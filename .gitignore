@@ -1,0 +1,43 @@
+# Node and build output
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+# Owner-specific identities: read by the export check, never committed or exported
+public-export/owner-identity.txt
+# Scaffolded by the host engine when it loads a plugin: the folder's own
+# tsconfig points at the generated declaration tree, so both are generated.
+plugins/*/tsconfig.json
+plugins/*/.claude-plugin/types/
+# Session worktrees a host creates inside the checkout. Untracked, they make the
+# checkout read dirty, and the fast-forward sync then skips it, so new sessions
+# keep loading the pane from before the latest merge.
+.claude/worktrees/
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+# Runtime state and private local material
+.state/
+state/
+runtime/
+logs/
+*.log
+.env*
+*.local.json
+.advisor-context.md
+.fleet-export.json

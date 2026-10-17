@@ -1,0 +1,28 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "agents": {
+        "state": "unconfigured"
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "limits": {
+      "jobStateBytes": 1024,
+      "jobStateClockSkewSeconds": 0
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "providers": [
+    {
+      "id": "primary",
+      "label": "Primary",
+      "home": "/fixture/runner/homes/primary"
+    },
+    {
+      "id": "secondary",
+      "home": "/fixture/runner/homes/secondary",
+      "enabled": true
+    }
+  ]
+}

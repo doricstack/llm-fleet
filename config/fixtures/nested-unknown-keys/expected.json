@@ -1,0 +1,16 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "mods.typing.vocab.bigramMax"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "pane.sections.middle"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "theme.worktrees.abandoned"
+    }
+  ]
+}

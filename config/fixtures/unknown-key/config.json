@@ -1,0 +1,13 @@
+{
+  "stateDirr": "/quiet/state",
+  "commands": {
+    "githubh": "gh"
+  },
+  "providers": [
+    {
+      "id": "primary",
+      "home": "/fixture/runner/homes/primary",
+      "hom": "typo"
+    }
+  ]
+}

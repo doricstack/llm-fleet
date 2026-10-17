@@ -1,0 +1,16 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_REQUIRED",
+      "path": "sources.prs.repositories"
+    },
+    {
+      "code": "E_CONFIG_REQUIRED",
+      "path": "sources.trials.database"
+    },
+    {
+      "code": "E_CONFIG_REQUIRED",
+      "path": "sources.worktrees.roots"
+    }
+  ]
+}

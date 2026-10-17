@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1",
+  "sources": {
+    "jobs": {
+      "enabled": "yes"
+    }
+  },
+  "providers": [
+    {
+      "id": 5,
+      "home": true
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "agents": {
+        "state": "unconfigured"
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "commands": {
+      "claude": [
+        "claude",
+        "--flag"
+      ],
+      "github": [
+        "gh"
+      ],
+      "cleanup": [
+        "rm",
+        "-rf",
+        "/quiet/cache"
+      ],
+      "skillReport": null
+    }
+  }
+}

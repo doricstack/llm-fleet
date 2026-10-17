@@ -1,0 +1,35 @@
+{
+  "name": "llm-fleet",
+  "version": "0.3.11",
+  "description": "Every Claude Code session, background job and open pull request on this machine in one live pane, with alerts when one fails or waits for you.",
+  "types": "./types/index.d.ts",
+  "license": "MIT",
+  "author": {
+    "name": "Doric Stack"
+  },
+  "homepage": "https://github.com/doricstack/llm-fleet",
+  "repository": "https://github.com/doricstack/llm-fleet",
+  "userConfig": {
+    "python": {
+      "type": "string",
+      "title": "Python interpreter",
+      "description": "The interpreter the plugin's readers run under: a name on your PATH, such as python3, or a full path to one. Python 3.11 or newer.",
+      "required": false,
+      "default": "python3"
+    },
+    "configPath": {
+      "type": "string",
+      "title": "Configuration file",
+      "description": "The full path of your fleet configuration, when you keep it somewhere other than the default place (~/.config/llm-fleet/config.json). Leave empty to use the default. /fleet setup writes a starter file there.",
+      "required": false,
+      "default": ""
+    },
+    "notify": {
+      "type": "boolean",
+      "title": "Desktop notifications",
+      "description": "Raise a desktop notification when a job fails or waits for you, as well as the toast in the session.",
+      "required": false,
+      "default": true
+    }
+  }
+}

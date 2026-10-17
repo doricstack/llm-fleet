@@ -1,0 +1,34 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "agents": {
+        "state": "unconfigured"
+      },
+      "prs": {
+        "checkRunLimit": 0
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "history": {
+      "spendWindowHours": 168,
+      "spendBucketMinutes": 1440,
+      "timelineIdleMinutes": 1,
+      "timelineSegmentLimit": 1,
+      "eventLimit": 1
+    }
+  }
+}

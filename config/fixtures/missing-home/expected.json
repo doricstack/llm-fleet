@@ -1,0 +1,52 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "trials": {
+        "enabled": true,
+        "state": "unavailable",
+        "database": "/fixture/runner/state/absent.db"
+      },
+      "progress": {
+        "enabled": true,
+        "state": "unavailable",
+        "directory": "/fixture/runner/state/not-a-directory"
+      },
+      "agents": {
+        "state": "unconfigured"
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "providers": [
+      {
+        "id": "primary",
+        "label": "primary",
+        "home": "/fixture/runner/homes/absent",
+        "enabled": true,
+        "adapter": "claude-code",
+        "state": "unavailable"
+      },
+      {
+        "id": "off",
+        "label": "off",
+        "home": null,
+        "enabled": false,
+        "adapter": "claude-code",
+        "state": "disabled"
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "runtime": {
+    "childEnvironment": {
+      "stripPrefixes": [
+        "ANTHROPIC_",
+        "FLEET_"
+      ],
+      "stripNames": [
+        "DEEPSEEK_API_KEY",
+        "KIMI_API_KEY",
+        "OPENAI_API_KEY",
+        "FLEET_TOKEN"
+      ]
+    }
+  }
+}

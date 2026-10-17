@@ -1,0 +1,16 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "commands.githubh"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "providers[0].hom"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "stateDirr"
+    }
+  ]
+}

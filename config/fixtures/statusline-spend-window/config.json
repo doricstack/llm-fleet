@@ -1,0 +1,9 @@
+{
+  "sources": {
+    "statusline": {
+      "enabled": true,
+      "sessionCosts": "/fixture/runner/state/statusline",
+      "spendSeconds": 7200
+    }
+  }
+}

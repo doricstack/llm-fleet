@@ -1,0 +1,14 @@
+{
+  "sources": {
+    "prs": {
+      "enabled": true
+    },
+    "trials": {
+      "enabled": true
+    },
+    "worktrees": {
+      "enabled": true,
+      "roots": []
+    }
+  }
+}

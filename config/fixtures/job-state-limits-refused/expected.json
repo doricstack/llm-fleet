@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "limits.jobStateBytes"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "limits.jobStateClockSkewSeconds"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "llm-fleet",
+  "description": "The llm-fleet plugin for Claude Code.",
+  "owner": {
+    "name": "Doric Stack"
+  },
+  "plugins": [
+    {
+      "name": "llm-fleet",
+      "source": "./plugins/fleet",
+      "description": "Every Claude Code session, background job and open pull request on this machine in one live pane, with alerts when one fails or waits for you.",
+      "version": "0.3.11",
+      "license": "MIT"
+    }
+  ]
+}

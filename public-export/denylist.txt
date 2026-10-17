@@ -1,0 +1,30 @@
+# Case-insensitive Python regular expressions; scan paths AND UTF-8 contents.
+# Shapes only. No real owner identifiers or credential values belong here.
+# Local home usernames, including Windows homes.
+/(?:Users|home)/[A-Za-z0-9._-]+(?:/|\b)
+[A-Z]:[\\/]Users[\\/][A-Za-z0-9._-]+
+# Personal provider homes, custom route homes, and workstation hostnames.
+# A provider home is a personal directory. The engine's own manifest directory
+# shares the prefix and is not one, so the reserved name is named here.
+\.(?:claude|codex|gemini)-(?!plugin\b)[A-Za-z0-9_-]+
+\b[A-Za-z0-9_-]+\.(?:local|lan)\b
+\b[A-Za-z0-9_-]+-(?:MacBook|Mac|Studio|Mini|Workstation)(?:-[A-Za-z0-9_-]+)?\b
+# Internal tooling repository families and private repository names.
+\bllm[-_](?:sh[a-z]+|h[q])\b
+(?<![A-Za-z0-9_.-])(?!(?:llm-fleet|mcp-broker)-private\b)[A-Za-z0-9_.-]+-private\b
+# Credential-store path shapes, including relative forms.
+(?:^|[\s/'"~])\.(?:[A-Za-z0-9_-]+-)?secrets(?:[/\\]|\b)
+(?:^|[\s/'"~])(?:secrets|credentials)[/\\][A-Za-z0-9_.-]+
+# An environment file's shape. The engine's call that reads one variable, the
+# dollar sign, the env noun, and its get method with an opening parenthesis,
+# shares the shape and is not a file, so that one call is named here; the same
+# noun naming anything else is not.
+(?:(?<!\$)|(?!\.env\.get\())\.(?:env(?:\.[A-Za-z0-9_-]+)+|netrc|npmrc|pypirc)\b
+[/\\](?:auth|credentials)\.json\b
+# Key formats and credential-bearing URLs. These are patterns, not credentials.
+sk-(?:proj-|ant-|live_)[A-Za-z0-9_-]{12,}
+gh[pousr]_[A-Za-z0-9_]{20,}
+github_pat_[A-Za-z0-9_]{20,}
+AKIA[0-9A-Z]{16}
+-----BEGIN [A-Z ]*PRIVATE KEY-----
+://[^\s/:]+:[^\s/@]+@

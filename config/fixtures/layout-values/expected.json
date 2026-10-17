@@ -1,0 +1,61 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>",
+      "group": "male",
+      "voice": "am_onyx",
+      "enabled": true
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "agents": {
+        "state": "unconfigured"
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "pane": {
+      "minimumColumns": 30,
+      "sectionOrder": [
+        "keys",
+        "sessions"
+      ],
+      "sections": {
+        "sessions": {
+          "collapsed": true,
+          "legend": "Own legend."
+        }
+      },
+      "replyPendingSeconds": 45
+    },
+    "keys": {
+      "tips": [],
+      "collapse": "z"
+    },
+    "theme": {
+      "failure": "claude",
+      "worktrees": {
+        "active": "idle"
+      }
+    },
+    "alerts": {
+      "tabTint": {
+        "failureRgb": [
+          1,
+          2,
+          3
+        ],
+        "staleSeconds": 300
+      }
+    }
+  }
+}

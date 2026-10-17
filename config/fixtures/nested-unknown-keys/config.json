@@ -1,0 +1,21 @@
+{
+  "theme": {
+    "worktrees": {
+      "abandoned": "error"
+    }
+  },
+  "pane": {
+    "sections": {
+      "middle": {
+        "visible": true
+      }
+    }
+  },
+  "mods": {
+    "typing": {
+      "vocab": {
+        "bigramMax": 3
+      }
+    }
+  }
+}

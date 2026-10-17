@@ -1,0 +1,9 @@
+{
+  "stateDir": "./state",
+  "providers": [
+    {
+      "id": "primary",
+      "home": "./homes/primary"
+    }
+  ]
+}

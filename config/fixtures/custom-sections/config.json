@@ -1,0 +1,25 @@
+{
+  "pane": {
+    "sectionOrder": [
+      "prs",
+      "custom:deploys",
+      "sessions"
+    ],
+    "custom": {
+      "deploys": {
+        "title": "Deploys",
+        "command": [
+          "deploy-status",
+          "--json"
+        ]
+      },
+      "queue-2": {
+        "command": [
+          "queue-report"
+        ],
+        "timeoutSeconds": 3,
+        "hideWhenEmpty": true
+      }
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "band.buttonReserve"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "band.minimumLeadColumns"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "commands.python"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "controller"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "labels"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "limits.worktreeWorkers"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "progress.orphanCountStaleSeconds"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "speech.samplesDirectory"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "statusline"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "theme.running"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "theme.skillVerdicts"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "theme.statuslinePalette"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "timeouts.audioCleanupMs"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "timeouts.lockSeconds"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "timeouts.probeGraceSeconds"
+    }
+  ]
+}

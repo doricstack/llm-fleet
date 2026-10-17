@@ -1,0 +1,23 @@
+{
+  "providers": [
+    {
+      "id": "primary",
+      "home": "/fixture/runner/homes/absent"
+    },
+    {
+      "id": "off",
+      "home": null,
+      "enabled": false
+    }
+  ],
+  "sources": {
+    "trials": {
+      "enabled": true,
+      "database": "/fixture/runner/state/absent.db"
+    },
+    "progress": {
+      "enabled": true,
+      "directory": "/fixture/runner/state/not-a-directory"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "alerts": {
+    "tabTint": {
+      "staleSeconds": 29
+    }
+  }
+}

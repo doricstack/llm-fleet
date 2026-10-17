@@ -1,0 +1,43 @@
+{
+  "config": {
+    "stateDir": "<FIXTURE>/state",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "providers": [
+      {
+        "id": "primary",
+        "label": "primary",
+        "home": "<FIXTURE>/homes/primary",
+        "enabled": true,
+        "adapter": "claude-code",
+        "state": "ready"
+      }
+    ],
+    "sources": {
+      "jobs": {
+        "state": "ready",
+        "providers": [
+          "primary"
+        ]
+      },
+      "interactive": {
+        "state": "ready",
+        "providers": [
+          "primary"
+        ]
+      },
+      "agents": {
+        "state": "ready",
+        "providers": [
+          "primary"
+        ]
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "<FIXTURE>/state/typing"
+      }
+    }
+  }
+}

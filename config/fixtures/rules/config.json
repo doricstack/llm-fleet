@@ -1,0 +1,16 @@
+{
+  "keys": {
+    "collapse": "x",
+    "expand": "1"
+  },
+  "pane": {
+    "sectionOrder": [
+      "sessions",
+      "sessions"
+    ]
+  },
+  "speech": {
+    "group": "female",
+    "voice": "am_onyx"
+  }
+}

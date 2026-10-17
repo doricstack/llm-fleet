@@ -1,0 +1,58 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "agents": {
+        "state": "unconfigured"
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "pane": {
+      "sectionOrder": [
+        "prs",
+        "custom:deploys",
+        "sessions"
+      ],
+      "custom": {
+        "deploys": {
+          "title": "Deploys",
+          "command": [
+            "deploy-status",
+            "--json"
+          ],
+          "legend": "No legend configured.",
+          "timeoutSeconds": 8,
+          "visible": true,
+          "collapsed": false,
+          "hideWhenEmpty": false,
+          "maxRows": 8
+        },
+        "queue-2": {
+          "title": "Custom section",
+          "command": [
+            "queue-report"
+          ],
+          "legend": "No legend configured.",
+          "timeoutSeconds": 3,
+          "visible": true,
+          "collapsed": false,
+          "hideWhenEmpty": true,
+          "maxRows": 8
+        }
+      }
+    }
+  }
+}

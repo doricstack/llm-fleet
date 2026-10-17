@@ -1,0 +1,9 @@
+{
+  "stateDir": "$FLEET_OTHER/state",
+  "sources": {
+    "progress": {
+      "enabled": true,
+      "directory": "$(pwd)/progress"
+    }
+  }
+}

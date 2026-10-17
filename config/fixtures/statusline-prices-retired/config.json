@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "statusline": {
+      "inputPricePerMTok": {"opus": 5, "other": 5}
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "pane": {
+    "sectionOrder": [
+      "prs",
+      "custom:missing",
+      "custom:deploys",
+      "elsewhere"
+    ],
+    "custom": {
+      "deploys": {
+        "command": [
+          "deploy-status"
+        ]
+      },
+      "Bad Name": {
+        "command": [
+          "x"
+        ]
+      },
+      "no-command": {
+        "title": "Nothing to run"
+      },
+      "slow": {
+        "command": [
+          "x"
+        ],
+        "timeoutSeconds": 0
+      }
+    },
+    "sections": {
+      "trials": {
+        "maxRows": 0
+      }
+    }
+  }
+}

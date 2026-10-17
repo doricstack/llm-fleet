@@ -1,0 +1,20 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_TYPE",
+      "path": "providers[0].home"
+    },
+    {
+      "code": "E_CONFIG_TYPE",
+      "path": "providers[0].id"
+    },
+    {
+      "code": "E_CONFIG_TYPE",
+      "path": "schemaVersion"
+    },
+    {
+      "code": "E_CONFIG_TYPE",
+      "path": "sources.jobs.enabled"
+    }
+  ]
+}

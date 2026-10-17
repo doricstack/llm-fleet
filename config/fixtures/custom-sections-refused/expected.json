@@ -1,0 +1,28 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_RULE",
+      "path": "pane.custom.Bad Name"
+    },
+    {
+      "code": "E_CONFIG_REQUIRED",
+      "path": "pane.custom.no-command.command"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "pane.custom.slow.timeoutSeconds"
+    },
+    {
+      "code": "E_CONFIG_RULE",
+      "path": "pane.sectionOrder[1]"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "pane.sectionOrder[3]"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "pane.sections.trials.maxRows"
+    }
+  ]
+}

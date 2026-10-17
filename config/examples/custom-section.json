@@ -1,0 +1,15 @@
+{
+  "pane": {
+    "sectionOrder": ["prs", "sessions", "trials", "running", "custom:disk", "session",
+                     "worktrees", "skills", "warnings", "keys"],
+    "custom": {
+      "disk": {
+        "title": "Disk",
+        "command": ["python3", "/path/to/llm-fleet/config/examples/disk_section.py"],
+        "legend": "How full each disk this session writes to is.",
+        "timeoutSeconds": 5,
+        "collapsed": true
+      }
+    }
+  }
+}

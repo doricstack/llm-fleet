@@ -1,0 +1,9 @@
+{
+  "runtime": {
+    "childEnvironment": {
+      "stripNames": [
+        "OPENAI_API_KEY"
+      ]
+    }
+  }
+}

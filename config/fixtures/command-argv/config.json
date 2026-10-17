@@ -1,0 +1,13 @@
+{
+  "commands": {
+    "claude": [
+      "claude",
+      "--flag"
+    ],
+    "cleanup": [
+      "rm",
+      "-rf",
+      "/quiet/cache"
+    ]
+  }
+}

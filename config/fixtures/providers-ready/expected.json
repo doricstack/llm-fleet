@@ -1,0 +1,54 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "ready",
+        "providers": [
+          "primary",
+          "secondary"
+        ]
+      },
+      "interactive": {
+        "state": "ready",
+        "providers": [
+          "primary",
+          "secondary"
+        ]
+      },
+      "agents": {
+        "state": "ready",
+        "providers": [
+          "primary",
+          "secondary"
+        ]
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "providers": [
+      {
+        "id": "primary",
+        "label": "Primary",
+        "home": "/fixture/runner/homes/primary",
+        "enabled": true,
+        "adapter": "claude-code",
+        "state": "ready"
+      },
+      {
+        "id": "secondary",
+        "label": "secondary",
+        "home": "/fixture/runner/homes/secondary",
+        "enabled": true,
+        "adapter": "claude-code",
+        "state": "ready"
+      }
+    ]
+  }
+}

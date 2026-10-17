@@ -1,0 +1,79 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "ready",
+        "providers": [
+          "primary"
+        ]
+      },
+      "interactive": {
+        "state": "ready",
+        "providers": [
+          "primary"
+        ]
+      },
+      "prs": {
+        "enabled": true,
+        "state": "ready",
+        "repositories": [
+          "owner/one",
+          "owner/two"
+        ]
+      },
+      "trials": {
+        "enabled": true,
+        "state": "ready",
+        "database": "/fixture/runner/state/change.db"
+      },
+      "progress": {
+        "enabled": true,
+        "state": "ready",
+        "directory": "/fixture/runner/state/progress"
+      },
+      "worktrees": {
+        "enabled": true,
+        "state": "ready",
+        "roots": [
+          "/fixture/runner/worktrees/one",
+          "/fixture/runner/worktrees/two"
+        ]
+      },
+      "skills": {
+        "enabled": true,
+        "state": "ready",
+        "directory": "/fixture/runner/state/skills"
+      },
+      "statusline": {
+        "enabled": true,
+        "payload": "/fixture/runner/state/host-payload.json",
+        "state": "ready"
+      },
+      "agents": {
+        "state": "ready",
+        "providers": [
+          "primary"
+        ]
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "providers": [
+      {
+        "id": "primary",
+        "label": "primary",
+        "home": "/fixture/runner/homes/primary",
+        "enabled": true,
+        "adapter": "claude-code",
+        "state": "ready"
+      }
+    ]
+  }
+}

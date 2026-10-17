@@ -1,0 +1,16 @@
+{
+  "commands": {"python": "python3"},
+  "controller": {"adapter": "changectl"},
+  "labels": {"primaryRepository": "owner/project"},
+  "band": {"buttonReserve": 12, "minimumLeadColumns": 12},
+  "theme": {
+    "skillVerdicts": {"flagged": "error"},
+    "statuslinePalette": {"accent": "cyan"},
+    "running": "accent"
+  },
+  "speech": {"samplesDirectory": "/fixture/samples"},
+  "timeouts": {"lockSeconds": 12, "probeGraceSeconds": 1, "audioCleanupMs": 5000},
+  "limits": {"worktreeWorkers": 8},
+  "progress": {"orphanCountStaleSeconds": 300},
+  "statusline": {"liveTtlSeconds": 2, "idleTtlSeconds": 3}
+}

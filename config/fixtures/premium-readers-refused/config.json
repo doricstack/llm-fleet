@@ -1,0 +1,14 @@
+{
+  "sources": {
+    "prs": {
+      "checkRunLimit": 101
+    }
+  },
+  "history": {
+    "spendWindowHours": 169,
+    "spendBucketMinutes": 0,
+    "timelineIdleMinutes": 0,
+    "timelineSegmentLimit": 0,
+    "eventLimit": "50"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "providers": [
+    {
+      "id": "primary",
+      "home": "/fixture/runner/homes/primary"
+    }
+  ],
+  "sources": {
+    "prs": {
+      "enabled": true,
+      "repositories": [
+        "owner/one",
+        "owner/two"
+      ]
+    },
+    "trials": {
+      "enabled": true,
+      "database": "/fixture/runner/state/change.db"
+    },
+    "progress": {
+      "enabled": true,
+      "directory": "/fixture/runner/state/progress"
+    },
+    "worktrees": {
+      "enabled": true,
+      "roots": [
+        "/fixture/runner/worktrees/one",
+        "/fixture/runner/worktrees/two"
+      ]
+    },
+    "skills": {
+      "enabled": true,
+      "directory": "/fixture/runner/state/skills"
+    },
+    "statusline": {
+      "enabled": true,
+      "payload": "/fixture/runner/state/host-payload.json"
+    }
+  }
+}

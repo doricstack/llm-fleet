@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "alerts.tabTint.staleSeconds"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_RULE",
+      "path": "keys.collapse"
+    },
+    {
+      "code": "E_CONFIG_RULE",
+      "path": "keys.expand"
+    },
+    {
+      "code": "E_CONFIG_RULE",
+      "path": "pane.sectionOrder"
+    },
+    {
+      "code": "E_CONFIG_RULE",
+      "path": "speech.voice"
+    }
+  ]
+}

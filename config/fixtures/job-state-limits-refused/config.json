@@ -1,0 +1,6 @@
+{
+  "limits": {
+    "jobStateBytes": 1023,
+    "jobStateClockSkewSeconds": -1
+  }
+}

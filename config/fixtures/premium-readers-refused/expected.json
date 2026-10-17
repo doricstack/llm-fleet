@@ -1,0 +1,28 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_TYPE",
+      "path": "history.eventLimit"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "history.spendBucketMinutes"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "history.spendWindowHours"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "history.timelineIdleMinutes"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "history.timelineSegmentLimit"
+    },
+    {
+      "code": "E_CONFIG_VALUE",
+      "path": "sources.prs.checkRunLimit"
+    }
+  ]
+}
