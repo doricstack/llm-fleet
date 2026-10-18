@@ -80,21 +80,25 @@ function seconds(value: unknown): number | null {
 }
 
 /**
- * The windows Codex reports for its own session, filling the same rows a
- * subscription session's five-hour and weekly windows fill.
+ * The windows the reader reports for this session's own provider, filling the
+ * rows a subscription session's five-hour and weekly windows fill.
  *
- * The reader is the only layer that can read a rollout, and it names each
- * window by the length of time it spans: five hours and a week are the two a
- * person watches, and they are drawn under those names. A window of another
- * length is left out rather than drawn under a name it does not have, and a
- * limit that is not a ready Codex reading contributes nothing.
+ * The reader is the only layer that can read a rollout or the status line's
+ * own file, and it names each window by the length of time it spans: five
+ * hours and a week are the two a person watches, and they are drawn under
+ * those names. A window of another length is left out rather than drawn under
+ * a name it does not have, and a limit that is not a ready reading of a
+ * provider that reports windows contributes nothing.
  */
-function codexWindows(limits: unknown): Record<string, number> {
+const WINDOW_PROVIDERS = new Set(["codex", "claude"]);
+
+function providerWindows(limits: unknown): Record<string, number> {
   if (typeof limits !== "object" || limits === null) {
     return {};
   }
   const read = limits as { state?: unknown; provider?: unknown; windows?: unknown };
-  if (read.state !== "ready" || read.provider !== "codex" || !Array.isArray(read.windows)) {
+  if (read.state !== "ready" || typeof read.provider !== "string"
+      || !WINDOW_PROVIDERS.has(read.provider) || !Array.isArray(read.windows)) {
     return {};
   }
   const rows: Record<string, number> = {};
@@ -187,11 +191,12 @@ export function withSession(documents: unknown, engine: Record<string, unknown> 
   const reading = documents as Record<string, unknown>;
   const fromReader = typeof reading.session === "object" && reading.session !== null
     ? reading.session as Record<string, unknown> : {};
-  // A Codex session's own windows are read from its rollout, not from the
-  // engine, which reports no rate limits there. They fill the rows the
-  // subscription session already draws, and stand over a reading's own fields
-  // because they are this session's current figures.
-  const windows = codexWindows(fromReader.limits);
+  // A Codex session's windows are read from its rollout, and a Claude
+  // session's from the file the status line writes, not from the engine, which
+  // reports no rate limits on either. They fill the rows the subscription
+  // session already draws, and stand over a reading's own fields because they
+  // are this session's current figures.
+  const windows = providerWindows(fromReader.limits);
   const provider = typeof fromReader.providerCostUsd === "number"
     && Number.isFinite(fromReader.providerCostUsd) ? fromReader.providerCostUsd : null;
   // The window spend is the machine's, read from files the engine never sees,

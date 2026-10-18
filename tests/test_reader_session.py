@@ -468,5 +468,96 @@ class CodexLimitTests(SessionCase):
         self.assertNotIn("credits", self.read_codex()["limits"])
 
 
+class ClaudeLimitTests(SessionCase):
+    """The account's Claude windows, from the file the status line writes."""
+
+    def setUp(self):
+        super().setUp()
+        self.folder = self.root / "statusline"
+        self.folder.mkdir()
+        self.limits_file = self.folder / "claude-rate-limits.json"
+
+    def wrote_limits(self, document):
+        self.limits_file.write_text(
+            document if isinstance(document, str) else json.dumps(document),
+            encoding="utf-8")
+        return self.limits_file
+
+    def read_claude(self, model="claude-opus-5-5", limits=None, **statusline):
+        statusline.setdefault("sessionCosts", str(self.folder))
+        return session_reader.read_session(
+            self.config(limits=limits, **statusline), model=model)
+
+    def test_the_account_windows_fill_a_claude_session_whose_payload_carries_none(self):
+        self.wrote_limits({"ts": "2026-10-17T23:25:25Z",
+                           "five_hour": {"percent": 20, "resets_at": 1792281600},
+                           "weekly": {"percent": 95, "resets_at": 1792393200}})
+        found = self.read_claude()["limits"]
+        self.assertEqual(found["state"], "ready")
+        self.assertEqual(found["provider"], "claude")
+        self.assertEqual(found["windows"], [
+            {"name": "five_hour", "windowMinutes": 300, "usedPercent": 20.0,
+             "resetsAt": 1792281600.0},
+            {"name": "weekly", "windowMinutes": 10080, "usedPercent": 95.0,
+             "resetsAt": 1792393200.0},
+        ])
+
+    def test_a_payload_that_carries_windows_is_not_second_guessed(self):
+        self.wrote(PAYLOAD)
+        self.wrote_limits({"five_hour": {"percent": 20, "resets_at": 1},
+                           "weekly": {"percent": 95, "resets_at": 2}})
+        self.assertIsNone(self.read_claude()["limits"])
+
+    def test_a_missing_file_is_unavailable_not_a_zeroed_window(self):
+        found = self.read_claude()["limits"]
+        self.assertEqual(found["state"], "unavailable")
+        self.assertNotIn("windows", found)
+
+    def test_a_file_that_is_not_json_is_unavailable(self):
+        self.wrote_limits("{ not json")
+        self.assertEqual(self.read_claude()["limits"]["state"], "unavailable")
+
+    def test_no_configured_place_reports_nothing(self):
+        # With nowhere to read, the payload's own windows are the reading; a
+        # state here would put noise in every Claude session's document.
+        self.assertIsNone(self.read_claude(sessionCosts=None)["limits"])
+
+    def test_a_declared_file_stands_over_the_priced_spend_folder(self):
+        elsewhere = self.root / "declared.json"
+        elsewhere.write_text(json.dumps({"five_hour": {"percent": 11, "resets_at": 5}}),
+                             encoding="utf-8")
+        found = self.read_claude(claudeLimits=str(elsewhere))["limits"]
+        self.assertEqual(found["state"], "ready")
+        self.assertEqual(found["windows"][0]["usedPercent"], 11.0)
+
+    def test_a_percentage_outside_the_range_is_absent_rather_than_nought(self):
+        self.wrote_limits({"five_hour": {"percent": 140, "resets_at": 5},
+                           "weekly": {"percent": 47}})
+        windows = self.read_claude()["limits"]["windows"]
+        self.assertNotIn("usedPercent", windows[0])
+        self.assertEqual(windows[0]["resetsAt"], 5.0)
+        self.assertEqual(windows[1]["usedPercent"], 47.0)
+
+    def test_a_file_over_the_byte_bound_is_unavailable(self):
+        self.wrote_limits({"five_hour": {"percent": 20, "resets_at": 1,
+                                         "pad": "x" * 4096}})
+        found = self.read_claude(limits={"jobStateBytes": 1024})["limits"]
+        self.assertEqual(found["state"], "unavailable")
+
+    def test_only_a_claude_model_gets_the_account_windows(self):
+        self.wrote_limits({"five_hour": {"percent": 20, "resets_at": 1}})
+        for model in ("deepseek-flash[1m]", "kimi-k2", ""):
+            self.assertIsNone(self.read_claude(model=model)["limits"], model)
+        # A Codex session is metered by Codex and never borrows the Claude
+        # account's figures. Its own folder is named here rather than left to
+        # the machine's home, so the case answers the same on every runner.
+        empty = self.root / "codex-sessions"
+        empty.mkdir()
+        found = self.read_claude(model="gpt-5-codex", codexSessions=str(empty))["limits"]
+        self.assertEqual(found["state"], "unavailable")
+        self.assertNotIn("provider", found)
+        self.assertEqual(self.read_claude()["limits"]["provider"], "claude")
+
+
 if __name__ == "__main__":
     unittest.main()

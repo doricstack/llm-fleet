@@ -272,16 +272,6 @@ def cost_figures(turns: int, priced: bool, cost: float, host_cost: float | None,
     return {}
 
 
-def scan(data: bytes, prices: Mapping[str, Any], limit: int,
-         whole: bool = True) -> dict[str, Any]:
-    """Fold a transcript's records into one agent's figures.
-
-    `whole` says the bytes start at the transcript's start, which is what lets
-    the host's recorded cost be checked against the first turn.
-    """
-    return fold(data, prices, limit, whole).figures
-
-
 class Folded:
     """A transcript's figures, and the timed facts a series and a timeline are built from.
 
@@ -315,11 +305,23 @@ class Folded:
         self.covers = covers
 
 
+def settle_unmeasured(spend: list[tuple[float | None, float | None]],
+                      unmeasured: Mapping[str, list[float | None]]) -> bool:
+    """Place every record of a response nobody measured at its own time.
+
+    Every record keeps its own time, so the window holds unknown spend if any
+    of them falls inside it. Called once, by the read, after every transcript
+    of the session has been folded. True when a response was settled.
+    """
+    for times in unmeasured.values():
+        spend.extend((stamp, None) for stamp in times)
+    return bool(unmeasured)
+
+
 def fold(data: bytes, prices: Mapping[str, Any], limit: int, whole: bool = True,
          seen: set[str] | None = None,
-         unmeasured: dict[str, list[float | None]] | None = None,
-         finalize: bool = True) -> Folded:
-    """The work behind `scan`, keeping each turn's time and price beside the totals.
+         unmeasured: dict[str, list[float | None]] | None = None) -> Folded:
+    """One transcript's records, keeping each turn's time and price beside the totals.
 
     `seen` holds the message identifiers already priced. One set shared across
     every transcript a session wrote means a response the host wrote into two of
@@ -327,13 +329,10 @@ def fold(data: bytes, prices: Mapping[str, Any], limit: int, whole: bool = True,
     one file.
 
     `unmeasured` holds the times of the records of each response no record has
-    yet measured, and `finalize` says whether this call is the last one reading
-    the session. A caller reading several transcripts passes one map and asks
-    every call but the last not to finalize, because a response the session's
-    own transcript states without usage may be measured by a subagent transcript
-    read after it: settled file by file, that response would leave an unknown
-    spend behind and force the whole session unpriced although its usage was
-    read.
+    yet measured. It is not settled here: a response the session's own
+    transcript states without usage may be measured by a subagent transcript
+    read after it, so the caller reads every transcript of the session before
+    calling `settle_unmeasured` once.
     """
     spend: list[tuple[float | None, float | None]] = []
     stamps: list[float] = []
@@ -446,14 +445,8 @@ def fold(data: bytes, prices: Mapping[str, Any], limit: int, whole: bool = True,
             priced = False
         else:
             cost += spent
-    # A response no record of which states its usage is of unknown price. Each
-    # of its records keeps its own time, so the window holds unknown spend if
-    # any of them falls inside it. Settled only by the last read of the session:
-    # a call that is not the last leaves the set for the one that is.
-    if finalize:
-        for times in unmeasured.values():
-            spend.extend((stamp, None) for stamp in times)
-        priced = priced and not unmeasured
+    # A response no record of which states its usage is of unknown price, and
+    # the caller settles it once every transcript of the session is read.
     figures: dict[str, Any] = {
         "turns": turns, "damagedRecords": damaged, "title": title, "model": model,
         "effort": effort, "tokens": totals, "firstActivity": first_activity,
@@ -544,9 +537,9 @@ def read_subagents(transcript: Path, bound: int, prices: Mapping[str, Any], limi
         if cut:
             result["cut"] += 1
         # Not the last read of the session: a response none of these files
-        # measures may still be settled by the caller's finalize.
+        # measures may still be settled by the caller.
         folded = fold(data, prices, limit, whole=not cut, seen=seen,
-                      unmeasured=unmeasured, finalize=False)
+                      unmeasured=unmeasured)
         result["turns"] += folded.figures["turns"]
         result["damaged"] += folded.figures["damagedRecords"]
         result["cost"] += folded.estimate
@@ -732,7 +725,7 @@ def read_agent(home: Path, session_id: Any, job_id: Any,
     # so a response one of them measures is priced rather than left unknown.
     unresolved: dict[str, list[float | None]] = {}
     folded = fold(data, prices, limit, whole=not truncated, seen=seen,
-                  unmeasured=unresolved, finalize=False)
+                  unmeasured=unresolved)
     figures = folded.figures
     # The host writes each subagent's turns beside the session's transcript and
     # counts them in the cost it records, so a figure that sums the session's
@@ -744,12 +737,10 @@ def read_agent(home: Path, session_id: Any, job_id: Any,
     # that is short by everything they held.
     gaps = extra["cut"] + extra["unreadable"] + extra["over"] + extra["damaged"]
     figures["damagedRecords"] += extra["damaged"]
-    if unresolved:
-        # A response no transcript of this session states the usage of: unknown
-        # spend, at each of the times its records carry.
-        folded.spend.extend((stamp, None) for times in unresolved.values()
-                            for stamp in times)
-    priced = folded.priced and extra["priced"] and not unresolved
+    # A response no transcript of this session states the usage of: unknown
+    # spend, at each of the times its records carry.
+    settled = settle_unmeasured(folded.spend, unresolved)
+    priced = folded.priced and extra["priced"] and not settled
     if extra["turns"] or extra["spend"]:
         figures["turns"] += extra["turns"]
         for name, count in extra["tokens"].items():

@@ -147,6 +147,21 @@ class TranscriptCase(unittest.TestCase):
         self.assertNotIn("savedTokens", other)
         self.assertNotIn("pricePerMTok", other)
 
+    def test_a_family_rate_never_prices_a_model_of_another_family(self):
+        # A map naming a family without a generation prices that family's own
+        # models, and nothing else: a model outside every family has no saving
+        # rather than whatever rate a fallback happened to reach.
+        prices = json.loads(json.dumps(PRICES))
+        prices["inputPricePerMTok"]["opus"] = 4
+        prices["cacheReadPricePerMTok"]["opus"] = 0.2
+        document = self.read(self.transcript([assistant(0, 0, 1_000_000)]),
+                             model_id="qwen3-coder", prices=prices)
+        self.assertEqual(document["priceFamily"], "other")
+        self.assertEqual(document["prices"], "absent")
+        self.assertNotIn("savedUsd", document)
+        self.assertNotIn("savedTokens", document)
+        self.assertNotIn("pricePerMTok", document)
+
     def test_a_configured_other_family_prices_a_model_outside_the_rest(self):
         prices = json.loads(json.dumps(PRICES))
         prices["inputPricePerMTok"]["other"] = 3

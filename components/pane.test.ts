@@ -267,6 +267,39 @@ test("a measured run carries a bar and its failures, and one with no denominator
   assert.deepEqual(barDimness(tree), [false, true]);
 });
 
+test("a command held in line does not ask for the person, and a failed one does", () => {
+  // The governor section leads when a command failed. A queue that is merely
+  // waiting its turn is not a failure, and moving the section for it would hand
+  // its hotkey to a row that says nothing new.
+  const held = (failed: number) => {
+    const pane = paneFrom(snapshot({
+      progress: { state: "ready", errors: [], runs: [
+        { key: "abc12345", repo: "example-repo", branch: null, label: "Build export",
+          display: "Build export", done: 1, total: 10, failed,
+          first_failure: failed ? "test_one" : "", elapsed: 30, eta_minutes: null,
+          phase: "verify" },
+      ] },
+    }), options());
+    return group(pane, "Running");
+  };
+  assert.equal(held(0).attention, false);
+  assert.equal(held(1).attention, true);
+});
+
+test("a failed try asks for the person on change control, and a green one does not", () => {
+  const trial = (is_green: boolean) => {
+    const pane = paneFrom(snapshot({
+      trials: { state: "ready", running: [], history: null, errors: [],
+                recent: [{ key: "k", repo: "example-repo", branch: "fix", change_state: "",
+                           at: NOW - 60, is_green, passed: 3, failed: is_green ? 0 : 1,
+                           errors: 0, skipped: 0 }] },
+    }), options());
+    return group(pane, "Trials");
+  };
+  assert.equal(trial(false).attention, true);
+  assert.equal(trial(true).attention, false);
+});
+
 test("a run with no published total draws no bar at all", () => {
   const pane = paneFrom(snapshot({
     progress: { state: "ready", errors: [], runs: [

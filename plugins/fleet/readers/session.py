@@ -402,21 +402,97 @@ def codex_folder(source: Mapping[str, Any]) -> Path | None:
     return Path(home) / ".codex" / "sessions"
 
 
-def session_limits(source: Mapping[str, Any], model: str, limit: int) -> Any:
-    """Codex's own windows for a Codex session, and nothing for any other.
+# A Claude session whose payload carries no windows still has an account behind
+# it, and the status line writes that account's windows to one file.
+CLAUDE_MODELS = ("claude",)
+# The file the status line writes, and the windows it holds: the key in that
+# file, the name the pane draws it under, and the minutes it spans.
+CLAUDE_LIMITS_FILE = "claude-rate-limits.json"
+CLAUDE_WINDOWS = (("five_hour", "five_hour", 300), ("weekly", "weekly", 10080))
 
-    A session routed to DeepSeek or running a Claude model has no Codex windows,
-    and drawing one machine's limits on another provider's session would be a
-    figure that session never reported.
+
+def claude_window(name: str, minutes: float, entry: Any) -> dict[str, Any] | None:
+    """One window as the pane can draw it, with every unusable figure left out.
+
+    The same rule the Codex windows follow: a percentage outside nought to a
+    hundred, or a figure that is not finite, is absent rather than drawn as
+    nought, which would state a spend the file never reported.
+    """
+    if not isinstance(entry, dict):
+        return None
+    window: dict[str, Any] = {"name": name, "windowMinutes": minutes}
+    used = number(entry.get("percent"))
+    if used is not None and math.isfinite(used) and 0 <= used <= 100:
+        window["usedPercent"] = used
+    resets = number(entry.get("resets_at"))
+    if resets is not None and math.isfinite(resets):
+        window["resetsAt"] = resets
+    return window
+
+
+def claude_limits_path(source: Mapping[str, Any]) -> Path | None:
+    """Where the status line writes the account's windows: configured, or beside the spend."""
+    declared = source.get("claudeLimits")
+    if declared:
+        return Path(str(declared))
+    folder = source.get("sessionCosts")
+    if folder:
+        return Path(str(folder)) / CLAUDE_LIMITS_FILE
+    return None
+
+
+def claude_limits(source: Mapping[str, Any], limit: int) -> dict[str, Any] | None:
+    """The Claude windows the status line last wrote, or the state saying why none.
+
+    A file that is not there is the renderer not having run, a file that cannot
+    be read or parsed is a state that says so, and neither is a window at
+    nought. With no place configured there is nothing to read and nothing to
+    report: the payload's own windows are the reading, and a state here would
+    be noise.
+    """
+    def unavailable(reason: str) -> dict[str, Any]:
+        return {"state": STATE_UNAVAILABLE,
+                "errors": [{"source": "session", "reason": reason}]}
+
+    path = claude_limits_path(source)
+    if path is None:
+        return None
+    if not path.is_file():
+        return unavailable("the status line has not written Claude rate limits")
+    document = read_bounded_json(path, limit)
+    if not isinstance(document, dict):
+        return unavailable("the Claude rate limits file could not be read")
+    windows = [window for key, name, minutes in CLAUDE_WINDOWS
+               if (window := claude_window(name, minutes, document.get(key))) is not None]
+    if not windows:
+        return unavailable("the Claude rate limits file carries no windows")
+    return {"state": STATE_READY, "provider": "claude", "windows": windows}
+
+
+def session_limits(source: Mapping[str, Any], model: str, limit: int,
+                   document: Mapping[str, Any] | None = None) -> Any:
+    """The provider's own windows for this session, and nothing for any other.
+
+    Codex's windows come from its rollout. A Claude session reads the account's
+    windows from the status line only when its payload did not carry them: the
+    payload is this session's own report and stands over a file written for the
+    whole account. A session routed to another provider has neither, and drawing
+    one machine's limits on another provider's session would be a figure that
+    session never reported.
     """
     if not source.get("enabled"):
         return None
-    if not str(model).lower().startswith(CODEX_MODELS):
+    if str(model).lower().startswith(CODEX_MODELS):
+        found = codex_limits(codex_folder(source), limit)
+        if found.get("state") == STATE_READY and "creditsBalance" in found:
+            found["credits"] = found.pop("creditsBalance")
+        return found
+    if not str(model).lower().startswith(CLAUDE_MODELS):
         return None
-    found = codex_limits(codex_folder(source), limit)
-    if found.get("state") == STATE_READY and "creditsBalance" in found:
-        found["credits"] = found.pop("creditsBalance")
-    return found
+    carried = document or {}
+    if "fiveHourUsedPercent" in carried or "sevenDayUsedPercent" in carried:
+        return None
+    return claude_limits(source, limit)
 
 
 def read_session(config: Mapping[str, Any], *, session_id: str = "",
@@ -443,7 +519,7 @@ def session_figures(config: Mapping[str, Any], *, session_id: str = "",
     """This session's figures, or the state that says why there are none."""
     document = figures(config, session_id=session_id, model=model)
     document["limits"] = session_limits(config["sources"]["statusline"], model,
-                                        int(config["limits"]["jobStateBytes"]))
+                                        int(config["limits"]["jobStateBytes"]), document)
     return document
 
 

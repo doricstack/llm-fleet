@@ -233,6 +233,27 @@ test("a codex session's own windows fill the subscription rows the pane draws", 
   assert.equal(text.includes("resets in"), true);
 });
 
+const CLAUDE_LIMITS = {
+  state: "ready",
+  provider: "claude",
+  windows: [
+    { name: "five_hour", usedPercent: 20, windowMinutes: 300, resetsAt: 1_792_281_600 },
+    { name: "weekly", usedPercent: 95, windowMinutes: 10080, resetsAt: 1_792_393_200 },
+  ],
+};
+
+test("a claude session with no windows in its payload takes the account's own", () => {
+  // The engine reports no rate limits on a routed Claude session, and the
+  // reader fills them from the file the status line writes for the account.
+  const engine = sessionDocument({ cost: { usd: 0 } }, "claude-opus-5-5", null, "abc", NOW_MS);
+  const merged = withSession(codexReading(CLAUDE_LIMITS), engine) as
+    { session: Record<string, unknown> };
+  assert.equal(merged.session.fiveHourUsedPercent, 20);
+  assert.equal(merged.session.fiveHourResetsAt, 1_792_281_600);
+  assert.equal(merged.session.sevenDayUsedPercent, 95);
+  assert.equal(merged.session.weekResetsAt, 1_792_393_200);
+});
+
 test("a session without codex limits draws no window rows", () => {
   // A DeepSeek or Claude session never shows Codex's windows, and an
   // unavailable rollout reading is not a set of noughts to draw.
