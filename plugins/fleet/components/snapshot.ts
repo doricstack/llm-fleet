@@ -29,7 +29,7 @@ export type ReaderDocuments = {
 };
 
 const READER_STATES = new Set<ReaderState>([
-  "disabled", "unconfigured", "unavailable", "ready", "empty", "failed",
+  "disabled", "unconfigured", "unavailable", "ready", "empty", "failed", "paused",
 ]);
 
 const WORKTREE_STATES = new Set<Worktree["state"]>([

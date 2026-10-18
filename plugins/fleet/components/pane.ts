@@ -12,6 +12,7 @@ import { ageText, countLabel, durationText, fit } from "./layout.ts";
 import { mask, MASK } from "./mask.ts";
 import { THEME, worktreeToken, type Theme } from "./palette.ts";
 import { money, spendWindowTile } from "./session.ts";
+import { FOOTER_TEXT } from "./version.ts";
 
 // The money rule lives with the session figures it prices; this module drew it
 // before the machine-wide spend tile needed the same rule in that module.
@@ -334,6 +335,7 @@ export function titleOf(name: string, options: PaneOptions): string {
 /** A reader's state, as a group state. */
 function groupState(state: string): GroupState {
   switch (state) {
+    case "paused":
     case "disabled":
     case "empty":
     case "failed":
@@ -970,7 +972,9 @@ function trialRow(trial: Trial, options: PaneOptions): Row {
   return {
     title: shown(trial.branch).text,
     state: trial.is_green ? "passed" : "failed",
-    meta: [{ text: trial.repo }, { text: " \u00b7 " + ageText(options.now - trial.at) }],
+    // The repository is the root above these rows; the row says what changed
+    // since it mattered.
+    meta: [{ text: ageText(options.now - trial.at) }],
     slot: outcomes > 0
       ? [{ text: counts, color: trial.is_green ? "success" : "error" },
          ...(trial.failed ? [{ text: " \u00b7 " + trial.failed + " failed", color: "error" as const }]
@@ -1025,7 +1029,9 @@ function pullRequestRow(pull: PullRequest): Row {
     state: pull.checks === "pass" ? "passed"
       : pull.checks === "fail" ? "failed"
         : pull.checks === "pending" ? "pending" : "unknown",
-    meta: [{ text: repoLabel(pull) }, ...(pull.branch ? [{ text: " \u00b7 " + pull.branch }] : [])],
+    // The project the pull request belongs to is the root above it, drawn
+    // once for its rows rather than repeated on every one.
+    meta: [...(pull.branch ? [{ text: pull.branch }] : [])],
     // The owner the row could not spend its width on is one hover away, so
     // nothing the repository states is lost.
     ...(pull.repo.includes("/") ? { note: { text: pull.repo, dim: true } } : {}),
@@ -1195,7 +1201,9 @@ function worktreeRow(tree: Worktree, options: PaneOptions): Row {
       ? { text: trouble + (tree.checked_at === undefined
         ? "" : " \u00b7 not rechecked since " + ageText(options.now - tree.checked_at)),
           color: "warning" }
-      : tree.project_root ? { text: tree.project_root, dim: true } : undefined,
+      // The project root is the heading this row hangs under, drawn once above
+      // it, so the row does not spend its hover on saying it again.
+      : undefined,
   };
 }
 
@@ -1212,6 +1220,9 @@ function errorRow(error: { source: string; reason: string }): Row {
  * is unknown, because a zero there would read as nothing running.
  */
 function summary(slots: Slot[], group: GroupState): Slot[] {
+  if (group === "paused") {
+    return [];
+  }
   return group === "failed" ? [{ text: "unknown", color: "error" }] : slots;
 }
 
@@ -1347,9 +1358,24 @@ function sectionGroup(name: string, rows: Row[], state: GroupState, summarySlots
     // section it is: a legend configured and drawn by one section only is a
     // legend seven sections were promised and never got.
     legend: choice?.legend ?? null,
+    // Every section whose rows end in a figure names that figure once, above
+    // them: a word like "passed" or "merged" says what it is, and a bare
+    // percentage or a check's verdict does not. The line is drawn at the rows'
+    // own right edge, so the names sit over the figures they name.
+    columns: COLUMN_NAMES[name] ?? (name.startsWith(CUSTOM_PREFIX) ? [{ text: "STATE" }] : undefined),
     ...extra,
   };
 }
+
+/** What a section's right-hand figures are, where the words beside them do not say. */
+const COLUMN_NAMES: Record<string, Slot[]> = {
+  sessions: [{ text: "STATE" }],
+  trials: [{ text: "RESULT" }],
+  prs: [{ text: "CHECKS" }],
+  worktrees: [{ text: "STATE" }],
+  skills: [{ text: "VERDICT" }],
+  warnings: [{ text: "REASON" }],
+};
 
 /** A token count in the unit a person reads it in, and never a rounded zero. */
 export function tokens(value: number): string {
@@ -1715,9 +1741,9 @@ function trialGroups(trials: Trials, progress: Progress, options: PaneOptions): 
   // Commands the governor runs come first, then the ones it holds in line.
   const ordered = [...progress.runs.filter((run) => run.kind !== "wait"),
                    ...progress.runs.filter((run) => run.kind === "wait")];
-  const runRows = ordered.map((run) => runRow(run, options));
+  const runRows = byProject(ordered.map((run) => ({ project: run.repo, row: runRow(run, options) })));
   const held = progress.runs.filter((run) => run.kind === "wait").length;
-  const runningCounts = combine([primaryCount(runRows.length - held, "running", "text"),
+  const runningCounts = combine([primaryCount(ordered.length - held, "running", "text"),
                                  steadyCount(held, "waiting", "warning")]);
   const runningSwitch = switchSlot(progress.switch);
   const running = sectionGroup(
@@ -1745,15 +1771,18 @@ function trialGroups(trials: Trials, progress: Progress, options: PaneOptions): 
   const leased = trials.running.filter((lease) => !moving.has(lease.repo + "|" + lease.branch));
   const retrying = new Set(leased.map((lease) => lease.repo + "|" + lease.branch)
     .filter((key) => latest.get(key)?.is_green === false));
-  const trialRows = [
-    ...changes.map((change) => changeRow(change, options,
-                                         latest.get(change.repo + "|" + change.branch))),
-    ...leased.map((lease) => leaseRow(lease, options,
-                                      retrying.has(lease.repo + "|" + lease.branch))),
+  const trialEntries = [
+    ...changes.map((change) => ({ project: change.repo,
+                                  row: changeRow(change, options,
+                                                 latest.get(change.repo + "|" + change.branch)) })),
+    ...leased.map((lease) => ({ project: lease.repo,
+                                row: leaseRow(lease, options,
+                                              retrying.has(lease.repo + "|" + lease.branch)) })),
     ...trials.recent.filter((trial) => !moving.has(trial.repo + "|" + trial.branch)
                                        && !retrying.has(trial.repo + "|" + trial.branch))
-      .map((trial) => trialRow(trial, options)),
+      .map((trial) => ({ project: trial.repo, row: trialRow(trial, options) })),
   ];
+  const trialRows = byProject(trialEntries);
   // The window's failures are the strip's caption and nowhere else. Stated on
   // the heading as well they were one section making the same claim twice, and
   // the two numbers sat next to "8 recent", which counts branches in a
@@ -1770,22 +1799,57 @@ function trialGroups(trials: Trials, progress: Progress, options: PaneOptions): 
     trials.switch === "off" ? [...trialSwitch, ...trialCounts]
       : [...trialCounts, ...trialSwitch],
     options);
-  groups.observed = trialRows.length;
+  groups.observed = trialEntries.length;
   groups.history = trials.history;
   // The latest trial of a branch is its verdict, so one that failed needs reading.
   groups.attention = trials.recent.some((trial) => !trial.is_green);
   return [running, groups];
 }
 
+/**
+ * A section's items under the project each belongs to.
+ *
+ * The project root is a heading and its items hang under it one rail deeper,
+ * so a pane holding four worktrees of one repository and one of another reads
+ * as two groups rather than five rows nobody can attribute. An item whose
+ * project nobody could read sits under its own heading rather than being
+ * attached to another project or dropped. Projects are ordered by name and
+ * items keep the order the reader gave, so a section does not reshuffle when an
+ * item arrives.
+ */
+function byProject(entries: { project: string | null | undefined; row: Row }[]): Row[] {
+  const groups = new Map<string, Row[]>();
+  for (const entry of entries) {
+    const name = (entry.project ?? "").trim() || "no project";
+    const bucket = groups.get(name);
+    if (bucket) {
+      bucket.push(entry.row);
+    } else {
+      groups.set(name, [entry.row]);
+    }
+  }
+  const names = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+  const rows: Row[] = [];
+  names.forEach((name, index) => {
+    const children = groups.get(name) ?? [];
+    for (const child of children) {
+      rows.push({ ...child,
+                  project: { root: name, count: children.length,
+                             last: index === names.length - 1 } });
+    }
+  });
+  return rows;
+}
+
 function pullRequestGroup(prs: PullRequests, options: PaneOptions): Group {
-  const rows = prs.prs.map(pullRequestRow);
+  const rows = byProject(prs.prs.map((pull) => ({ project: pull.repo, row: pullRequestRow(pull) })));
   const failing = prs.prs.filter((pull) => pull.checks === "fail").length;
   const group = sectionGroup(
     "prs", rows, partial(rows, prs.state),
     combine([primaryCount(prs.prs.length, "open"),
              countSlot(failing, "failing", "error")]),
     options);
-  group.observed = rows.length;
+  group.observed = prs.prs.length;
   group.attention = failing > 0;
   return group;
 }
@@ -1888,7 +1952,8 @@ function worktreePressNote(trees: Worktree[]): string {
 }
 
 function worktreeGroup(worktrees: Worktrees, options: PaneOptions): Group {
-  const rows = worktrees.worktrees.map((tree) => worktreeRow(tree, options));
+  const rows = byProject(
+    worktrees.worktrees.map((tree) => ({ project: tree.project_root, row: worktreeRow(tree, options) })));
   const legend = (["active", "held", "merged", "preserved", "unknown"] as const)
     .map((state) => ({
       count: worktrees.worktrees.filter((tree) => tree.state === state).length,
@@ -1907,11 +1972,11 @@ function worktreeGroup(worktrees: Worktrees, options: PaneOptions): Group {
   const state: GroupState = partial(rows, worktrees.state);
   const group = sectionGroup(
     "worktrees", rows, state,
-    combine([primaryCount(rows.length, "checked out"), legend, cleaned]),
+    combine([primaryCount(worktrees.worktrees.length, "checked out"), legend, cleaned]),
     options);
-  group.observed = rows.length;
+  group.observed = worktrees.worktrees.length;
   group.staleSeconds = stale && state === "stale" ? age : undefined;
-  if (rows.length && options.actions) {
+  if (worktrees.worktrees.length && options.actions) {
     group.notes = [[{ text: worktreePressNote(worktrees.worktrees), dim: true }]];
   }
   return group;
@@ -1998,6 +2063,14 @@ function loadGroup(load: Load, options: PaneOptions): Group {
   const summary = combine([primaryCount(load.total, "processes"),
                            countSlot(rows.length, "shown", "subtle")]);
   const group = sectionGroup("load", rows, partial(rows, load.state), summary, options);
+  // The two figures are the section's only meaning that a shape does not tell
+  // on its own: a percentage and a byte count, in columns wide enough to hold
+  // them. Naming them once costs one line and stops a reader guessing which is
+  // which. The widths are the row's own, so the names sit over their columns.
+  group.columns = [
+    { text: "CPU", width: CPU_COLUMN, align: "right" },
+    { text: " · MEM", width: MEMORY_COLUMN, align: "left" },
+  ];
   group.observed = rows.length;
   return group;
 }
@@ -2243,6 +2316,7 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     // Escape closes the pane as well as its key: the engine opens it with
     // `closeOnEscape`, and a key nobody is told about is a key nobody presses.
     hint: "Esc or " + options.keys.close + " closes this pane",
+    footer: { text: FOOTER_TEXT, dim: true },
     digest: digestFrom(snapshot, options),
     groups,
     width: options.width,

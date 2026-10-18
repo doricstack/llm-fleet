@@ -650,6 +650,30 @@ class ProviderStateTests(ConfigTestCase):
 class SourceStateTests(ConfigTestCase):
     """Enabled, unconfigured, unavailable, and disabled stay distinct."""
 
+    def test_pause_marker_resolves_home_and_prevents_target_probe(self):
+        for name, target in (("progress", "directory"), ("trials", "database")):
+            probed = []
+            def probe(path):
+                probed.append(path)
+                return "file"
+            source = self.load({"sources": {name: {
+                "enabled": True, target: path_of("missing"), "paused_when_exists": "~/paused"
+            }}}, probe=probe)["sources"][name]
+            self.assertEqual(source["paused_when_exists"], path_of("paused"))
+            self.assertEqual(source["state"], "paused")
+            self.assertEqual(probed, [path_of("paused")])
+
+    def test_pause_marker_is_optional_nullable_and_validated(self):
+        for name in ("progress", "trials"):
+            for settings in ({}, {"paused_when_exists": None}):
+                source = self.load({"sources": {name: settings}})["sources"][name]
+                self.assertIsNone(source.get("paused_when_exists", "missing"))
+                self.assertEqual(source["state"], "disabled")
+            for value, code in ((7, "E_CONFIG_TYPE"), ("", "E_CONFIG_VALUE"),
+                                ("$UNKNOWN/paused", "E_CONFIG_UNRESOLVED_VAR")):
+                self.assert_errors([(code, "sources." + name + ".paused_when_exists")],
+                                   {"sources": {name: {"paused_when_exists": value}}})
+
     def test_enabled_source_without_repositories_is_refused(self) -> None:
         self.assert_errors([("E_CONFIG_REQUIRED", "sources.prs.repositories")],
                            {"sources": {"prs": {"enabled": True}}})

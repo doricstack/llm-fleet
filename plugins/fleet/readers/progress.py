@@ -193,6 +193,10 @@ def read_progress(config: Mapping[str, Any], *, now: float | None = None,
         result["switch"] = state
     if not source["enabled"]:
         return result
+    marker = source.get("paused_when_exists")
+    if marker and Path(marker).exists():
+        result["state"] = "paused"
+        return result
     root = Path(directory if directory is not None else source["directory"])
     if not root.is_dir():
         result["state"] = "unavailable"

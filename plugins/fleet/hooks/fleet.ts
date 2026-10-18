@@ -819,6 +819,19 @@ function stopStream(state: State): void {
  */
 function streamed($: Engine, state: State,
                   held: { documents: unknown; at: number; progressAt?: number }): unknown {
+  // A paused source replaces its rows on this paint, without waiting behind
+  // another section's transition.
+  const target = documentsOf(held);
+  if (state.shown !== null && target !== null) {
+    for (const source of ["progress", "trials"]) {
+      if ((target[source] as { state?: unknown } | null)?.state === "paused") {
+        state.shown = { ...state.shown, [source]: target[source] };
+        if (source === "progress") {
+          state.shownCountsAt = held.progressAt ?? held.at;
+        }
+      }
+    }
+  }
   // A paint of the reading already landed has nothing to step, and one while
   // the timer runs leaves the stepping to it.
   if (state.streamTimer !== null || state.shownFrom === held.documents) {
@@ -1061,6 +1074,9 @@ function newer(stored: Carried, held: Held | null): boolean {
  */
 function withNewerCounts(before: Held | null, documents: unknown,
                          progressAt: number): { documents: unknown; progressAt: number } {
+  if ((documents as { progress?: { state?: unknown } } | null)?.progress?.state === "paused") {
+    return { documents, progressAt };
+  }
   if (before === null || !("documents" in before) || before.progressAt === undefined
       || before.progressAt <= progressAt) {
     return { documents, progressAt };
@@ -1159,7 +1175,9 @@ async function readWhole($: Engine, state: State, fresh = false): Promise<void> 
   // landed is known for what it is and read again with it.
   state.sessionIdRead = asked;
   if ("documents" in result) {
-    const kept = withNewerCounts(state.held, result.documents, started);
+    const progressAt = (result.documents as { progress?: { state?: unknown } })?.progress?.state
+      === "paused" ? result.at : started;
+    const kept = withNewerCounts(state.held, result.documents, progressAt);
     state.held = { documents: kept.documents, at: result.at, progressAt: kept.progressAt };
   } else {
     state.held = result;
@@ -1180,7 +1198,9 @@ async function readWhole($: Engine, state: State, fresh = false): Promise<void> 
     // lapses, and the one that finishes last is not the one that read last.
     const stored: unknown = await $.store.get(READING_KEY).catch(() => undefined);
     if (!(isCarried(stored) && stored.at > result.at)) {
-      await $.store.set(READING_KEY, { at: result.at, progressAt: started,
+      const progressAt = (result.documents as { progress?: { state?: unknown } })?.progress?.state
+        === "paused" ? result.at : started;
+      await $.store.set(READING_KEY, { at: result.at, progressAt,
                                        documents: result.documents })
         .catch(() => undefined);
     }
@@ -1190,7 +1210,7 @@ async function readWhole($: Engine, state: State, fresh = false): Promise<void> 
 }
 
 /** The progress states a read that worked answers with: runs counted, or none to count. */
-const READ_STATES: ReadonlySet<unknown> = new Set(["ready", "empty"]);
+const READ_STATES: ReadonlySet<unknown> = new Set(["ready", "empty", "paused"]);
 
 /** Whether a reading holds a governor run that is live now. */
 function liveRuns(documents: unknown): boolean {

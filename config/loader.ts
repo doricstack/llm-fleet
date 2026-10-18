@@ -53,6 +53,7 @@ export interface ConfigErrorEntry {
 }
 
 export interface Field {
+  expandHome?: boolean;
   path?: string;
   name?: string;
   type: string;
@@ -79,6 +80,7 @@ export interface Field {
 }
 
 export interface Group {
+  pausedWhenExists?: string;
   id: string;
   path: string;
   fields: string[];
@@ -403,6 +405,10 @@ function scalar(
     if (typeof value !== "string") {
       errors.push(error(CODE_TYPE, path));
       return INVALID;
+    }
+    if (field.expandHome && (value === "~" || value.startsWith("~/")
+        || (process.platform === "win32" && value.startsWith("~\\")))) {
+      value = "$HOME" + value.slice(1);
     }
     const resolved = resolvePathValue(value, context.configDirectory, context.environ,
                                      context.variables);
@@ -878,6 +884,10 @@ function groupState(
   }
   if (incomplete) {
     return null;
+  }
+  const marker = group.pausedWhenExists === undefined ? null : values[group.pausedWhenExists];
+  if (typeof marker === "string" && marker && probe(marker) !== "missing") {
+    return "paused";
   }
   if (group.requiresReadyProvider && !entries.some((entry) => entry.state === "ready")) {
     return "unconfigured";

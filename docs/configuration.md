@@ -47,6 +47,7 @@
 | ID | Context | Statement or required action |
 | --- | --- | --- |
 | DOC6-41 | Resolution output | Resolution is pure apart from one injected path probe, so a result can be asserted without a machine that has provider homes. |
+| DOC6-85 | Pause markers | `paused_when_exists` accepts `~` or `~/` expanded from `HOME` (also a backslash separator on Windows), declared environment variables, absolute paths, or paths relative to the configuration file. A disabled source stays disabled. Required target settings remain required; an existing marker is checked before probing those targets. Removing the marker resumes the next read. |
 | DOC6-42 | Resolution output | `sources.jobs.providers` and `sources.interactive.providers` list ready identifiers only. |
 | DOC6-43 | Resolution output | A refusal carries every error as a code and a field path, sorted by path then code. Message text is not part of the contract. |
 
@@ -55,6 +56,7 @@
 | State | Meaning |
 | --- | --- |
 | `disabled` | The configuration switched the source off. No work is attempted, and no path is probed. |
+| `paused` | An enabled progress or trials source has an existing pause marker. No source data is read; cached rows are replaced by a paused line. |
 | `unconfigured` | The source is enabled, but no provider home is ready to read. |
 | `unavailable` | The source is enabled and configured, but its target is missing or is the wrong kind. |
 | `ready` | The source is enabled, configured, and present. |
@@ -74,7 +76,7 @@
 | DOC6-47 | Recorded decisions | An absent file at the default location uses the declared defaults. |
 | DOC6-48 | Recorded decisions | A file named by the selector that is absent, unreadable, or not a regular file is an error, never a silent fall back to defaults. |
 | DOC6-49 | Recorded decisions | Legacy environment overrides are recorded in the schema and never read: their precedence is undecided, so setting one changes nothing. |
-| DOC6-50 | Recorded decisions | A value may reference `HOME` and the declared XDG variables. A tilde, a shell expression, an undeclared name, and an unset variable are refused. |
+| DOC6-50 | Recorded decisions | A value may reference `HOME` and the declared XDG variables. Tilde expansion is allowed only for `paused_when_exists`; other fields refuse it. Shell expressions, undeclared names, and unset variables are refused. |
 | DOC6-51 | Recorded decisions | Paths resolve lexically against the config file's directory. Nothing is required to exist, and no symlink is followed. |
 | DOC6-52 | Recorded decisions | `commands.cleanup` and `commands.skillReport` entries are literal argv; no variable expansion is applied to them. |
 | DOC6-53 | Recorded decisions | An enabled source missing a required field is refused at load time, before any reader runs. |
@@ -123,11 +125,13 @@
 | `sources.prs.checkRunLimit` | integer, 0 to 100 | Not present | 12; the checks a pull request row lists one by one in `check_runs`. Past it the failing checks are kept first, then the pending ones, and `check_runs_more` counts the rest |
 | `sources.trials.enabled` | boolean | Reads controller store when present | `false`; optional adapter |
 | `sources.trials.database` | path or null | Local controller database; `FLEET_CHANGE_DB` override | `null`; required when trials enabled |
+| `sources.trials.paused_when_exists` | path or null | Optional pause marker | `null`; absent means never paused. Checked on every read before opening the database, including lease lookups. |
 | `sources.trials.stages` | string array | Not present | `NEW,PLANNED,TRIALED,PUSHED,MERGED,PUBLISHED,VERIFIED,CLEANUP_ELIGIBLE,CLEANED`: the controller's stage path. A change not at the last stage that moved within `history.trialsSeconds` is drawn in flight with a bar of its place on the path; a state the path does not name keeps its row without a bar |
 | `sources.trials.offSwitch` | path or null | Not present | `null`: a file whose presence switches the change controller off for the whole machine. The heading says which way it is set; the file's contents are never read. Unset draws no switch state |
 | `sources.progress.enabled` | boolean | Reads shared governor files | `false` |
 | `sources.progress.directory` | path or null | Personal tooling state path; `FLEET_PROGRESS_DIR` override | `null`; required when progress enabled |
 | `sources.progress.offSwitch` | path or null | Not present | `null`: the governor's switch, on the same terms as `sources.trials.offSwitch` |
+| `sources.progress.paused_when_exists` | path or null | Optional pause marker | `null`; absent means never paused. Checked on every read before inspecting the run directory. |
 | `sources.worktrees.enabled` | boolean | Cached rows, fresh probe on section opening | `false` |
 | `sources.worktrees.roots` | path array | One personal worktree root; `FLEET_WORKTREES_DIR` override | `[]`; required when enabled |
 | `sources.worktrees.baseRef` | non-empty string | A personal branch name, hardcoded in the preserved-branch helper | `origin/main`; the reference a worktree branch is compared with |

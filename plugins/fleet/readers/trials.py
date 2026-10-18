@@ -146,6 +146,9 @@ def lease_sessions(config: Mapping[str, Any], now: float) -> list[dict[str, str]
     source = config["sources"]["trials"]
     if not source["enabled"] or not source["database"]:
         return []
+    marker = source.get("paused_when_exists")
+    if marker and Path(marker).exists():
+        return []
     path = Path(source["database"])
     if not path.is_file():
         return []
@@ -229,6 +232,10 @@ def read_trials(config: Mapping[str, Any], *, now: float | None = None) -> dict[
     if state is not None:
         result["switch"] = state
     if not source["enabled"]:
+        return result
+    marker = source.get("paused_when_exists")
+    if marker and Path(marker).exists():
+        result["state"] = "paused"
         return result
     path = Path(source["database"])
     if not path.is_file():

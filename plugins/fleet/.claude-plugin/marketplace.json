@@ -9,7 +9,6 @@
       "name": "llm-fleet",
       "source": "./",
       "description": "Every Claude Code session, background job and open pull request on this machine in one live pane, with alerts when one fails or waits for you.",
-      "version": "0.3.12",
       "license": "MIT"
     }
   ]

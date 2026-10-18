@@ -135,6 +135,16 @@ export type Row = {
   key?: string;
   title: string;
   /**
+   * The project this row belongs to, when the section is drawn as a tree.
+   *
+   * The renderer prints the root as a heading the first time a project's rows
+   * are reached and hangs the rows under it one rail deeper, so the section
+   * reads as one tree per project rather than a flat list of items nobody can
+   * attribute. `last` is true for the section's last project, whose rail closes
+   * into the section's line.
+   */
+  project?: { root: string; count: number; last: boolean };
+  /**
    * What a press on the title does, when it does anything: the title is then a
    * control, every cell of it, so a person presses the thing they read.
    */
@@ -217,7 +227,7 @@ export type Digest = {
   through: number | null;
 };
 
-export type GroupState = "ready" | "empty" | "disabled" | "failed" | "stale" | "unavailable";
+export type GroupState = "ready" | "empty" | "disabled" | "failed" | "stale" | "unavailable" | "paused";
 
 export type Group = {
   /**
@@ -245,6 +255,15 @@ export type Group = {
    * seconds otherwise moved every section below it each time.
    */
   reserve?: number;
+  /**
+   * Names for the figures a section draws in its rows' right-hand columns.
+   *
+   * A figure whose meaning a person has to infer from its shape, such as a
+   * percentage and a byte count in two aligned columns, is named once above the
+   * rows. A section whose right slot is a state word or a measured count names
+   * nothing: there the slot already says what it is.
+   */
+  columns?: Slot[];
   /** Rows a stale group still carries, and how old the last good read is. */
   observed?: number;
   staleSeconds?: number;
@@ -323,6 +342,13 @@ export type Pane = {
   hint?: string;
   /** What happened since the person last looked, when there is anything to say. */
   digest?: Digest | null;
+  /**
+   * The line under the last card: what this is, its version and its license.
+   *
+   * It is the one place a person finds the version to quote when something is
+   * wrong, so it is drawn dim and whole wherever the width holds it.
+   */
+  footer?: Slot;
   groups: Group[];
   /** Columns the surface offers. */
   width: number;
@@ -443,6 +469,8 @@ export function countLabel(bar: Bar | undefined): Slot {
 export function groupMessage(group: Group): Slot[] {
   const age = ageText(group.staleSeconds ?? 0);
   switch (group.state) {
+    case "paused":
+      return [{ text: `${group.name} is paused.`, dim: true }];
     case "empty":
       return [{ text: group.emptyText ?? `No ${group.name.toLowerCase()} here.`, dim: true }];
     case "disabled":
@@ -487,11 +515,40 @@ export function ageText(seconds: number): string {
 }
 
 /**
+ * A section's project root, drawn once above the rows that belong to it.
+ *
+ * The root is set in the theme's accent so a reader tells one project from the
+ * next without counting indents, and its count is the items under that root
+ * rather than the section's total, which its heading already states.
+ */
+function renderProject(project: { root: string; count: number }, width: number,
+                       rail: Rail): Node {
+  const label = fit(project.root, Math.max(8, width - rail.first.length - 12));
+  const count = project.count + (project.count === 1 ? " item" : " items");
+  return box({ flexDirection: "row", gap: 1 }, [
+    text({ color: rail.color, ...(rail.dim ? { dimColor: true } : {}) }, rail.first),
+    text({ color: "claude", bold: true }, label),
+    text({ dimColor: true }, count),
+  ]);
+}
+
+/**
  * The mark a section's items hang off, beside each line an item draws: a branch
  * on its first line and the rail running on beside the rest, or the closing
  * branch and nothing for the last item.
  */
-export type Rail = { first: string; rest: string; color: Color; dim?: boolean };
+export type Rail = {
+  first: string;
+  rest: string;
+  color: Color;
+  dim?: boolean;
+  /**
+   * What stands before this row's branch on the section's rail: the parent's
+   * rail at full width while the row is one of several under it, and blank when
+   * it is the last, so the branch closes into the section's line.
+   */
+  prefix?: string;
+};
 
 /** The rail's own glyphs. */
 export const RAIL_BRANCH = "├─";
@@ -518,7 +575,7 @@ const ASKING = new Set(["waiting", "blocked"]);
 export function renderRow(row: Row, width: number, narrowAt: number,
                           key?: string, rail?: Rail): Node {
   const offset = Math.max(0, Math.round(row.motion?.offset ?? 0));
-  const railWidth = rail ? RAIL_BRANCH.length + 1 : 0;
+  const railWidth = rail ? (rail.prefix?.length ?? 0) + RAIL_BRANCH.length + 1 : 0;
   // The row is laid out at the width it has at rest, and the slide's offset is
   // taken from the dim middle text alone: cut to the room left after the
   // offset, the title's ellipsis moved a cell on every frame of a slide.
@@ -604,10 +661,11 @@ export function renderRow(row: Row, width: number, narrowAt: number,
   const moved = offset > 0 ? { marginLeft: offset } : {};
   const railed = (glyph: string | null, content: Node, props: BoxProps = {}): Node => {
     const body = box({ flexDirection: "column", gap: 0, flexGrow: 1, ...moved }, [content]);
-    return glyph === null
+    const glyphs = glyph === null ? "" : (rail?.prefix ?? "") + glyph;
+    return glyphs === ""
       ? box({ flexDirection: "row", gap: 0, ...props }, [body])
       : box({ flexDirection: "row", gap: 1, ...props }, [
-        text({ color: rail?.color, ...(rail?.dim ? { dimColor: true } : {}) }, glyph),
+        text({ color: rail?.color, ...(rail?.dim ? { dimColor: true } : {}) }, glyphs),
         body,
       ]);
   };
@@ -934,18 +992,50 @@ export function renderGroup(given: Group, width: number, narrowAt: number): Node
       parts.push(spark);
     }
   }
+  // The columns are named once, above the rows they align with, in the same
+  // dim tone as any other label. A folded section draws none: it draws no rows.
+  if (group.columns?.length && group.rows.length && !group.collapsed) {
+    parts.push(box({ flexDirection: "row", justifyContent: "flex-end" },
+                   [line(group.columns.map((slot): Slot => ({ ...slot, dim: true })))]));
+  }
   if (group.rows.length && !group.collapsed) {
     // The section is the parent and its items hang off one rail in its tone. A
     // calm rail rests dim; one that warns is drawn at full strength.
     const calm = group.blink === undefined && (tone === "subtle" || tone === "success");
     const count = group.rows.length;
-    parts.push(box({ flexDirection: "column", gap: 0 },
-                   group.rows.map((row, index) => renderRow(
-                     row, inner, narrowAt,
-                     "row:" + groupKey(group) + ":" + (row.key ?? String(index)),
-                     { first: index === count - 1 ? RAIL_LAST : RAIL_BRANCH,
-                       rest: index === count - 1 ? RAIL_END : RAIL_ON,
-                       color: shown, ...(calm ? { dim: true } : {}) }))));
+    // A section drawn as a tree prints each project root once, in the theme's
+    // accent, and hangs that project's rows one rail deeper: the section's own
+    // rail holds each root, and the root's rail runs on when another project
+    // follows it.
+    const drawn: Node[] = [];
+    group.rows.forEach((row, index) => {
+      const project = row.project;
+      const newProject = project !== undefined
+        && (index === 0 || group.rows[index - 1]?.project?.root !== project.root);
+      if (newProject && project) {
+        const rail: Rail = {
+          first: project.last ? RAIL_LAST : RAIL_BRANCH,
+          rest: project.last ? RAIL_END : RAIL_ON,
+          color: shown, ...(calm ? { dim: true } : {}),
+        };
+        drawn.push(renderProject(project, inner, rail));
+      }
+      const next = group.rows[index + 1];
+      // A row without a project closes its own rail at the section's end; a
+      // row inside a project closes when its project has no next row.
+      const closesRail = project === undefined
+        ? index === count - 1
+        : next?.project?.root !== project.root;
+      const lastChild = closesRail;
+      const first = lastChild ? RAIL_LAST : RAIL_BRANCH;
+      const rest = lastChild ? RAIL_END : RAIL_ON;
+      const prefix = project === undefined ? "" : project.last ? RAIL_END : RAIL_ON;
+      drawn.push(renderRow(
+        row, inner, narrowAt,
+        "row:" + groupKey(group) + ":" + (row.key ?? String(index)),
+        { first, rest, prefix, color: shown, ...(calm ? { dim: true } : {}) }));
+    });
+    parts.push(box({ flexDirection: "column", gap: 0 }, drawn));
     // What the ceiling held back is drawn under the section while the pointer is
     // on it: the heading already states how many there are, and a number a
     // person cannot open is one they have to take on trust. The rows are read
@@ -1281,6 +1371,14 @@ export function renderPane(pane: Pane): Tree {
   parts.push(box({ flexDirection: "column", gap: 0, marginBottom: 1 }, []));
   for (const group of pane.groups) {
     parts.push(renderGroup(group, pane.width, pane.narrowAt));
+  }
+  // The footer is the pane's one line of identity, under everything it reports:
+  // a person reading a screenshot or quoting a version in a report takes it
+  // from here, not from a header that competes with the counts.
+  if (pane.footer) {
+    parts.push(box({ flexDirection: "row", marginTop: 1 }, [
+      text({ dimColor: true }, fit(pane.footer.text, pane.width)),
+    ]));
   }
   return box({ flexDirection: "column", gap: 0 }, parts);
 }

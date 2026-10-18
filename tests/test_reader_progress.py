@@ -320,6 +320,30 @@ class AssociationTests(ProgressCase):
 
 
 class SourceStateTests(ProgressCase):
+    def test_pause_marker_is_checked_on_every_read_and_removal_resumes(self):
+        self.record("abcdef12", {})
+        config = self.config()
+        marker = self.root / "paused"
+        config["sources"]["progress"]["paused_when_exists"] = str(marker)
+        self.assertEqual(progress.read_progress(config, now=NOW)["state"], "ready")
+        marker.touch()
+        self.assertEqual(progress.read_progress(config, now=NOW),
+                         {"state": "paused", "runs": [], "errors": []})
+        marker.unlink()
+        self.assertEqual(len(progress.read_progress(config, now=NOW)["runs"]), 1)
+
+    def test_paused_source_does_not_inspect_its_directory(self):
+        from unittest.mock import patch
+        config = self.config()
+        marker = self.root / "paused"
+        marker.touch()
+        config["sources"]["progress"]["paused_when_exists"] = str(marker)
+        with patch.object(Path, "is_dir", side_effect=AssertionError("directory inspected")):
+            self.assertEqual(progress.read_progress(config, now=NOW),
+                             {"state": "paused", "runs": [], "errors": []})
+        config["sources"]["progress"]["enabled"] = False
+        self.assertEqual(progress.read_progress(config, now=NOW)["state"], "disabled")
+
     def test_a_disabled_source_is_not_read(self):
         config = self.config(**{"sources": {"progress": {"enabled": False,
                                                         "directory": str(self.directory)}}})

@@ -1,4 +1,7 @@
-.PHONY: script-public-export script-check-doc-format script-typescript-suite script-host-drift script-render-review script-statusline-demo script-plugin-boundary script-mutation-check
+.PHONY: script-public-export script-check-doc-format script-typescript-suite script-host-drift script-render-review script-statusline-demo script-plugin-boundary script-mutation-check script-version
+
+script-version: ## Write the pane's version constant from the manifest; --check refuses drift
+	$(PYTHON) scripts/version.py $(if $(VERSION_CHECK),--check,)
 
 script-public-export: ## Invoke public-export.py with PUBLIC_TREE and EXPORT_MODE
 	@set -euo pipefail; test -n "$(PUBLIC_TREE)" || { echo 'Set PUBLIC_TREE to a separate output directory'; exit 2; }

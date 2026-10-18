@@ -7,7 +7,7 @@
  * repository instead of as a blank row on screen.
  */
 
-export type SourceState = "disabled" | "unconfigured" | "unavailable" | "ready";
+export type SourceState = "disabled" | "unconfigured" | "unavailable" | "ready" | "paused";
 export type ReaderState = SourceState | "empty" | "failed";
 
 export type ReaderError = {

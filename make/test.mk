@@ -24,6 +24,13 @@ test-config: ## Run the configuration contract, behavior, and parity suites
 test-config-parity: ## Refuse unless both loaders agree on the shared fixture corpus
 	FLEET_CONFIG_REQUIRE_NODE=1 $(TEST_ENV) $(PYTHON) tests/test_config_loader.py -k FixtureParityTests -v
 
+.PHONY: test-reader-progress test-reader-trials
+test-reader-progress: ## Run progress reader behavior and pause-marker checks
+	$(TEST_ENV) $(PYTHON) tests/test_reader_progress.py -v
+
+test-reader-trials: ## Run trial reader behavior and pause-marker checks
+	$(TEST_ENV) $(PYTHON) tests/test_reader_trials.py -v
+
 test-readers: ## Run the reader suites against real stub commands, stores and files
 	$(TEST_ENV) $(PYTHON) tests/test_readers.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_trials.py -v
@@ -74,6 +81,19 @@ test-components: ## Run the shared layout, pane view model, masking, and declare
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/entries.test.ts
 	$(TEST_ENV) $(PYTHON) tests/test_host_drift.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_render_review.py -v
+
+.PHONY: test-pane-model test-motion test-snapshot test-layout
+test-pane-model: ## Run the pane view model behavior suite
+	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/pane.test.ts
+
+test-motion: ## Run the pane motion behavior suite
+	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/motion.test.ts
+
+test-snapshot: ## Run the snapshot assembly behavior suite
+	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/snapshot.test.ts
+
+test-layout: ## Run the shared layout behavior suite
+	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/layout.test.ts
 
 statusline-demo: script-statusline-demo ## Draw the statusline lines from a payload
 

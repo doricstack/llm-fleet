@@ -47,6 +47,42 @@ test("a pane uses only Box and Text", () => {
   assert.deepEqual(elementTypes(tree), ["Box", "Text"]);
 });
 
+test("a section names the figures in its columns, once, above its rows", () => {
+  const columns = [{ text: "CPU", width: 6, align: "right" as const },
+                   { text: " MEM", width: 8, align: "left" as const }];
+  const open = renderedText(renderPane(pane({ groups: [group({ columns })] })));
+  const names = open.indexOf("CPU");
+  assert.equal(names > 0, true);
+  assert.equal(names < open.indexOf("Test suite"), true, "the names head the rows");
+  // Folded, the section draws no rows, so it names no columns above them.
+  const folded = renderedText(renderPane(pane({ groups: [group({ columns, collapsed: true })] })));
+  assert.equal(folded.includes("CPU"), false);
+});
+
+test("the footer is the pane's last line, drawn dim and cut rather than wrapped", () => {
+  const footer = { text: "llm-fleet 0.3.15 · Doric Stack · MIT", dim: true };
+  const tree = renderPane(pane({ footer }));
+  assert.equal(renderedText(tree).at(-1), footer.text);
+  // Dim on the node itself: a footer drawn in the body color competes with what
+  // the pane reports, which is the one thing it must not do.
+  const drawn: { text: string; dim: boolean }[] = [];
+  const walk = (node: Tree | string): void => {
+    if (typeof node === "string") {
+      return;
+    }
+    const props = node.props as { dimColor?: boolean };
+    if (node.type === "Text" && node.children[0] === footer.text) {
+      drawn.push({ text: footer.text, dim: props.dimColor === true });
+    }
+    node.children.forEach(walk);
+  };
+  walk(tree);
+  assert.deepEqual(drawn, [{ text: footer.text, dim: true }]);
+  const narrow = renderedText(renderPane(pane({ footer, width: 24 }))).at(-1) ?? "";
+  assert.equal(narrow.length, 24);
+  assert.equal(narrow.endsWith("..."), true);
+});
+
 test("the same tree renders through a host binding without changing its structure", () => {
   // Both surfaces declare Box and Text with the same props, so one binding
   // serves them; a mounted tree is compared with the tree it was built from.

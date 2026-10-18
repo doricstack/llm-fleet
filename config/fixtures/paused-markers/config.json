@@ -1,0 +1,14 @@
+{
+  "sources": {
+    "progress": {
+      "enabled": true,
+      "directory": "./runs",
+      "paused_when_exists": "~/paused"
+    },
+    "trials": {
+      "enabled": true,
+      "database": "./changes.db",
+      "paused_when_exists": "~/paused"
+    }
+  }
+}

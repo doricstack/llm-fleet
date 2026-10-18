@@ -1,0 +1,39 @@
+{
+  "config": {
+    "stateDir": "<FIXTURE>/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "<FIXTURE>/runner/.local/state/llm-fleet/typing"
+      }
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured",
+        "providers": []
+      },
+      "interactive": {
+        "state": "unconfigured",
+        "providers": []
+      },
+      "agents": {
+        "state": "unconfigured",
+        "providers": []
+      },
+      "progress": {
+        "enabled": true,
+        "directory": "<FIXTURE>/runs",
+        "paused_when_exists": "<FIXTURE>/paused",
+        "state": "ready"
+      },
+      "trials": {
+        "enabled": true,
+        "database": "<FIXTURE>/changes.db",
+        "paused_when_exists": "<FIXTURE>/paused",
+        "state": "ready"
+      }
+    }
+  }
+}

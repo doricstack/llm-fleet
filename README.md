@@ -1,5 +1,7 @@
 # llm-fleet
 
+by Doric Stack
+
 One pane for every Claude Code session and background job on your machine. llm-fleet is a Claude Code plugin: it shows which jobs are working, waiting or failed, what each agent is doing and what it costs, and it alerts you when one needs you.
 
 ## Install
@@ -40,8 +42,8 @@ To run your working copy instead of the installed plugin, start a session with `
 
 ## Versions
 
-The version in `plugins/fleet/.claude-plugin/plugin.json` is the plugin's version. Both marketplace entries carry the same number, and a contract test fails when they drift. A change people would notice raises it, and a release is tagged `v` followed by that number.
+The version in `plugins/fleet/.claude-plugin/plugin.json` is the plugin's version, written there once. Neither marketplace entry sets one, because the host reads the manifest and a second number only earns a warning. The pane's footer constant is generated from the manifest by `make version`, and `make quality` refuses a copy that has gone stale. A change people would notice raises it, and a release is tagged `v` followed by that number.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT, 2026. See [LICENSE](LICENSE).

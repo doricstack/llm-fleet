@@ -1,0 +1,6 @@
+{
+  "errors": [
+    {"code": "E_CONFIG_TYPE", "path": "sources.progress.paused_when_exists"},
+    {"code": "E_CONFIG_VALUE", "path": "sources.trials.paused_when_exists"}
+  ]
+}

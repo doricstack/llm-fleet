@@ -21,12 +21,52 @@ import { fitSlots, groupMessage, renderedText, renderPane, renderRow }
   from "../plugins/fleet/components/layout.ts";
 import { NARROW_AT } from "../plugins/fleet/components/options.ts";
 import { themeFrom, type Theme } from "../plugins/fleet/components/palette.ts";
+import { FOOTER_TEXT } from "../plugins/fleet/components/version.ts";
 import type {
   Group, Row,
 } from "../plugins/fleet/components/layout.ts";
 import type { Snapshot } from "../plugins/fleet/components/state.ts";
 
 const NOW = 1_700_000_000;
+
+test("paused progress and trials each draw one paused line without rows", () => {
+  const built = paneFrom(snapshot({
+    progress: { state: "paused", runs: [], errors: [] },
+    trials: { state: "paused", running: [], recent: [], history: null, errors: [] },
+  }), options());
+  for (const title of ["Running", "Trials"]) {
+    const section = group(built, title);
+    assert.equal(section.state, "paused");
+    assert.deepEqual(section.rows, []);
+    assert.deepEqual(section.summary, []);
+    assert.deepEqual(groupMessage(section).map((slot) => slot.text), [title + " is paused."]);
+  }
+});
+
+test("every section names the figure its rows end in", () => {
+  // The words beside a figure ("42 passed", "merged") say what they are; a
+  // verdict, a state and a check count do not, so each section says once what
+  // its right-hand column holds. Load names two figures in their own widths.
+  const built = paneFrom(snapshot(), options());
+  const named = new Map(built.groups.map((section) => [section.title, section.columns]));
+  assert.deepEqual(named.get("Background sessions"), [{ text: "STATE" }]);
+  assert.deepEqual(named.get("Trials"), [{ text: "RESULT" }]);
+  assert.deepEqual(named.get("Pull requests"), [{ text: "CHECKS" }]);
+  assert.deepEqual(named.get("Worktrees"), [{ text: "STATE" }]);
+  assert.deepEqual(named.get("Skills"), [{ text: "VERDICT" }]);
+  // A section whose rows end in a bar and no right-hand figure names nothing.
+  assert.equal(named.get("Keys"), undefined);
+});
+
+test("the pane names the installed plugin, its author and its license in the footer", () => {
+  // The host offers no plugin version, so the number is written beside the
+  // manifest and a publication test keeps the two equal. What this case holds is
+  // that the pane draws it, dim, under everything it reports.
+  const built = paneFrom(snapshot(), options());
+  assert.equal(built.footer?.text, FOOTER_TEXT);
+  assert.equal(built.footer?.dim, true);
+  assert.match(FOOTER_TEXT, /^llm-fleet \d+\.\d+\.\d+ · Doric Stack · MIT$/);
+});
 
 test("every section the pane builds carries its own fold control and hotkey", () => {
   // Read off the view model the plugin actually builds, not off a fixture: a
@@ -155,6 +195,20 @@ function barDimness(tree: unknown): boolean[] {
   };
   walk(tree);
   return found;
+}
+
+/**
+ * The lines the pane's items draw, without the project roots a tree section
+ * heads them with.
+ *
+ * `texts` reads every string the pane draws; a section grouped by project also
+ * draws each root and how many items hang under it, and a test asserting what an
+ * item says is about the item.
+ */
+function itemTexts(pane: { groups: Group[] }): string[] {
+  const roots = new Set(pane.groups.flatMap((group) => group.rows
+    .flatMap((row) => row.project ? [row.project.root] : [])));
+  return texts(pane).filter((value) => !roots.has(value) && !/^\d+ items?$/.test(value));
 }
 
 function bars(values: string[]): string[] {
@@ -373,12 +427,102 @@ test("a pull request shows its check verdict and marks a draft", () => {
   assert.equal(rows[0]?.slot[1]?.text, "checks failed");
   assert.equal(rows[1]?.title, "No number");
   assert.equal(rows[1]?.slot[0]?.text, "no checks");
-  const values = texts(pane);
+  const values = itemTexts(pane);
   assert.equal(values.includes("2 open"), true);
   assert.equal(values.some((value) => value.includes("1 failing")), true);
 });
 
-test("a pull request is named by its project on every row, with the owner on hover", () => {
+test("a section groups its rows under each project root, in a stable order", () => {
+  const tree = (name: string, root: string, state: string) => ({
+    name, branch: "main", path: "/w/" + name, project_root: root,
+    state, merged: state === "merged", archived: false, held: false,
+    last_commit: "abc", last_commit_at: NOW - 60, checked_at: NOW - 60,
+    changes: 0, main_ahead: 0, feedback: [], dirty: 0, cleanup_command: null,
+  });
+  const pane = paneFrom(snapshot({
+    worktrees: { state: "ready", errors: [], cleaned: 0, worktrees: [
+      tree("two", "/repos/b", "active"),
+      tree("one", "/repos/a", "active"),
+      tree("three", "/repos/a", "merged"),
+    ] },
+  }), options());
+  const rows = group(pane, "Worktrees").rows;
+  // One row per worktree, each naming its root: the root is drawn as a heading
+  // by the renderer, not carried as a row that counts as an item.
+  assert.deepEqual(rows.map((row) => row.project?.root), ["/repos/a", "/repos/a", "/repos/b"]);
+  assert.deepEqual(rows.map((row) => row.project?.count), [2, 2, 1]);
+  // Only the last project closes the section's rail.
+  assert.deepEqual(rows.map((row) => row.project?.last), [false, false, true]);
+  // The root is a heading, not an item: three worktrees draw three rows.
+  assert.equal(rows.length, 3);
+});
+
+test("each project root is drawn once, above its rows, in the accent", () => {
+  const tree = (name: string, root: string) => ({
+    name, branch: "main", path: "/w/" + name, project_root: root,
+    state: "active", merged: false, archived: false, held: false,
+    last_commit: "abc", last_commit_at: NOW - 60, checked_at: NOW - 60,
+    changes: 0, main_ahead: 0, feedback: [], dirty: 0, cleanup_command: null,
+  });
+  const pane = paneFrom(snapshot({
+    worktrees: { state: "ready", errors: [], cleaned: 0, worktrees: [
+      tree("one", "/repos/a"), tree("two", "/repos/b"), tree("three", "/repos/b"),
+    ] },
+  }), options());
+  const values = texts(pane);
+  // Each root once, in the theme's accent so the roots are read at a glance.
+  const accents: string[] = [];
+  const walk = (node: unknown): void => {
+    const record = node as { type?: string; props?: { color?: unknown }; children?: unknown[] };
+    if (record?.type === "Text" && record.props?.color === "claude") {
+      accents.push((record.children ?? []).join(""));
+    }
+    for (const child of record.children ?? []) {
+      walk(child);
+    }
+  };
+  walk(renderPane({ ...pane, title: "Fleet", counts: [], updated: { text: "u" },
+                    groups: pane.groups, width: 120, narrowAt: 60 }));
+  assert.deepEqual(accents, ["/repos/a", "/repos/b"]);
+  assert.equal(values.filter((value) => value === "/repos/a").length, 1);
+  assert.equal(values.filter((value) => value === "/repos/b").length, 1);
+  assert.equal(values.includes("1 item"), true);
+  assert.equal(values.includes("2 items"), true);
+});
+
+test("the last project closes the section's rail, and its items hang under it", () => {
+  const tree = (name: string, root: string) => ({
+    name, branch: "main", path: "/w/" + name, project_root: root,
+    state: "active", merged: false, archived: false, held: false,
+    last_commit: "abc", last_commit_at: NOW - 60, checked_at: NOW - 60,
+    changes: 0, main_ahead: 0, feedback: [], dirty: 0, cleanup_command: null,
+  });
+  const pane = paneFrom(snapshot({
+    worktrees: { state: "ready", errors: [], cleaned: 0, worktrees: [
+      tree("one", "/repos/a"), tree("two", "/repos/b"),
+    ] },
+  }), options());
+  const glyphs: string[] = [];
+  const walk = (node: unknown): void => {
+    const record = node as { type?: string; children?: unknown[] };
+    if (record?.type === "Text") {
+      const value = (record.children ?? []).join("");
+      if (/^[│\s]*[├└]─$/.test(value)) {
+        glyphs.push(value);
+      }
+    }
+    for (const child of record.children ?? []) {
+      walk(child);
+    }
+  };
+  walk(renderPane({ ...pane, title: "Fleet", counts: [], updated: { text: "u" },
+                    groups: [group(pane, "Worktrees")], width: 120, narrowAt: 60 }));
+  // The first project's rail runs on past its item; the last closes into the
+  // section's line, and its item closes under it.
+  assert.deepEqual(glyphs, ["├─", "│ └─", "└─", "  └─"]);
+});
+
+test("a pull request's project heads its rows once, and its owner stays on hover", () => {
   const pane = paneFrom(snapshot({
     prs: { state: "ready", errors: [], prs: [
       { repo: "owner/an-enterprise-project-name", number: 1, title: "t", branch: "b", head: "h",
@@ -392,13 +536,19 @@ test("a pull request is named by its project on every row, with the owner on hov
     ] },
   }), options());
   const rows = group(pane, "Pull requests").rows;
-  assert.deepEqual(rows[0]?.meta[0], { text: "an-enterprise-project-name" });
-  assert.deepEqual(rows[1]?.meta[0], { text: "team-project" });
-  assert.deepEqual(rows[2]?.meta[0], { text: "older-reading" });
-  // The branch still follows it on the same line.
-  assert.deepEqual(rows[0]?.meta[1], { text: " · b" });
+  // The project is the tree's root now: named once above its rows, so the row
+  // carries only what tells it from its siblings.
+  assert.deepEqual(rows.map((row) => row.project?.root),
+                   ["other/team-project", "owner/an-enterprise-project-name",
+                    "owner/older-reading"]);
+  // The root is not a row of its own: three items draw three rows.
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((row) => row.project?.last), [false, false, true]);
+  assert.deepEqual(rows[1]?.project?.count, 1);
+  // The branch still follows on the same line.
+  assert.deepEqual(rows[0]?.meta, [{ text: "b" }]);
   // Nothing the row cut is lost: the whole repository is on its hover card.
-  assert.deepEqual(rows[1]?.note, { text: "other/team-project", dim: true });
+  assert.deepEqual(rows[0]?.note, { text: "other/team-project", dim: true });
 });
 
 test("a skill row carries its worst finding and a newly noticed one is marked", () => {
@@ -478,9 +628,9 @@ test("a section a person showed in full draws every row and states no count", ()
   assert.equal(worktrees.summary.some((slot) => slot.text.includes("more")), false);
 });
 
-test("a worktree row names the project it belongs to, with the root on hover", () => {
-  // Two projects on one machine draw the same branch name; the row that does
-  // not say where it belongs is one a person has to open to find out.
+test("a worktree row sits under its project, named there rather than repeated", () => {
+  // Two projects on one machine draw the same branch name; the root above the
+  // row is what tells them apart, and the row keeps only what differs.
   const pane = paneFrom(snapshot({
     worktrees: { state: "ready", cleaned: null, errors: [], worktrees: [
       { name: "lane", path: "/tmp/lane", project: "llm-fleet", project_root: "/projects/llm-fleet",
@@ -490,7 +640,7 @@ test("a worktree row names the project it belongs to, with the root on hover", (
   }), options());
   const [row] = group(pane, "Worktrees").rows;
   assert.deepEqual(row?.meta, [{ text: "llm-fleet" }, { text: " · fix/one" }]);
-  assert.deepEqual(row?.note, { text: "/projects/llm-fleet", dim: true });
+  assert.deepEqual(row?.project, { root: "/projects/llm-fleet", count: 1, last: true });
 });
 
 test("every reader error reaches the warnings group once", () => {
@@ -1972,6 +2122,17 @@ test("a process under load is drawn by name, project, age and what it costs", ()
   // The heading says how many the drawn rows were chosen from.
   assert.deepEqual(load.summary, [{ text: "412 processes" },
                                   { text: "  1 shown", color: "subtle" }]);
+});
+
+test("the load section names the two figures its rows draw in columns", () => {
+  const built = paneFrom(snapshot({
+    load: { state: "ready", sampled_at: NOW, total: 412, errors: [], processes: [PROCESS] },
+  }), options({ sectionOrder: ["load"] }));
+  const load = group(built, "Load");
+  // The names are the row's own column widths, so they sit over their figures,
+  // and the word before the second name is the separator the rows use.
+  assert.deepEqual(load.columns?.map((slot) => slot.text), ["CPU", " · MEM"]);
+  assert.deepEqual(load.columns?.map((slot) => slot.width), [6, 8]);
 });
 
 test("a load row keeps each figure in its own column", () => {

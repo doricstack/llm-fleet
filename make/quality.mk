@@ -1,6 +1,12 @@
-.PHONY: quality lint typecheck violations doc-format plugin-boundary
+.PHONY: quality lint typecheck violations doc-format plugin-boundary version version-check
 
-quality: lint doc-format violations plugin-boundary ## Run the implemented scaffold quality checks
+quality: lint doc-format violations plugin-boundary version-check ## Run the implemented scaffold quality checks
+
+version: ## Write the pane's version constant from the manifest
+	$(MAKE) script-version
+
+version-check: ## Refuse a version written anywhere but the manifest, or generated stale from it
+	$(MAKE) script-version VERSION_CHECK=1
 
 lint: ## Check Python indentation using the standard-library linter
 	$(PYTHON) -m tabnanny scripts tests config plugins

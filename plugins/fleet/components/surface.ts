@@ -19,6 +19,7 @@ import { recolor, THEME } from "./palette.ts";
 import { CLOSE, DEFAULT_KEYS, paneFrom, type PaneOptions } from "./pane.ts";
 import { paneOptions } from "./options.ts";
 import { snapshotFrom, type ReaderDocuments } from "./snapshot.ts";
+import { FOOTER_TEXT } from "./version.ts";
 
 export type SurfaceInput = {
   /** What the read command printed, or nothing when it has not answered yet. */
@@ -66,6 +67,7 @@ function notice(state: Group["state"], text: string, input: SurfaceInput,
     controls: [{ key: CLOSE, label: "Close", hotkey: close, dim: true,
                  onPress: () => input.onPress?.(CLOSE) }],
     hint: "Esc or " + close + " closes this pane",
+    footer: { text: FOOTER_TEXT, dim: true },
     groups: [group],
     width: input.width,
     narrowAt: 60,

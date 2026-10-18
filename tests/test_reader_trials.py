@@ -72,6 +72,33 @@ class StoreCase(unittest.TestCase):
 
 
 class RunningTests(StoreCase):
+    def test_pause_marker_is_checked_on_every_read_and_removal_resumes(self):
+        self.lease()
+        config = self.config()
+        marker = self.root / "paused"
+        config["sources"]["trials"]["paused_when_exists"] = str(marker)
+        self.assertEqual(trials.read_trials(config, now=NOW)["state"], "ready")
+        marker.touch()
+        self.assertEqual(trials.read_trials(config, now=NOW),
+                         {"state": "paused", "running": [], "recent": [],
+                          "changes": [], "history": None, "errors": []})
+        self.assertEqual(trials.lease_sessions(config, NOW), [])
+        marker.unlink()
+        self.assertEqual(len(trials.read_trials(config, now=NOW)["running"]), 1)
+        self.assertEqual(len(trials.lease_sessions(config, NOW)), 1)
+
+    def test_paused_source_does_not_inspect_or_open_the_database(self):
+        from unittest.mock import patch
+        config = self.config()
+        marker = self.root / "paused"
+        marker.touch()
+        config["sources"]["trials"]["paused_when_exists"] = str(marker)
+        with patch.object(Path, "is_file", side_effect=AssertionError("database inspected")):
+            self.assertEqual(trials.read_trials(config, now=NOW)["state"], "paused")
+            self.assertEqual(trials.lease_sessions(config, NOW), [])
+        config["sources"]["trials"]["enabled"] = False
+        self.assertEqual(trials.read_trials(config, now=NOW)["state"], "disabled")
+
     def test_a_live_lease_is_a_running_trial(self):
         self.lease()
         result = trials.read_trials(self.config(), now=NOW)

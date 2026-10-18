@@ -75,10 +75,23 @@ class Marketplaces(unittest.TestCase):
         self.assertEqual(entry["source"], "./")
 
     def test_one_version_everywhere(self) -> None:
+        # The manifest is the one place the version is written. A marketplace
+        # entry that sets one only earns a validation warning, because the
+        # manifest wins at install; the pane's footer constant is generated from
+        # the manifest and checked below.
         version = read(MANIFEST)["version"]
         self.assertRegex(version, SEMVER)
-        self.assertEqual(self.entry(PUBLISHED)["version"], version)
-        self.assertEqual(self.entry(LOCAL)["version"], version)
+        for path in (PUBLISHED, LOCAL):
+            with self.subTest(marketplace=path.relative_to(ROOT).as_posix()):
+                self.assertNotIn("version", self.entry(path))
+
+    def test_the_pane_footer_names_the_installed_version(self) -> None:
+        # The host gives a plugin no way to read its own manifest, so the footer
+        # carries the number as a constant and this test is what keeps it true.
+        text = (PLUGIN / "components" / "version.ts").read_text(encoding="utf-8")
+        found = re.search(r'PLUGIN_VERSION = "([^"]+)"', text)
+        self.assertIsNotNone(found, "the pane's version constant is named")
+        self.assertEqual(found.group(1) if found else "", read(MANIFEST)["version"])
 
     def test_one_owner_and_one_description(self) -> None:
         manifest = read(MANIFEST)

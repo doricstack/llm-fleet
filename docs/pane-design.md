@@ -62,6 +62,25 @@ by color alone. Long titles wrap before they collide with the slot. At narrow
 widths the slot moves to its own line while preserving reading order. Truncation
 must not hide a failed state, source error, or the denominator.
 
+A section whose items belong to a project draws them as a tree. The project root
+is printed once, in the theme's accent with the count of items under it, and its
+items hang one rail deeper under a rail that runs on while another project
+follows it. The row then keeps only what tells it from its siblings: the project
+is drawn where it changes, not on every line that shares it. An item whose
+project nobody could read sits under a root that says so, never attached to
+another project and never dropped.
+
+A section whose rows carry figures in two aligned columns names them once, in a
+dim line above the rows, in the same widths as the columns. The load section is
+that case: a percentage and a byte count side by side say nothing about which is
+which until they are named.
+
+Under the last card the pane draws one dim line naming the plugin, its version and
+its license. It sits at the bottom, never in the head: the head reports this
+machine, and a product line there competes with what the pane exists to say. It
+is drawn in every state, including while the first read runs and after a
+refusal, so the version a person quotes is always on the pane they are reading.
+
 ## The band above the prompt
 
 The band is the pane's switch, and it is always drawn: a command typed while a

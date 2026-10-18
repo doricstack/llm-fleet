@@ -148,7 +148,7 @@ export function animate(pane: Pane, memory: Motion, now: number): { pane: Pane; 
 
   const drawn = pane.groups.map((group) => {
     const id = groupId(group);
-    if (group.collapsed) {
+    if (group.collapsed || group.state === "paused") {
       return group;
     }
     const marked: Row[] = group.rows.map((row) => {

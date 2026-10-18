@@ -1516,6 +1516,77 @@ function liveReading(at: number, done: number): Record<string, unknown> {
   }] } } };
 }
 
+test("a paused live reading replaces cached governor rows and is shared", async () => {
+  const memory: Record<string, unknown> = {};
+  const paused = { state: "paused", runs: [], errors: [] };
+  const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290), memory,
+    answer: (argv) => argv.includes("--only")
+      ? { exitCode: 0, stdout: JSON.stringify({ progress: paused }) } : undefined });
+  await driven.start();
+  await driven.run();
+  driven.advance(LIVE_MS / 1000);
+  driven.tick(LOOK_MS);
+  await drain();
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Running is paused."), true, text);
+  assert.equal(text.includes("290"), false, text);
+  assert.deepEqual((memory[COUNTS_KEY] as { progress: unknown }).progress, paused);
+});
+
+test("a paused stored reading replaces live counts and resumes on a later ready reading", async () => {
+  const memory: Record<string, unknown> = {};
+  const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290), memory });
+  await driven.start();
+  await drain();
+  memory[COUNTS_KEY] = { at: 1790000000,
+    progress: (liveReading(0, 350).documents as { progress: unknown }).progress };
+  driven.tick(LOOK_MS);
+  await drain();
+  await driven.render();
+  memory[READING_KEY] = { at: 1790000001, progressAt: 1790000001, documents: {
+    ...OUTPUT, progress: { state: "paused", runs: [], errors: [] },
+    trials: { state: "paused", running: [], recent: [], changes: [], errors: [] },
+  } };
+  driven.advance(1);
+  driven.tick(LOOK_MS);
+  await drain();
+  let text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Running is paused."), true, text);
+  assert.equal(text.includes("350"), false, text);
+  assert.equal(text.includes("Trials is paused."), true, text);
+  memory[READING_KEY] = liveReading(1790000002, 500);
+  driven.advance(1);
+  driven.tick(LOOK_MS);
+  await drain();
+  text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("500"), true, text);
+  assert.equal(text.includes("Running is paused."), false, text);
+});
+
+test("a paused whole reading clears counts read while it was running", async () => {
+  const paused = { ...OUTPUT, progress: { state: "paused", runs: [], errors: [] },
+                   trials: { state: "paused", running: [], recent: [], changes: [], errors: [] } };
+  const driven = stub({ held: false, stored: liveReading(1790000000 - STALE_SECONDS, 290),
+    stdout: JSON.stringify(paused),
+    answer: (argv) => argv.includes("--only") ? countsAnswer(400) : undefined });
+  await driven.start();
+  await driven.run();
+  await drain();
+  driven.advance(LIVE_MS / 1000);
+  driven.tick(LOOK_MS);
+  driven.tick(LIVE_MS);
+  await drain();
+  await driven.settle();
+  await drain();
+  await driven.render();
+  driven.tick(STREAM_MS);
+  driven.advance(1);
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Running is paused."), true, text);
+  assert.equal(text.includes("Trials is paused."), true, text);
+  assert.equal(text.includes("400"), false, text);
+});
+
 test("a fresh reading another session took is drawn here without reading the machine again", async () => {
   // Two panes side by side showed two moments, an interval apart, because each
   // session read the machine on its own. The one the store holds is the one

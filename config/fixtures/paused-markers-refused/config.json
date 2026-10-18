@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "progress": {"paused_when_exists": 7},
+    "trials": {"paused_when_exists": ""}
+  }
+}

@@ -19,6 +19,7 @@ import { GEOMETRY } from "../plugins/fleet/components/options.ts";
 import { recordingPrimitives } from "../plugins/fleet/components/mount.ts";
 import { isReading, isRefusal, surfaceTree,
          type SurfaceInput } from "../plugins/fleet/components/surface.ts";
+import { FOOTER_TEXT } from "../plugins/fleet/components/version.ts";
 
 const WIDTH = 100;
 const NOW = 1790000000;
@@ -61,6 +62,13 @@ test("a reading becomes the pane, drawn with the host's own elements", () => {
   assert.deepEqual(drawn.types, ["Box", "Button", "Text"]);
   assert.equal(drawn.text.includes("Review adapter behavior"), true);
   assert.equal(drawn.text.includes("Fleet"), true);
+});
+
+test("a pane drawn before a reading still names the plugin and its version", () => {
+  // The footer is not a claim about the machine, so it is drawn whatever the
+  // read is doing: a person quoting a version takes it from the pane they see.
+  const drawn = draw(input({ documents: null }));
+  assert.equal(drawn.text.split("\n").at(-1), FOOTER_TEXT);
 });
 
 test("a read that has not answered says it is reading, not that nothing is running", () => {

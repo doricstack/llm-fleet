@@ -28,6 +28,7 @@ scripts/typescript-suite.py
 scripts/host-drift.py
 scripts/render-review.py
 scripts/plugin-boundary.py
+scripts/version.py
 plugins/fleet/config/__init__.py
 plugins/fleet/config/loader.py
 config/loader.ts
@@ -69,6 +70,7 @@ plugins/fleet/components/statusline.ts
 plugins/fleet/components/surface.ts
 plugins/fleet/components/cards.ts
 plugins/fleet/components/vector.ts
+plugins/fleet/components/version.ts
 plugins/fleet/components/stream.ts
 plugins/fleet/components/palette.ts
 plugins/fleet/tests/pane.test.ts
