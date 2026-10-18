@@ -47,6 +47,67 @@ test("a pane uses only Box and Text", () => {
   assert.deepEqual(elementTypes(tree), ["Box", "Text"]);
 });
 
+test("a headline figure is the control that opens what it counts", () => {
+  const pressed: string[] = [];
+  const tree = renderPane(pane({ cards: [
+    { label: "Failed outcomes", value: "2", color: "error",
+      press: { key: "fleet.focus.failed", label: "Failed outcomes",
+               onPress: () => pressed.push("failed") } },
+  ] }));
+  const found: string[] = [];
+  const walk = (node: Tree | string): void => {
+    if (typeof node === "string") {
+      return;
+    }
+    const props = node.props as { key?: string; onPress?: () => void };
+    if (node.type === "Button" && typeof props.onPress === "function") {
+      found.push(props.key ?? "unnamed");
+      props.onPress();
+    }
+    node.children.forEach(walk);
+  };
+  walk(tree);
+  assert.deepEqual(found, ["fleet.focus.failed"]);
+  assert.deepEqual(pressed, ["failed"]);
+});
+
+test("a narrowed pane says so, and offers the press that widens it", () => {
+  const words: string[] = [];
+  const tree = renderPane(pane({
+    focus: { text: "Showing failed only.",
+             clear: { key: "fleet.focus.clear", label: "Show all",
+                      onPress: () => words.push("clear") } },
+  }));
+  const drawn = renderedText(tree);
+  assert.equal(drawn.includes("Showing failed only."), true);
+  assert.equal(drawn.includes("Show all"), true);
+  const walk = (node: Tree | string): void => {
+    if (typeof node === "string") {
+      return;
+    }
+    const props = node.props as { key?: string; onPress?: () => void };
+    if (node.type === "Button" && props.key === "fleet.focus.clear") {
+      props.onPress?.();
+    }
+    node.children.forEach(walk);
+  };
+  walk(tree);
+  assert.deepEqual(words, ["clear"]);
+});
+
+test("a row pressed open draws what it holds in full, and a row left shut does not", () => {
+  const details = [{ text: "folder /tmp/project" }, { text: "provider one" }];
+  const open = renderedText(renderPane(pane({ groups: [group({
+    rows: [row({ details, detailsPress: { key: "fleet.details.1", label: "details",
+                                          onPress: () => undefined }, expanded: true })] })] })));
+  assert.equal(open.includes("folder /tmp/project"), true);
+  assert.equal(open.includes("provider one"), true);
+  const shut = renderedText(renderPane(pane({ groups: [group({
+    rows: [row({ details, detailsPress: { key: "fleet.details.1", label: "details",
+                                          onPress: () => undefined } })] })] })));
+  assert.equal(shut.includes("folder /tmp/project"), false);
+});
+
 test("a section names the figures in its columns, once, above its rows", () => {
   const columns = [{ text: "CPU", width: 6, align: "right" as const },
                    { text: " MEM", width: 8, align: "left" as const }];

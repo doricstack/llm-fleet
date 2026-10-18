@@ -33,6 +33,10 @@ export const BAND_TOGGLE = "fleet.band.toggle";
 export const BAND_DISMISS = "fleet.band.dismiss";
 /** The address of the switch that turns speech on or off in every session. */
 export const BAND_SPEAK = "fleet.band.speak";
+/** The address of a press on one of the band's figures, before the state it names. */
+export const BAND_FOCUS = "fleet.band.focus.";
+/** The address of a press on the item the band leads with. */
+export const BAND_ITEM = "fleet.band.item.";
 
 /** The cell the rule above the buttons is drawn from, written as a code point. */
 const BAND_RULE = "─";
@@ -294,6 +298,14 @@ export type BandInput = {
   onToggle: () => unknown;
   onDismiss: () => void;
   onSpeak?: () => unknown;
+  /**
+   * Open the pane, narrowed to one of the figures, or to the whole fleet.
+   *
+   * The band is on screen while the pane is shut, which is when a person reads
+   * a count and wants the rows behind it; without this the figure is a number
+   * they have to go and find.
+   */
+  onOpen?: (focus?: "working" | "waiting" | "failed") => unknown;
 };
 
 /** The cells a button adds around its label: "[ " before it and " ]" after. */
@@ -330,15 +342,22 @@ export function bandTree(input: BandInput): Node {
     parts.push(button(BAND_SPEAK, word, input.onSpeak, speaking));
     used += PART_GAP + word.length + BUTTON_CHROME;
   }
-  const figures: [number, string, Color][] = input.counts === null ? [] : [
-    [input.counts.working, "working", "success"],
-    [input.counts.waiting, "waiting", "warning"],
-    [input.counts.failed, "failed", "error"],
-  ];
-  for (const [count, word, color] of figures) {
+  const figures: [number, string, Color, "working" | "waiting" | "failed"][] =
+    input.counts === null ? [] : [
+      [input.counts.working, "working", "success", "working"],
+      [input.counts.waiting, "waiting", "warning", "waiting"],
+      [input.counts.failed, "failed", "error", "failed"],
+    ];
+  for (const [count, word, color, focus] of figures) {
     if (count > 0) {
       const label = count + " " + word;
-      parts.push(chip(label, color));
+      const drawn = chip(label, color);
+      // The figure is the way to the rows it counts: a press opens the pane
+      // already narrowed to them.
+      parts.push(input.onOpen === undefined ? drawn
+        : { type: "Button", props: { key: BAND_FOCUS + focus, label,
+                                     onPress: () => input.onOpen?.(focus) },
+            children: [drawn] });
       used += PART_GAP + label.length + 2;
     }
   }
@@ -370,11 +389,19 @@ export function bandTree(input: BandInput): Node {
     const rest = [failing > 0 ? failing + " more failing" : "",
                   waits > 0 ? waits + " more waiting" : ""].filter(Boolean).join(", ");
     const lead = fit(first.text, Math.max(4, room - (rest ? rest.length + 3 : 0)));
-    parts.push(box({ flexDirection: "row", gap: 0, flexShrink: 1 }, [
+    const words: Node[] = [
       text({ color: first.level, bold: true, wrap: "truncate-end" }, lead),
       ...(rest && lead.length + rest.length + 3 <= room
         ? [text({ dimColor: true }, " · " + rest)] : []),
-    ]));
+    ];
+    // What the band leads with is the way into it: a press opens the pane,
+    // where the row it names is drawn with the rest of what it says.
+    parts.push(box({ flexDirection: "row", gap: 0, flexShrink: 1 },
+                   input.onOpen === undefined ? words
+                     : [{ type: "Button",
+                          props: { key: BAND_ITEM + first.key, label: lead,
+                                   onPress: () => input.onOpen?.() },
+                          children: words }]));
   }
   const left = box({ flexDirection: "row", gap: 2, flexShrink: 1 }, parts);
   const row = dismiss

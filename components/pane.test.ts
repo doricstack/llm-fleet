@@ -43,6 +43,61 @@ test("paused progress and trials each draw one paused line without rows", () => 
   }
 });
 
+test("a press on a figure narrows the pane to that state, and the counts stay whole", () => {
+  const reading = snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "blocked" },
+                                     { ...JOB, id: "run", name: "Building the pane",
+                                       state: "working" }],
+              interactive: {}, errors: [], providers: {},
+              sources: { jobs: "ready", interactive: "empty" } },
+    trials: { state: "ready", running: [], history: null, errors: [],
+              recent: [{ key: "k", repo: "example-repo", branch: "fix", change_state: "",
+                         at: NOW - 60, is_green: false, passed: 3, failed: 1,
+                         errors: 0, skipped: 0 }] },
+  });
+  const failed = paneFrom(reading, options({ focus: "failed" }));
+  // The line says why only some rows are drawn, and the press that widens it.
+  assert.equal(failed.focus?.text, "Showing failed only.");
+  assert.equal(failed.focus?.clear.key, "fleet.focus.clear");
+  // The figures still count the whole machine, not the narrowed pane.
+  assert.deepEqual(failed.cards?.map((card) => card.value), ["1", "1", "1"]);
+  assert.deepEqual(failed.groups.map((group) => group.title), ["Trials"]);
+  assert.equal(failed.groups[0]?.rows.every((row) => row.state === "failed"), true);
+  const waiting = paneFrom(reading, options({ focus: "waiting" }));
+  assert.deepEqual(waiting.groups.map((group) => group.title), ["Background sessions"]);
+  assert.deepEqual(waiting.groups[0]?.rows.map((row) => row.title), ["Review adapter behavior"]);
+  // A pane with no filter carries no line and draws every section it did before.
+  assert.equal(paneFrom(reading, options()).focus, undefined);
+});
+
+test("a press on a figure is the control that carries its state", () => {
+  // The figures are drawn only on a roster that answered: a card over an
+  // unread roster is the loudest place to be wrong.
+  const pane = paneFrom(snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "working" }], interactive: {},
+              errors: [], providers: {}, sources: { jobs: "ready", interactive: "empty" } },
+  }), options());
+  assert.deepEqual(pane.cards?.map((card) => card.press?.key),
+                   ["fleet.focus.working", "fleet.focus.waiting", "fleet.focus.failed"]);
+});
+
+test("a row pressed open says so, and carries the press that closes it", () => {
+  const pane = paneFrom(snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "working" }], interactive: {},
+              errors: [], providers: {}, sources: { jobs: "ready", interactive: "empty" } },
+  }), options({ sectionOrder: ["sessions"] }));
+  const row = group(pane, "Background sessions").rows[0];
+  assert.equal(row?.detailsPress?.key.startsWith("fleet.details."), true);
+  assert.equal(row?.expanded, false);
+  assert.equal(row?.details?.some((slot) => slot.text.includes("provider primary")), true);
+  const id = row?.detailsPress?.key.slice("fleet.details.".length) ?? "";
+  const opened = paneFrom(snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "working" }], interactive: {},
+              errors: [], providers: {}, sources: { jobs: "ready", interactive: "empty" } },
+  }), options({ sectionOrder: ["sessions"], details: { [id]: true } }));
+  assert.equal(group(opened, "Background sessions").rows[0]?.expanded, true);
+});
+
 test("every section names the figure its rows end in", () => {
   // The words beside a figure ("42 passed", "merged") say what they are; a
   // verdict, a state and a check count do not, so each section says once what

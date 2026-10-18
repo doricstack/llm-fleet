@@ -185,6 +185,18 @@ export type Row = {
   /** What could not be read or proved about this row. */
   note?: Slot;
   /**
+   * What the row holds in full, drawn under it once the row is opened.
+   *
+   * The two lines at rest are what a person scans; these are what they read
+   * after pressing the row's figures, where the facts live that would make
+   * every row three lines tall if they were always drawn.
+   */
+  details?: Slot[];
+  /** The press that opens the row, drawn on its figures. */
+  detailsPress?: Control;
+  /** Whether the details are drawn now. */
+  expanded?: boolean;
+  /**
    * Checks drawn as dots at the right of the first line, one per check in its
    * state, and how many the reader left out, which are counted beside them.
    */
@@ -321,6 +333,20 @@ export type Group = {
 /** One headline figure of a section. */
 export type Tile = { label: string; value: string; color?: Color };
 
+/**
+ * A headline figure that is also the way into what it counts.
+ *
+ * A figure a person reads and cannot act on leaves them to find the rows
+ * themselves; pressing the card narrows the pane to the items in that state,
+ * which is the thing the number made them want.
+ */
+export type PaneCard = {
+  label: string;
+  value: string;
+  color?: Color;
+  press?: Control;
+};
+
 export type Pane = {
   title: string;
   /**
@@ -331,7 +357,7 @@ export type Pane = {
    * a card: a card is the loudest thing on the pane, and a zero there is the
    * strongest claim it could make.
    */
-  cards?: { label: string; value: string; color?: Color }[];
+  cards?: PaneCard[];
   /** The counts as a line of text, for a caller that draws no cards. */
   counts: Slot[];
   updated: Slot;
@@ -340,6 +366,14 @@ export type Pane = {
   controls?: Control[];
   /** What closes the pane, said beside the controls in the words a person types. */
   hint?: string;
+  /**
+   * The filter a press on a headline figure set, and the press that clears it.
+   *
+   * Drawn under the controls, so a narrowed pane never reads as a small fleet:
+   * the figures at the top still state the whole machine, and this line says
+   * why only some of its rows are under them.
+   */
+  focus?: { text: string; clear: Control };
   /** What happened since the person last looked, when there is anything to say. */
   digest?: Digest | null;
   /**
@@ -623,6 +657,11 @@ export function renderRow(row: Row, width: number, narrowAt: number,
   const rightLine = dots
     ? box({ flexDirection: "row", gap: 1 }, right.length ? [dots.node, line(right)] : [dots.node])
     : line(right.length ? right : [{ text: "" }]);
+  // A row holding more than its two lines says so on its figures: the words a
+  // person already reads for the row's state are the press that opens them.
+  const rightDrawn = row.detailsPress
+    ? control(row.detailsPress, { plain: true, hover: { color: "claude" } }, [rightLine])
+    : rightLine;
   const first = stacked
     ? box({ flexDirection: "row", gap: 1, flexGrow: 1 }, [statusDot(row.state ?? ""), title])
     : box({ flexDirection: "row", justifyContent: "space-between", gap: 1, flexGrow: 1 }, [
@@ -631,7 +670,7 @@ export function renderRow(row: Row, width: number, narrowAt: number,
         title,
         ...(meta.length ? [line(meta, { dimColor: true })] : []),
       ]),
-      rightLine,
+      rightDrawn,
     ]);
   // The second line: the question an item waits on, or its bar and label.
   const room = Math.max(1, inner - 2);
@@ -672,7 +711,7 @@ export function renderRow(row: Row, width: number, narrowAt: number,
   const lines: Node[] = [railed(rail ? rail.first : null, first)];
   if (stacked && (right.length || dots)) {
     lines.push(railed(rail ? rail.rest : null, box({ marginLeft: 2, flexDirection: "row" },
-                                                    [rightLine])));
+                                                    [rightDrawn])));
   }
   if (second) {
     lines.push(railed(rail ? rail.rest : null, box({ marginLeft: 2, flexDirection: "row" },
@@ -695,6 +734,16 @@ export function renderRow(row: Row, width: number, narrowAt: number,
       : line(slots, extraLine.italic ? { italic: true } : {});
     lines.push(railed(rail ? rail.rest : null,
                       box({ marginLeft: 2, flexDirection: "row" }, [content])));
+  }
+  // The row opened: what it holds in full, one dim line each, under the lines
+  // it always draws. Nothing here is hidden behind the pointer, because a press
+  // was the question and these are the answer.
+  if (row.expanded && row.details?.length) {
+    for (const detail of row.details) {
+      lines.push(railed(rail ? rail.rest : null,
+                        box({ marginLeft: 2, flexDirection: "row" },
+                            [line([{ ...detail, text: fit(detail.text, room), dim: true }])])));
+    }
   }
   if (row.field) {
     // The field is the row's last line, under what it answers.
@@ -1360,6 +1409,17 @@ export function renderPane(pane: Pane): Tree {
       ...pane.controls.map((item) => control(item,
         { dimColor: true, ...(item.hotkey ? { plain: true as const } : {}) })),
       ...(hint ? [text({ dimColor: true, italic: true }, hint)] : []),
+    ]));
+  }
+  // A narrowed pane says so, with the press that widens it again: the figures
+  // above still count the whole machine, and a person who forgot the press
+  // would read a filtered list as a quiet fleet.
+  if (pane.focus) {
+    parts.push(box({ flexDirection: "row", gap: 2 }, [
+      text({ dimColor: true }, pane.focus.text),
+      control(pane.focus.clear,
+              { plain: true, dimColor: true, hover: { color: "claude" } },
+              [text({ dimColor: true, italic: true }, pane.focus.clear.label)]),
     ]));
   }
   // What happened while the person was away heads the sections, since it is

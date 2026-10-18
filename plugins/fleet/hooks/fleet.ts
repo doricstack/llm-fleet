@@ -64,9 +64,11 @@ import type { PaneConfig } from "../components/options.ts";
 import type { FleetDigestSeen, FleetFold } from "../types/index.d.ts";
 import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.ts";
 import { recolor, THEME } from "../components/palette.ts";
-import { CLOSE, REPLY_PENDING_SECONDS, replyKey, replyText, SHOW_ALL_PREFIX, TOGGLE_ALL,
+import { CLOSE, DETAILS_PREFIX, FOCUS_CLEAR, FOCUS_PREFIX,
+         REPLY_PENDING_SECONDS, replyKey, replyText, SHOW_ALL_PREFIX, TOGGLE_ALL,
          TOGGLE_PREFIX, unreadableKey,
-         type PaneActions, type PaneOptions, type RepliesPaused } from "../components/pane.ts";
+         type Focus, type PaneActions, type PaneOptions, type RepliesPaused }
+  from "../components/pane.ts";
 import { mask } from "../components/mask.ts";
 import { pendingSources, stepStream } from "../components/stream.ts";
 import { isReading, isRefusal, surfaceTree } from "../components/surface.ts";
@@ -380,6 +382,16 @@ type State = {
   restored: boolean;
   /** Which sections a person pressed to draw in full, by name. */
   shownAll: Fold;
+  /**
+   * The state a press on a headline figure narrowed the pane to.
+   *
+   * It lives for this session and only while it is pressed: the figures at the
+   * top keep counting the whole machine, and the clear control beside them
+   * widens the pane again.
+   */
+  focus: Focus | null;
+  /** The rows a person pressed open, by the key the row carries. */
+  details: Record<string, true>;
   /** Whether the sections this session was left in full have been asked for. */
   shownAllRestored: boolean;
   /** The band items a person dismissed, by key. */
@@ -2898,6 +2910,7 @@ export const register: Register = (on, options) => {
   launch = launchFrom(options);
   const state: State = { held: null, looking: false, readingWhole: false, counting: false, hydrated: false, pressed: {},
                          restored: false, shownAll: {}, shownAllRestored: false,
+                         focus: null, details: {},
                          hidden: [], replied: [], replying: new Set(), cleared: [],
                          paused: null,
                          sessionId: "", sessionIdRead: "", open: false,
@@ -3252,6 +3265,44 @@ export const register: Register = (on, options) => {
                              }
                              return;
                            }
+                           // A press on a headline figure narrows the pane to the
+                           // rows it counted, and the same press widens it again:
+                           // the figure is a toggle a person can see the state of
+                           // in the line under the controls.
+                           if (element === FOCUS_CLEAR) {
+                             if (state.focus !== null) {
+                               state.focus = null;
+                               $.ui.invalidate("ui.render");
+                             }
+                             return;
+                           }
+                           if (element.startsWith(FOCUS_PREFIX)) {
+                             const which = element.slice(FOCUS_PREFIX.length);
+                             const known: Focus[] = ["working", "waiting", "failed"];
+                             const next = known.find((name) => name === which) ?? null;
+                             const wanted = next !== null && next !== state.focus ? next : null;
+                             if (wanted !== state.focus) {
+                               state.focus = wanted;
+                               $.ui.invalidate("ui.render");
+                             }
+                             return;
+                           }
+                           // A press on a row's figures opens the rest of what the
+                           // row knows, and the same press closes it.
+                           if (element.startsWith(DETAILS_PREFIX)) {
+                             const id = element.slice(DETAILS_PREFIX.length);
+                             if (id !== "") {
+                               const open = { ...state.details };
+                               if (open[id] === true) {
+                                 delete open[id];
+                               } else {
+                                 open[id] = true;
+                               }
+                               state.details = open;
+                               $.ui.invalidate("ui.render");
+                             }
+                             return;
+                           }
                            const press = folded(state.pressed, configured, element, names);
                            // What the host holds is the presses, so a press is
                            // written whenever it recorded anything at all, even
@@ -3272,6 +3323,8 @@ export const register: Register = (on, options) => {
                          options: withTipsWord(state, {
                            ...paneOptions(width, now, pane), folded: drawnFolds,
                            shownAll: state.shownAll,
+                           focus: state.focus,
+                           details: state.details,
                            countsAt: state.shownCountsAt,
                            actions: paneActions($, state, e.surface),
                            replied: state.replied,
@@ -3369,6 +3422,16 @@ export const register: Register = (on, options) => {
           // Asked again once the engine has done it, so the word follows the
           // engine's answer rather than the press when the two disagree.
           .then(() => $.ui.invalidate("ui.render"))
+          .catch(() => undefined);
+      },
+      onOpen: (focus?: Focus) => {
+        // The band is read while the pane is shut, so a figure here is the
+        // moment a person wants its rows: open the pane already narrowed to
+        // them, and let the clear control inside widen it.
+        state.focus = focus ?? null;
+        state.open = true;
+        $.ui.invalidate("ui.render");
+        return $.ui.open({ id: PANE, title: `Fleet (${MARK})`, closeOnEscape: true })
           .catch(() => undefined);
       },
       onDismiss: () => {

@@ -11,7 +11,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BAND_DEFAULTS, BAND_DISMISS, BAND_SPEAK, BAND_TOGGLE, bandConfigFrom, bandCounts, bandItems,
+import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_ITEM, BAND_SPEAK, BAND_TOGGLE,
+         bandConfigFrom, bandCounts, bandItems,
          answeredSources, bandTree, fleetLabel, keptHidden,
          isOwnJob, speakLabel } from "../plugins/fleet/components/band.ts";
 import { renderedText } from "../plugins/fleet/components/layout.ts";
@@ -264,6 +265,44 @@ test("the switch is always drawn, and its word says which way a press goes", () 
     assert.equal(nodesIn(tree).some((node) =>
       (node.props as { key?: string }).key === BAND_DISMISS), false);
   }
+});
+
+test("a figure is the press that opens the pane narrowed to what it counted", () => {
+  const opened: (string | undefined)[] = [];
+  const counts = { working: 2, waiting: 1, failed: 1 };
+  const tree = bandTree({ items: [], counts, open: false, width: 120,
+                          onToggle: () => undefined, onDismiss: () => undefined,
+                          onOpen: (focus) => { opened.push(focus); } });
+  const keys = nodesIn(tree).filter((node) => node.type === "Button")
+    .map((node) => (node.props as { key?: string }).key);
+  assert.deepEqual(keys, [BAND_TOGGLE, BAND_FOCUS + "working", BAND_FOCUS + "waiting",
+                          BAND_FOCUS + "failed"]);
+  const failed = nodesIn(tree).find((node) =>
+    (node.props as { key?: string }).key === BAND_FOCUS + "failed");
+  (failed?.props as { onPress?: () => unknown }).onPress?.();
+  assert.deepEqual(opened, ["failed"]);
+  // A figure at zero draws nothing, so there is no press to a state nobody is in.
+  const quiet = bandTree({ items: [], counts: { working: 2, waiting: 0, failed: 0 }, open: false,
+                           width: 120, onToggle: () => undefined, onDismiss: () => undefined,
+                           onOpen: (focus) => { opened.push(focus); } });
+  const quietKeys = nodesIn(quiet).filter((node) => node.type === "Button")
+    .map((node) => (node.props as { key?: string }).key);
+  assert.deepEqual(quietKeys, [BAND_TOGGLE, BAND_FOCUS + "working"]);
+});
+
+test("what the band leads with opens the pane", () => {
+  const items = [{ key: "trial:r:feat/a:TRYING", level: "error" as const,
+                   text: "Trial failed on repo feat/a: 2 failed" }];
+  const opened: (string | undefined)[] = [];
+  const tree = bandTree({ items, counts: { working: 0, waiting: 0, failed: 1 }, open: false,
+                          width: 140, onToggle: () => undefined, onDismiss: () => undefined,
+                          onOpen: (focus) => { opened.push(focus); } });
+  const lead = nodesIn(tree).find((node) =>
+    (node.props as { key?: string }).key === BAND_ITEM + items[0].key);
+  assert.notEqual(lead, undefined);
+  (lead?.props as { onPress?: () => unknown }).onPress?.();
+  // No state was named: the press opens the whole fleet, where the item lives.
+  assert.deepEqual(opened, [undefined]);
 });
 
 test("the band states figures above zero, says when nothing runs, and names a read in flight", () => {

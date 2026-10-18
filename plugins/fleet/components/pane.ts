@@ -210,7 +210,45 @@ export type PaneOptions = {
    * looked before.
    */
   lastSeen?: number | null;
+  /**
+   * The state a press on one of the headline figures narrowed the pane to.
+   *
+   * Absent or null is the whole fleet. A narrowed pane draws the same figures
+   * and the same headings, so the numbers still count everything; only the rows
+   * under them are the ones in that state, and a line says so.
+   */
+  focus?: Focus | null;
+  /** The rows a person pressed open, by the key the row carries. */
+  details?: Record<string, true>;
 };
+
+/** The three states a headline figure narrows the pane to. */
+export type Focus = "working" | "waiting" | "failed";
+
+/** The address of a press on one of the headline figures. */
+export const FOCUS_PREFIX = "fleet.focus.";
+/** The address of the press that widens a narrowed pane again. */
+export const FOCUS_CLEAR = "fleet.focus.clear";
+/** The address of a press that opens the rest of a row. */
+export const DETAILS_PREFIX = "fleet.details.";
+
+/**
+ * Whether a row is one the focused figure counted.
+ *
+ * The words are the states the rows carry: a job works or waits, a pull request
+ * and a trial pass or fail, and a run is running. A figure for working counts
+ * every live state, because a lapse of one word is not a different outcome.
+ */
+export function focusMatches(state: string | undefined, focus: Focus): boolean {
+  if (focus === "failed") {
+    return state === "failed";
+  }
+  if (focus === "waiting") {
+    // A job that waits on a person carries the word its provider uses for it.
+    return state === "waiting" || state === "blocked";
+  }
+  return state === "working" || state === "running" || state === "active";
+}
 
 /** The address a press carries back for a job's attach command. */
 export const JOB_PREFIX = "fleet.job.";
@@ -578,7 +616,25 @@ function jobRow(job: Job, options: PaneOptions): Row {
       : active(job)
         ? [{ text: job.state, color: "success" }]
         : [{ text: job.state, dim: true }];
+  // What a person opens the row for: where it runs, under which provider, for
+  // how long, and the line that puts them in front of it. All of it was read
+  // already; none of it earns a line on a row at rest.
+  const opened: Slot[] = [];
+  if (job.cwd) {
+    opened.push({ text: "folder " + shown(job.cwd).text });
+  }
+  opened.push({ text: "provider " + shown(job.provider).text
+                      + (job.session_id ? " \u00b7 session " + job.session_id : "") });
+  if (job.since !== null && job.since !== undefined) {
+    opened.push({ text: "in this state for " + durationText(options.now - job.since) });
+  }
+  if (job.attach_command) {
+    opened.push({ text: job.attach_command });
+  }
   return {
+    // The row is named across readings, so a press that opens it survives a
+    // filter or a fresh reading rather than landing on another row's place.
+    key: "job:" + job.id,
     title: name.text,
     // The job's own state word, which is what the dot beside the name is for:
     // the slot at the right says the same thing in words for a reader who
@@ -589,6 +645,7 @@ function jobRow(job: Job, options: PaneOptions): Row {
       ? [...slot, { text: " \u00b7 " + MASK, dim: true }]
       : slot,
     detail: question.text || detail.text || undefined,
+    ...(opened.length ? { details: opened } : {}),
   };
 }
 
@@ -970,6 +1027,7 @@ function trialRow(trial: Trial, options: PaneOptions): Row {
   const bad = trial.failed + trial.errors;
   const outcomes = trial.passed + bad;
   return {
+    key: "trial:" + trial.key,
     title: shown(trial.branch).text,
     state: trial.is_green ? "passed" : "failed",
     // The repository is the root above these rows; the row says what changed
@@ -996,6 +1054,13 @@ function trialRow(trial: Trial, options: PaneOptions): Row {
       ? { done: trial.passed, total: outcomes, failed: bad, label: null,
           cells: options.geometry.progressCells }
       : undefined,
+    // The counts in full, the repository the branch belongs to, and when the
+    // trial ran: what a person checking a red row wants before opening the log.
+    details: [
+      { text: outcomes + " outcomes: " + trial.passed + " passed, " + trial.failed
+              + " failed, " + trial.errors + " errors" },
+      { text: "repository " + trial.repo + " · ran " + ageText(options.now - trial.at) + " ago" },
+    ],
   };
 }
 
@@ -1024,6 +1089,7 @@ function pullRequestRow(pull: PullRequest): Row {
   }
   const page = prUrl(pull);
   return {
+    key: "pr:" + pull.repo + "#" + String(pull.number),
     title: (pull.number === null ? "" : "#" + pull.number + " ") + shown(pull.title).text,
     ...(page ? { link: page } : {}),
     state: pull.checks === "pass" ? "passed"
@@ -1039,6 +1105,15 @@ function pullRequestRow(pull: PullRequest): Row {
     // A reading from before checks were listed one by one has no dots to draw.
     ...(runs === undefined ? {}
       : { checks: { states: runs.map((run) => run.state), more: pull.check_runs_more ?? 0 } }),
+    details: [
+      ...(pull.repo ? [{ text: "repository " + pull.repo }] : []),
+      ...(pull.branch ? [{ text: "branch " + pull.branch }] : []),
+      ...(page ? [{ text: page }] : []),
+      ...(runs === undefined ? []
+        : [{ text: runs.length + " check" + (runs.length === 1 ? "" : "s") + " read"
+                  + (failing.length ? ", " + failing.length + " failing" : "")
+                  + (pull.check_runs_more ? ", " + pull.check_runs_more + " not listed" : "") }]),
+    ],
   };
 }
 
@@ -1185,6 +1260,7 @@ function worktreeRow(tree: Worktree, options: PaneOptions): Row {
   // that tone is laid over the finished tree.
   const tone = worktreeToken(options.theme ?? THEME, tree.state);
   return {
+    key: "worktree:" + tree.path,
     title,
     state: tree.state,
     meta,
@@ -1194,6 +1270,17 @@ function worktreeRow(tree: Worktree, options: PaneOptions): Row {
                                 + (byHand === null ? "" : "; " + byHand),
                         color: tone, ...(quiet ? { dim: true } : {}) }] }],
     slot: [{ text: tree.state, color: tone }],
+    // What a person who is about to clean it needs: where it is, which checkout
+    // it belongs to, and the line that removes it. A row the reader could offer
+    // no safe line for stays a row with nothing to press, which is the whole of
+    // what it says.
+    ...(byHand === null ? {
+      details: [
+        { text: "path " + tree.path },
+        ...(tree.project_root ? [{ text: "project root " + tree.project_root }] : []),
+        ...(tree.cleanup_command ? [{ text: tree.cleanup_command }] : []),
+      ],
+    } : {}),
     // A stale row says so, with the age of the read it is carrying. Nothing
     // wrong with it, the hover card carries the project's own root, which is
     // more of a path than a row at rest should spend.
@@ -2048,6 +2135,14 @@ function loadRow(entry: LoadProcess): Row {
       { text: " " + bytes(entry.memory_bytes), width: MEMORY_COLUMN, align: "left" },
     ],
     ...(entry.project_root ? { note: { text: entry.project_root, dim: true } } : {}),
+    // The row is read by a name; the command it was started from is what a
+    // person acts on, and the pid is what a kill or a signal takes.
+    details: [
+      { text: "command " + entry.command },
+      { text: "pid " + entry.pid + " · running " + durationOf(entry.elapsed_seconds * 1000)
+              + " · " + bytes(entry.memory_bytes) },
+      ...(entry.project_root ? [{ text: "project root " + entry.project_root }] : []),
+    ],
   };
 }
 
@@ -2260,6 +2355,40 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   if (warned > 0) {
     groups.unshift(...groups.splice(warned, 1));
   }
+  // A press on a figure narrows the pane to the rows that figure counted. A
+  // section left with nothing to say leaves the pane rather than drawing an
+  // empty card: the filter is a deliberate mode, and a heading over no rows is
+  // a place a person presses and finds nothing.
+  const focus = options.focus ?? null;
+  if (focus !== null) {
+    for (let index = groups.length - 1; index >= 0; index -= 1) {
+      const kept = groups[index]?.rows.filter((row) => focusMatches(row.state, focus)) ?? [];
+      if (groups[index] && kept.length === 0) {
+        groups.splice(index, 1);
+      } else if (groups[index]) {
+        groups[index].rows = kept;
+      }
+    }
+  }
+  // A row that holds more than its two lines gets the press that opens them,
+  // keyed by what names the row across readings, and is drawn open when the
+  // person left it open.
+  const details = options.details ?? {};
+  for (const group of groups) {
+    group.rows = group.rows.map((row, index) => {
+      if (!row.details?.length) {
+        return row;
+      }
+      const id = row.key ?? (group.toggle?.key ?? group.title) + ":" + index;
+      return {
+        ...row,
+        key: row.key ?? id,
+        detailsPress: { key: DETAILS_PREFIX + id, label: "details",
+                        onPress: pressTo(options, DETAILS_PREFIX + id) },
+        expanded: details[id] === true,
+      };
+    });
+  }
   const jobs = snapshot.roster.jobs;
   const workingNow = jobs.filter((job) => working(job) || active(job)).length;
   const waitingNow = jobs.filter(waiting).length;
@@ -2279,13 +2408,22 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   // A reading that failed draws no cards at all: the pane does not have those
   // counts, and a card is the loudest place to be wrong.
   const readable = snapshot.roster.state === "ready";
+  // Each figure is also the way in to what it counted: pressing it narrows the
+  // pane to those rows, and the line under the controls says so and offers the
+  // press that widens it again.
+  const card = (label: string, value: number, tone: "success" | "warning" | "error",
+                which: Focus): { label: string; value: string; color: "success" | "warning"
+                                 | "error" | "subtle"; press: Control } => ({
+    label,
+    value: String(value),
+    color: value > 0 ? tone : "subtle",
+    press: { key: FOCUS_PREFIX + which, label: label,
+             onPress: pressTo(options, FOCUS_PREFIX + which) },
+  });
   const cards = readable
-    ? [{ label: "Working sessions", value: String(workingNow),
-         color: workingNow > 0 ? "success" as const : "subtle" as const },
-       { label: "Waiting on you", value: String(waitingNow),
-         color: waitingNow > 0 ? "warning" as const : "subtle" as const },
-       { label: "Failed outcomes", value: String(failedNow),
-         color: failedNow > 0 ? "error" as const : "subtle" as const }]
+    ? [card("Working sessions", workingNow, "success", "working"),
+       card("Waiting on you", waitingNow, "warning", "waiting"),
+       card("Failed outcomes", failedNow, "error", "failed")]
     : [];
   const unreadable = unreadableSources(snapshot);
   return {
@@ -2316,6 +2454,13 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     // Escape closes the pane as well as its key: the engine opens it with
     // `closeOnEscape`, and a key nobody is told about is a key nobody presses.
     hint: "Esc or " + options.keys.close + " closes this pane",
+    ...(focus === null ? {} : {
+      focus: {
+        text: "Showing " + focus + " only.",
+        clear: { key: FOCUS_CLEAR, label: "Show all",
+                 onPress: pressTo(options, FOCUS_CLEAR) },
+      },
+    }),
     footer: { text: FOOTER_TEXT, dim: true },
     digest: digestFrom(snapshot, options),
     groups,

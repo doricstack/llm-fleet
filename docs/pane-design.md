@@ -11,7 +11,10 @@ measured.
 Every section is a card: a rounded rule the surface draws, with the section's
 name, its fold arrow, and its count on the heading, and its rows held inside.
 The headline figures are a row of cards under the title, each a quiet label over
-a bold value. A row carries a dot in its state's color beside its name, the
+a bold value. Each figure is also a control: a press narrows the pane to the rows
+that figure counted, and a line under the controls says so and carries the press
+that widens it again. The figures keep counting the whole machine while a filter
+is on, so a narrowed pane never reads as a small fleet. A row carries a dot in its state's color beside its name, the
 state word in its right slot, and a rate bar across the card under any item that
 has a total.
 
@@ -243,6 +246,12 @@ that draws vectors, in the slot the cells take, and the terminal keeps the cells
 The layout never asks for an Svg itself. Interaction adapters may use the common
 Button, Input, and Link components around the shared layout without changing its
 structure.
+
+A row that holds more than its two lines says so on its figures: a press there
+opens the rest of what the row knows, in dim lines under it, and the same press
+closes it. The band's figures and the item it leads with are presses too: a
+figure opens the pane narrowed to the state it counted, and the item opens the
+pane where the row it names is drawn.
 
 A row that offers something is pressed on its title. A background job's title
 copies the line that opens it, `CLAUDE_CONFIG_DIR=<home> claude attach <id>`,

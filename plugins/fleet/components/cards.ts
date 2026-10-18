@@ -16,7 +16,7 @@
 import type { Color, Node } from "./host.ts";
 // Type-only, so the cycle with layout.ts is erased rather than evaluated: the
 // layout draws with the pieces here, so the pieces cannot draw with it.
-import type { History, Slot } from "./layout.ts";
+import type { History, PaneCard, Slot } from "./layout.ts";
 import { box, fit, text } from "./layout.ts";
 import { barVector, stripVector } from "./vector.ts";
 
@@ -135,12 +135,18 @@ export function titleChip(state: string): Color | null {
 }
 
 /** One figure: its value on a chip in its own color, and the word for it. */
-function statCell(card: { label: string; value: string; color?: Color },
-                  each: number): Node {
-  return box({ flexDirection: "row", gap: 1 }, [
+function statCell(card: PaneCard, each: number): Node {
+  const cell = box({ flexDirection: "row", gap: 1 }, [
     chip(fit(card.value, 6), card.color ?? "subtle"),
     text({ dimColor: true }, fit(card.label, Math.max(4, each - card.value.length - 3))),
   ]);
+  // A figure that is a way into what it counts is drawn as the control it is:
+  // the whole cell is the press, so a person presses the number they read.
+  return card.press
+    ? { type: "Button", props: { key: card.press.key, label: card.press.label,
+                                 onPress: card.press.onPress, hover: { color: "claude" } },
+        children: [cell] }
+    : cell;
 }
 
 /** The least a label keeps when the figures share one line. */
@@ -201,8 +207,7 @@ function shareWidths(cards: { label: string; value: string }[], width: number): 
  * Too narrow for three side by side, the figures stack rather than shrinking to
  * initials: a pane a third of the width it wants still has figures worth reading.
  */
-export function statStrip(cards: { label: string; value: string; color?: Color }[],
-                          width: number, measured = false): Node {
+export function statStrip(cards: PaneCard[], width: number, measured = false): Node {
   // A caller that measured the figures against its own line already knows they
   // fit there whole, so each label keeps its full length rather than a share.
   if (measured) {

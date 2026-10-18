@@ -990,6 +990,71 @@ test("pressing a section heading folds it, and pressing again opens it", async (
   assert.equal(again.includes("\u25be\nBackground sessions"), true);
 });
 
+/** Every control address a drawn tree carries, in drawing order. */
+function buttonKeys(tree: unknown, found: string[] = []): string[] {
+  if (tree === null || typeof tree !== "object") {
+    return found;
+  }
+  const node = tree as { type?: string; props?: { key?: unknown }; children?: unknown };
+  if (node.type === "Button" && typeof node.props?.key === "string") {
+    found.push(node.props.key);
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      buttonKeys(child, found);
+    }
+  }
+  return found;
+}
+
+test("a press on a headline figure narrows the pane, and its clear control widens it", async () => {
+  const driven = stub();
+  await driven.start();
+  await driven.settle();
+  const all = renderedText(await driven.render() as never).join("\n");
+  assert.equal(all.includes("Showing working only."), false);
+  assert.equal(buttonKeys(await driven.render()).includes("fleet.focus.working"), true);
+  await driven.press("fleet.focus.working");
+  const narrowed = renderedText(await driven.render() as never).join("\n");
+  assert.equal(narrowed.includes("Showing working only."), true);
+  assert.equal(narrowed.includes("Show all"), true);
+  // The row in that state is still drawn, so the press narrowed the pane rather
+  // than blanking it.
+  assert.equal(narrowed.includes("Review adapter behavior"), true);
+  await driven.press("fleet.focus.clear");
+  const wide = renderedText(await driven.render() as never).join("\n");
+  assert.equal(wide.includes("Showing working only."), false);
+  assert.equal(wide.includes("Review adapter behavior"), true);
+});
+
+test("a press on a row's figures opens what the row holds in full, and closes it again", async () => {
+  const driven = stub();
+  await driven.start();
+  await driven.settle();
+  const key = buttonKeys(await driven.render()).find((address) =>
+    address.startsWith("fleet.details."));
+  assert.notEqual(key, undefined);
+  const before = renderedText(await driven.render() as never).join("\n");
+  assert.equal(before.includes("provider one"), false);
+  await driven.press(key as string);
+  const open = renderedText(await driven.render() as never).join("\n");
+  assert.equal(open.includes("provider one"), true);
+  await driven.press(key as string);
+  const shut = renderedText(await driven.render() as never).join("\n");
+  assert.equal(shut.includes("provider one"), false);
+});
+
+test("a press on the band's figure opens the pane narrowed to it", async () => {
+  const driven = stub();
+  await driven.start();
+  await driven.settle();
+  await driven.band();
+  await driven.pressBand("fleet.band.focus.working");
+  assert.deepEqual(driven.calls.opened, [PANE]);
+  const words = renderedText(await driven.render() as never).join("\n");
+  assert.equal(words.includes("Showing working only."), true);
+});
+
 test("the controls that act on every section fold them all, and open them all", async () => {
   const driven = stub();
   await driven.start();

@@ -26,6 +26,14 @@ Answer `y` to add the marketplace, then pick a scope. The one-step install needs
 
 `/fleet doctor` tells you what the pane is missing and the setting that fixes each thing: the interpreter, where the configuration was read from, each home and source with its state, and the commands the readers start. `/fleet` opens the pane, and running it again closes it.
 
+## Using the pane
+
+- The figures at the top are controls. Press **Working sessions**, **Waiting on you** or **Failed outcomes** to narrow the pane to those rows; a line under the controls says what is shown, with **Show all** to widen it again.
+- A row that holds more than its two lines says so on its figures: press them to open the rest (path, provider, cleanup line, check list), and press again to close it.
+- A section heading folds it, and the keys section lists every binding the pane draws.
+- On the band above the prompt, the figures open the pane narrowed to their state, and the item the band leads with opens the pane where its row lives.
+- What a row offers is copied or opened from its title: a job's attach line, a worktree's cleanup line, a pull request's page, a skill report command.
+
 ## Commands
 
 - `/fleet` opens or closes the pane, and `/fleet close` only closes it.
@@ -43,7 +51,7 @@ Three options live in `/config` under the plugin, because they are needed before
 - **Configuration file**: a full path to your configuration when it is not in the default place.
 - **Desktop notifications**: on by default; adds a desktop notification to the in-session toast.
 
-Everything else is in the configuration file. Sessions, background jobs, agent cards and this session's own cost, context and limits are on from the start. Pull requests, worktrees, trials, progress, skill scans and a recorded statusline payload are sources you switch on, and the doctor names the key each one needs. Speech is off until you set `speech.enabled` and a speech command. A key the schema does not know is refused by name rather than ignored. The full list of settings, with defaults, is in [the configuration reference](https://github.com/doricstack/llm-fleet/blob/main/docs/configuration.md).
+Everything else is in the configuration file. Each section can be shown or hidden (`pane.sections.<name>.visible`), folded at the start (`collapsed`), and capped at a row count (`maxRows`), and the order is the one you set. Sessions, background jobs, agent cards and this session's own cost, context and limits are on from the start. Pull requests, worktrees, trials, progress, skill scans and a recorded statusline payload are sources you switch on, and the doctor names the key each one needs. Speech is off until you set `speech.enabled` and a speech command. A key the schema does not know is refused by name rather than ignored. The full list of settings, with defaults, is in [the configuration reference](https://github.com/doricstack/llm-fleet/blob/main/docs/configuration.md).
 
 ## What it reads
 
