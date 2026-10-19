@@ -51,6 +51,11 @@ WHERE m.moved_at >= ?
 ORDER BY m.moved_at DESC
 """
 
+# The states the controller uses for a change a person closed. The configured
+# path names its own last stage, so only the closed states it does not name are
+# listed here; anything else not on the path stays visible.
+CLOSED_STATES = ("ABANDONED",)
+
 LEASE_SESSIONS = """
 SELECT l.session, p.remote_url, c.branch, c.worktree_path
 FROM leases l JOIN changes c USING(change_id) JOIN repos p USING(repo_id)
@@ -289,7 +294,12 @@ def _changes(path: Path, timeout: float, clock: float, window: float, stages: li
     changes: list[dict[str, Any]] = []
     for url, branch, state, moved_at, holder in rows:
         state_name = printable(state)
-        if state_name == stages[-1]:
+        # The last stage is the configured path's own word for finished, and an
+        # abandoned change is one a person closed deliberately. Neither is
+        # moving through the controller, so neither is counted as in flight. A
+        # state the path does not name keeps its row: a controller that added a
+        # stage keeps its work visible in this pane until the path names it.
+        if state_name == stages[-1] or state_name in CLOSED_STATES:
             continue
         place = stages.index(state_name) + 1 if state_name in stages else None
         changes.append({"repo": repository_name(url), "branch": printable(branch),

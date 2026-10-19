@@ -326,6 +326,13 @@ class ChangeTests(StoreCase):
         self.moved(4, NOW - 43200 - 1)
         self.assertEqual(trials.read_trials(self.config(), now=NOW)["changes"], [])
 
+    def test_an_abandoned_change_is_history_and_not_in_flight(self):
+        # The section counts "in flight". A change the person closed deliberately
+        # is not moving through the controller any more, and a count that adds it
+        # to the ones still moving claims work that nobody is doing.
+        self.moved(1, NOW - 60, "ABANDONED")
+        self.assertEqual(trials.read_trials(self.config(), now=NOW)["changes"], [])
+
     def test_a_state_the_path_does_not_name_keeps_its_row_without_a_place(self):
         self.moved(1, NOW - 60)  # TRYING is not on the default path
         change = trials.read_trials(self.config(), now=NOW)["changes"][0]
