@@ -75,24 +75,53 @@ The pane draws in the terminal, the Claude desktop app and the VS Code extension
 
 ## What it sends, and what it runs
 
-The plugin makes no network request of its own. Every fact in the pane is read on this machine and printed to it, and the only messages it sends are `$.session.send` notes to the other Claude sessions on the same machine, which carry a job identifier and a short line such as a speech reply. The one reader that reaches out is the pull-request one, through the `gh` command and your own GitHub login; leave that source off and no pull-request query is made. A custom section runs whatever command you give it, so a command that reaches the network does so because you configured it. It reads the conversation only through the transcripts and events the host hands it, and it never changes one.
+Nothing leaves your machine through the plugin. It makes no network request of its own, holds no key, and reads no credential to send anywhere. Every fact in the pane is read on this machine and drawn on it. A desktop notification (`$.ui.notify`) is shown by Claude Code on this machine and goes nowhere else, and the only messages it sends are `$.session.send` notes to the other Claude sessions on the same machine, each holding a job identifier and a short line such as a speech reply. It reads the conversation only through the transcripts and events the host hands it, never sends that text anywhere, and never changes it.
 
-Every hook it registers either answers its own command or drawing and returns, or passes the event on unchanged with `next(event)`. It registers no permission event and never decides whether a tool call may run; that stays with you and your settings. Its `command.run` hooks are matched to the commands it registers itself, so no other command's answer passes through it.
+Two things reach the network, and only because you turn them on: the pull-request source asks GitHub through your own `gh` login, and a custom section runs whatever command you give it. The one web address in the pane is a pull request's page on github.com, opened only when you press its row.
 
-The hooks, and what each does:
+### The hooks, and what each decides
 
-- `session.start` registers the four commands and reads this session's identity.
-- `command.run` answers `/llm-fleet`, `/speak`, `/worktrees` and `/keys`, and nothing else.
-- `ui.render` draws the pane, the band above the prompt and the tip under it.
-- `ui.close` records that this pane shut and, for Escape, the digest it showed as seen.
-- `prompt.submit` hands the prompt on unchanged; it never edits or drops one.
-- `session.end` stops the timers this session started.
+Every hook either answers its own command or drawing and returns, or passes the event on unchanged with `next(event)`. It registers no permission event and never decides whether a tool call may run; that stays with you and your settings. Its `command.run` hooks are matched to the four commands it registers, so no other command passes through it.
 
-It reads no credential and stores none. The environment it reads is terminal identity only: `TERM_PROGRAM`, `TMUX`, `ITERM_SESSION_ID` and `LC_TERMINAL`. Every mods API call it makes is part of Claude Code's own surface; it adds no namespace and calls no method another plugin adds.
+| Hook | What it does |
+| --- | --- |
+| `session.start` | Registers `/llm-fleet`, `/speak`, `/worktrees` and `/keys`, and reads this session's identity. |
+| `command.run` | Answers those four commands and nothing else. |
+| `ui.render` | Draws the pane, the band above the prompt and the key tip under it. |
+| `ui.close` | Records that the pane shut and, for Escape, marks the digest it showed as seen. |
+| `prompt.submit` | Records this session as the one you are typing in, so alerts reach you here, and lands any write a paint left waiting. It hands the prompt on unchanged and never reads, edits or drops its text. |
+| `session.end` | Stops the timers this session started. |
 
-It runs two kinds of program. The first are its own Python entries, started through the interpreter you set in the plugin's options: `readers/read.py` for the reading, and the doctor and setup commands. The second are the commands your configuration or the pane's fixed set name, listed above. Both kinds run as your user, with no credentials of their own: the plugin's options hold no key, and the outside commands the readers start get the provider variables stripped, as above.
+### The programs it runs, and why
 
-The paint recolors the element tree it was given by walking that tree's props and rewriting the color values in it (`components/palette.ts`). It reads nothing else and draws nothing new.
+Every program runs as your user, from the list below, with its arguments built by the plugin and never through a shell.
+
+| Program | Why |
+| --- | --- |
+| Your Python interpreter (the plugin option, `python3` by default) on the plugin's own scripts: `readers/snapshot.py`, `readers/alerts.py`, `readers/tab.py`, `readers/doctor.py`, `readers/setup.py` and `readers/governance.py` | The reading behind the pane, alerts and speech, the terminal tab's color, the two first-run commands, and the governance switch. The statusline scripts (`readers/host.py`, `readers/session.py`, `readers/transcript.py`) run only when your statusline starts them. |
+| `tmux show-options -gqv allow-passthrough` and `tmux display-message -p #{client_tty}` | Inside tmux only: whether the tab can be colored, and which terminal to color. |
+| `claude` | The session roster. |
+| `ps` | The machine's load, and which terminal a session runs in. |
+| `git` and `lsof` | A worktree's branch and state, and which process holds it, when the worktrees source is on. |
+| `gh` | Pull requests, when that source is on. |
+| Commands your configuration names | The speech command, your custom sections, the governance switch, and the cleanup, skill report and process-list commands. None runs until you configure it. |
+
+The outside commands run with your Anthropic variables and the common provider API key variables removed from their environment, and the configuration can add to that list but never shorten it.
+
+### The files it writes
+
+- The starter configuration, once, from `/llm-fleet setup`, and never over a file already there.
+- Small records under its state directory (`$XDG_STATE_HOME/llm-fleet`, `%LOCALAPPDATA%\llm-fleet` or `~/.local/state/llm-fleet`): which alert was claimed, which reply was sent, whose turn the voice is, and each terminal tab's color.
+- Speech clips in the system temporary folder while speech is on, each removed once played.
+- Your folds, focus and speech choice, in Claude Code's own plugin store.
+
+### The environment it reads
+
+The hooks module reads terminal identity only: `TERM_PROGRAM`, `TMUX`, `ITERM_SESSION_ID` and `LC_TERMINAL`. The Python scripts read `FLEET_CONFIG`, `HOME`, `USERPROFILE`, `CLAUDE_CONFIG_DIR`, `PATH`, `TMPDIR` and the XDG and Windows folder variables to find your configuration, homes and commands, and hand the rest of the environment, minus the removed variables above, to the commands they start. None of it is sent anywhere.
+
+### Calls from Claude Code
+
+Every mods API call it makes is part of Claude Code's own surface, `$.ui.notify` included; it adds no namespace and calls no method another plugin adds. The paint recolors the element tree it was handed by walking that tree's props and rewriting the color values in it (`components/palette.ts`); it reads nothing else and draws nothing new.
 
 ## License
 

@@ -133,6 +133,7 @@ tests/paths.py
 tests/sandbox.py
 tests/test_sandbox.py
 tests/test_plugin_contract.py
+tests/test_directory_rules.py
 tests/test_readers.py
 tests/test_reader_trials.py
 tests/test_reader_governance.py

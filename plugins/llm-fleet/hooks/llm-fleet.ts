@@ -890,9 +890,9 @@ function streamed($: Engine, state: State,
   state.streamQueue = pending;
   state.streamTimer = $.clock.every(state.alerts.streamStepMs, () => {
     const now = state.held !== null && !("reason" in state.held) ? state.held : null;
-    const next = state.streamQueue.shift();
-    if (now !== null && !state.ended && next !== undefined) {
-      landStep(state, now, next);
+    const queued = state.streamQueue.shift();
+    if (now !== null && !state.ended && queued !== undefined) {
+      landStep(state, now, queued);
     }
     // What changed again while the line was landing is the next line.
     if (now !== null && !state.ended && state.streamQueue.length === 0) {
@@ -1423,14 +1423,14 @@ function folded(pressed: Fold, configured: Fold, element: string,
     // under a session, and a control that replaced the whole map would drop the
     // fold of a section that is merely out of sight for now, so it came back
     // wherever its configuration started it rather than where it was left.
-    const next = { ...pressed,
+    const merged = { ...pressed,
                    ...Object.fromEntries(names.map((name) => [name, to])) };
     // The press is recorded even when every section already draws that way, so
     // the person's last action stands if a later configuration disagrees. Only
     // the redraw is skipped: a pane redrawn for a press that changed nothing is
     // redrawn for nothing.
     const already = names.every((name) => (drawn[name] ?? false) === to);
-    return { pressed: next, changed: !already, named: names };
+    return { pressed: merged, changed: !already, named: names };
   }
   return { pressed, changed: false, named: [] };
 }
@@ -1786,11 +1786,11 @@ function restoreSeen($: Engine, state: State): void {
     $.store.get(SEEN_KEY).then(seenFrom, () => null),
   ]).then(([own, shared]) => {
     const looks = [state.lastSeen ?? null, own, shared].filter((at): at is number => at !== null);
-    const next = looks.length ? Math.max(...looks) : null;
-    if (next === state.lastSeen) {
+    const latest = looks.length ? Math.max(...looks) : null;
+    if (latest === state.lastSeen) {
       return;
     }
-    state.lastSeen = next;
+    state.lastSeen = latest;
     // Only a reading that carries events draws a digest, so only then can the
     // look change what is on the pane.
     const documents = state.held !== null && "documents" in state.held
@@ -2355,17 +2355,17 @@ function heldGovernance(state: State): Governance | null {
  */
 async function moveGovernance($: Engine, state: State, scope: "governor" | "controller") {
   const governance = heldGovernance(state);
-  const on = scope === "governor" ? governance?.governor : governance?.controller;
-  if (on === null || on === undefined) {
+  const isOn = scope === "governor" ? governance?.governor : governance?.controller;
+  if (isOn === null || isOn === undefined) {
     return;
   }
-  if (on && state.confirmingGovernance !== scope) {
+  if (isOn && state.confirmingGovernance !== scope) {
     state.confirmingGovernance = scope;
     $.ui.invalidate("ui.render");
     return;
   }
   state.confirmingGovernance = null;
-  await switchGovernance($, state, scope, !on);
+  await switchGovernance($, state, scope, !isOn);
 }
 
 /** Move both scopes from the band's one press. */
@@ -2388,8 +2388,8 @@ async function moveGovernanceBoth($: Engine, state: State) {
  * printed document is part of what decides whether the switch moved.
  */
 async function switchGovernance($: Engine, state: State, scope: "governor" | "controller" | "both",
-                                on: boolean) {
-  const args = ["--set", scope, on ? "--on" : "--off"];
+                                turnOn: boolean) {
+  const args = ["--set", scope, turnOn ? "--on" : "--off"];
   let run: Awaited<ReturnType<typeof runEntry>>;
   try {
     run = await runEntry($, "governance", args, ASK_MS);
@@ -2718,28 +2718,28 @@ async function raise($: Engine, state: State, documents: ReaderDocuments, at: nu
   }
   const { fresh, seen } = newEvents(state.seen, snapshotFrom(documents, at), state.sessionId);
   state.seen = seen;
-  for (const event of fresh) {
-    await alert($, state, event).catch(() => undefined);
+  for (const fired of fresh) {
+    await alert($, state, fired).catch(() => undefined);
   }
 }
 
-async function alert($: Engine, state: State, event: FleetEvent) {
+async function alert($: Engine, state: State, fired: FleetEvent) {
   const config = state.alerts;
   // A toast belongs in the session the person is typing in, not every one open.
   if (config.toast && (await helper($, ["focused", state.sessionId])).exitCode === 0) {
-    void say($, "fleet: " + event.text, config.toastMs).catch(() => undefined);
+    void say($, "fleet: " + fired.text, config.toastMs).catch(() => undefined);
   }
   if (!config.notify || !state.notify) {
     return;
   }
-  if ((await helper($, ["claim", event.key])).exitCode !== 0) {
+  if ((await helper($, ["claim", fired.key])).exitCode !== 0) {
     return;
   }
-  await $.ui.notify(mask(event.text).text, { title: "llm-fleet" }).catch(() => undefined);
+  await $.ui.notify(mask(fired.text).text, { title: "llm-fleet" }).catch(() => undefined);
   // Said aloud by the one session that took the claim, so the machine says it
   // once. Not awaited: a voice that is slow must not hold up the next alert.
-  if (event.spoken !== undefined) {
-    const spoken = event.spoken;
+  if (fired.spoken !== undefined) {
+    const spoken = fired.spoken;
     void voiced($, state).then((setting) => setting?.isOn ? speak($, state, spoken, setting) : null)
       .catch(() => undefined);
   }
@@ -3021,10 +3021,10 @@ function sectionOfKey(key: string): string | null {
  * Every surface that docks a pane places it by width, the desktop app included,
  * so the reason is always room: a wider window, whatever draws it.
  */
-export function notPlaced(on?: string): string {
-  return on === undefined
+export function notPlaced(section?: string): string {
+  return section === undefined
     ? `llm-fleet pane opens once this window is wider (${MARK}).`
-    : `llm-fleet opens its ${on} section once this window is wider (${MARK}).`;
+    : `llm-fleet opens its ${section} section once this window is wider (${MARK}).`;
 }
 
 async function openOn($: Engine, state: State, section: string): Promise<{ text: string }> {
@@ -3558,8 +3558,8 @@ export const register: Register = (on, options) => {
                            if (element.startsWith(FOCUS_PREFIX)) {
                              const which = element.slice(FOCUS_PREFIX.length);
                              const known: Focus[] = ["working", "waiting", "failed"];
-                             const next = known.find((name) => name === which) ?? null;
-                             const wanted = next !== null && next !== state.focus ? next : null;
+                             const chosen = known.find((name) => name === which) ?? null;
+                             const wanted = chosen !== null && chosen !== state.focus ? chosen : null;
                              if (wanted !== state.focus) {
                                state.focus = wanted;
                                $.ui.invalidate("ui.render");

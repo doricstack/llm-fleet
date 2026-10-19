@@ -114,9 +114,10 @@ function isNode(value: unknown): value is Node {
 /**
  * One props object with every color it holds swapped.
  *
- * A color is a prop named `color` or ending in `Color`; a nested plain object,
- * the hover props, is walked the same way. A function, the press a control
- * carries, is kept as it is, and so is every other value.
+ * A color is a prop named `color` or ending in `Color`; a nested object, the
+ * hover props, is walked the same way. A tree's props are plain data, so no
+ * object in them needs its kind read before it is walked. A function, the press
+ * a control carries, is kept as it is, and so is every other value.
  */
 function swapProps(props: Record<string, unknown>, swap: Map<Color, Color>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -125,8 +126,7 @@ function swapProps(props: Record<string, unknown>, swap: Map<Color, Color>): Rec
       out[key] = swap.get(value as Color) ?? value;
     } else if (key === "children" && Array.isArray(value)) {
       out[key] = value.map((child) => (isNode(child) ? swapNode(child, swap) : child));
-    } else if (typeof value === "object" && value !== null && !Array.isArray(value)
-               && Object.getPrototypeOf(value) === Object.prototype) {
+    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       out[key] = swapProps(value as Record<string, unknown>, swap);
     } else {
       out[key] = value;
