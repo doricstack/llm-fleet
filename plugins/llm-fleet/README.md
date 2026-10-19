@@ -123,6 +123,10 @@ The hooks module reads terminal identity only: `TERM_PROGRAM`, `TMUX`, `ITERM_SE
 
 Every mods API call it makes is part of Claude Code's own surface, `$.ui.notify` included; it adds no namespace and calls no method another plugin adds. The paint recolors the element tree it was handed by walking that tree's props and rewriting the color values in it (`components/palette.ts`); it reads nothing else and draws nothing new.
 
+## Privacy
+
+The plugin collects nothing about you and sends nothing to Doric Stack: everything it reads stays on your machine, as the sections above set out. Doric Stack's [Privacy Policy](https://doricstack.com/privacy) covers the company's own site and support requests.
+
 ## License
 
 MIT.

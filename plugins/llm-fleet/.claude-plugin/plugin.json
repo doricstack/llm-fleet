@@ -1,6 +1,6 @@
 {
   "name": "llm-fleet",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "description": "Every Claude Code session, background job and open pull request on this machine in one live pane, with alerts when one fails or waits for you.",
   "types": "./types/index.d.ts",
   "license": "MIT",
@@ -9,6 +9,9 @@
   },
   "homepage": "https://github.com/doricstack/llm-fleet",
   "repository": "https://github.com/doricstack/llm-fleet",
+  "documentationUrl": "https://github.com/doricstack/llm-fleet/blob/main/plugins/llm-fleet/README.md",
+  "supportUrl": "https://github.com/doricstack/llm-fleet/issues",
+  "privacyPolicyUrl": "https://doricstack.com/privacy",
   "userConfig": {
     "python": {
       "type": "string",

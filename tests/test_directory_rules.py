@@ -14,6 +14,7 @@ answered, so it names each script the plugin starts and each fixed program the
 readers run; a script added to the entry table without a line there fails here.
 """
 
+import json
 from pathlib import Path
 import re
 import unittest
@@ -34,6 +35,7 @@ SIGNATURE = re.compile(r"\bfunction\s*[\w$]*\s*\((?P<params>[^)]*)\)")
 ARROW = re.compile(r"\((?P<params>[^()]*)\)\s*(?::\s*[^=]+)?=>")
 ENTRY = re.compile(r"^\s+\w+:\s*\"(?P<path>readers/\w+\.py)\",$", re.MULTILINE)
 FIXED_PROGRAMS = ("claude", "ps", "git", "lsof", "gh", "tmux")
+PRIVACY_URL = "https://doricstack.com/privacy"
 
 
 def code_only(text: str) -> str:
@@ -155,6 +157,18 @@ class FleetDirectoryRules(unittest.TestCase):
 
     def test_the_readme_says_nothing_leaves_the_machine(self):
         self.assertIn("Nothing leaves your machine through the plugin.", README.read_text(encoding="utf-8"))
+
+    def test_the_listing_links_are_https_pages(self):
+        # The submit form warns without a privacy policy, and the listing reads
+        # these three from the manifest alone.
+        manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        for key in ("privacyPolicyUrl", "documentationUrl", "supportUrl"):
+            self.assertRegex(manifest.get(key, ""), r"^https://[^\s]+$", key)
+        self.assertEqual(manifest["privacyPolicyUrl"], PRIVACY_URL)
+
+    def test_the_readme_links_the_privacy_policy(self):
+        readme = README.read_text(encoding="utf-8")
+        self.assertRegex(readme, r"\[[^\]]*Privacy[^\]]*\]\(" + re.escape(PRIVACY_URL) + r"\)")
 
     def test_no_module_reads_an_object_kind_by_reflection(self):
         found = []
