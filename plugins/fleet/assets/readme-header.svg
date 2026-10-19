@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="420" viewBox="0 0 1600 420" fill="none" role="img" aria-label="llm-fleet brand header">
+  <defs>
+    <style>
+      .word { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-weight: 760; letter-spacing: -0.045em; }
+      .caption { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-weight: 450; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="420" rx="30" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="2"/>
+
+  <g transform="translate(140,84) scale(1.95)">
+    <g transform="translate(14,14)">
+      <g fill="#0B0911">
+        <rect x="12" y="12" width="76" height="16" rx="8"/>
+        <path d="M20 42H64L78 56L67 67L58 58H20A8 8 0 0 1 20 42Z"/>
+        <rect x="12" y="72" width="40" height="16" rx="8"/>
+      </g>
+      <circle cx="80" cy="64" r="10" fill="#476416"/>
+    </g>
+  </g>
+
+  <text x="440" y="186" class="word" font-size="96" fill="#0B0911">llm-fleet</text>
+  <text x="446" y="244" class="caption" font-size="34" fill="#476416">Know what needs you.</text>
+  <text x="446" y="300" class="caption" font-size="26" fill="#6B6559">Every session  -  Every background job  -  Every open pull request</text>
+
+  <g>
+    <rect x="1268" y="104" width="250" height="16" rx="8" fill="#EDE9DF"/>
+    <rect x="1268" y="150" width="180" height="16" rx="8" fill="#EDE9DF"/>
+    <rect x="1268" y="196" width="272" height="16" rx="8" fill="#C4F06A"/>
+    <rect x="1268" y="242" width="150" height="16" rx="8" fill="#EDE9DF"/>
+    <rect x="1268" y="288" width="215" height="16" rx="8" fill="#EDE9DF"/>
+    <circle cx="1556" cy="204" r="9" fill="#0B0911"/>
+  </g>
+</svg>

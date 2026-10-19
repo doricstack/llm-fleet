@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820" fill="none" role="img" aria-label="The llm-fleet pane, drawn from a sample machine">
+  <defs>
+    <style>
+      .mono { font-family: JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace; font-size: 16px; }
+      .head { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; font-weight: 650; font-size: 17px; }
+      .small { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; font-weight: 450; font-size: 14px; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="820" rx="26" fill="#0B0911" stroke="#2A2633" stroke-width="2"/>
+
+  <text x="56" y="60" class="head" fill="#F5F1E8">Fleet</text>
+  <text x="1144" y="60" class="small" fill="#8A8578" text-anchor="end">Updated 2s ago</text>
+
+  <text x="56" y="108" class="mono" fill="#C4F06A">Working sessions 4</text>
+  <text x="300" y="108" class="mono" fill="#E8B24A">Waiting on you 2</text>
+  <text x="536" y="108" class="mono" fill="#E2685C">Failed outcomes 1</text>
+  <line x1="56" y1="132" x2="1144" y2="132" stroke="#2A2633" stroke-width="1"/>
+
+  <text x="56" y="176" class="mono" fill="#F5F1E8">Sessions</text>
+  <text x="1144" y="176" class="small" fill="#8A8578" text-anchor="end">4 rows</text>
+  <text x="1144" y="200" class="small" fill="#8A8578" text-anchor="end">model   step   context   cost</text>
+
+  <circle cx="66" cy="230" r="5" fill="#C4F06A"/>
+  <text x="86" y="236" class="mono" fill="#F5F1E8">api migrations</text>
+  <text x="560" y="236" class="mono" fill="#C4F06A">working</text>
+  <text x="720" y="236" class="mono" fill="#B9B3A6">opus</text>
+  <text x="860" y="236" class="mono" fill="#B9B3A6">step 12</text>
+  <text x="1000" y="236" class="mono" fill="#B9B3A6">48%</text>
+  <text x="1144" y="236" class="mono" fill="#F5F1E8" text-anchor="end">$1.24</text>
+
+  <circle cx="66" cy="272" r="5" fill="#C4F06A"/>
+  <text x="86" y="278" class="mono" fill="#F5F1E8">docs refresh</text>
+  <text x="560" y="278" class="mono" fill="#C4F06A">working</text>
+  <text x="720" y="278" class="mono" fill="#B9B3A6">haiku</text>
+  <text x="860" y="278" class="mono" fill="#B9B3A6">step 3</text>
+  <text x="1000" y="278" class="mono" fill="#B9B3A6">21%</text>
+  <text x="1144" y="278" class="mono" fill="#F5F1E8" text-anchor="end">$0.18</text>
+
+  <circle cx="66" cy="314" r="5" fill="#E8B24A"/>
+  <text x="86" y="320" class="mono" fill="#F5F1E8">webhook retry</text>
+  <text x="560" y="320" class="mono" fill="#E8B24A">waiting on you</text>
+  <text x="720" y="320" class="mono" fill="#B9B3A6">sonnet</text>
+  <text x="860" y="320" class="mono" fill="#B9B3A6">step 7</text>
+  <text x="1000" y="320" class="mono" fill="#B9B3A6">62%</text>
+  <text x="1144" y="320" class="mono" fill="#F5F1E8" text-anchor="end">$0.86</text>
+
+  <circle cx="66" cy="356" r="5" fill="#C4F06A"/>
+  <text x="86" y="362" class="mono" fill="#F5F1E8">billing tests</text>
+  <text x="560" y="362" class="mono" fill="#C4F06A">working</text>
+  <text x="720" y="362" class="mono" fill="#B9B3A6">haiku</text>
+  <text x="860" y="362" class="mono" fill="#B9B3A6">step 1</text>
+  <text x="1000" y="362" class="mono" fill="#B9B3A6">12%</text>
+  <text x="1144" y="362" class="mono" fill="#F5F1E8" text-anchor="end">$0.04</text>
+
+  <line x1="56" y1="392" x2="1144" y2="392" stroke="#2A2633" stroke-width="1"/>
+
+  <text x="56" y="436" class="mono" fill="#F5F1E8">Background jobs</text>
+  <text x="1144" y="436" class="small" fill="#8A8578" text-anchor="end">3 rows</text>
+
+  <rect x="58" y="458" width="14" height="14" rx="3" fill="#C4F06A"/>
+  <text x="86" y="472" class="mono" fill="#F5F1E8">nightly-export</text>
+  <text x="560" y="472" class="mono" fill="#C4F06A">finished</text>
+  <text x="1144" y="472" class="mono" fill="#8A8578" text-anchor="end">6m ago   pid 41288</text>
+
+  <rect x="58" y="500" width="14" height="14" rx="3" fill="#E8B24A"/>
+  <text x="86" y="514" class="mono" fill="#F5F1E8">record-fixtures</text>
+  <text x="560" y="514" class="mono" fill="#E8B24A">waiting on you</text>
+  <text x="1144" y="514" class="mono" fill="#8A8578" text-anchor="end">2m ago   pid 41302</text>
+
+  <rect x="58" y="542" width="14" height="14" rx="3" fill="#E2685C"/>
+  <text x="86" y="556" class="mono" fill="#F5F1E8">seed-fixtures</text>
+  <text x="560" y="556" class="mono" fill="#E2685C">failed  exit 2</text>
+  <text x="1144" y="556" class="mono" fill="#8A8578" text-anchor="end">18m ago   pid 40977</text>
+
+  <line x1="56" y1="586" x2="1144" y2="586" stroke="#2A2633" stroke-width="1"/>
+
+  <text x="56" y="630" class="mono" fill="#F5F1E8">Pull requests</text>
+  <text x="1144" y="630" class="small" fill="#8A8578" text-anchor="end">8 open</text>
+
+  <circle cx="66" cy="662" r="5" fill="#E8B24A"/>
+  <text x="86" y="668" class="mono" fill="#F5F1E8">#128  Add a retry budget to the webhook sender</text>
+  <text x="1144" y="668" class="mono" fill="#B9B3A6" text-anchor="end">checks 5 of 6</text>
+
+  <circle cx="66" cy="704" r="5" fill="#C4F06A"/>
+  <text x="86" y="710" class="mono" fill="#F5F1E8">#131  Split the reader timeout from the job timeout</text>
+  <text x="1144" y="710" class="mono" fill="#B9B3A6" text-anchor="end">checks 6 of 6</text>
+
+  <line x1="56" y1="742" x2="1144" y2="742" stroke="#2A2633" stroke-width="1"/>
+  <text x="56" y="784" class="small" fill="#8A8578">llm-fleet 0.4.2 | Doric Stack | MIT</text>
+</svg>

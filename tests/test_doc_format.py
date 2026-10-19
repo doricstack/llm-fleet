@@ -45,6 +45,22 @@ class DocFormatTests(unittest.TestCase):
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_a_bitmap_is_not_read_as_source(self):
+        # A PNG's bytes are not text. Read as UTF-8 they turn into the very
+        # punctuation this rule bans, so an image beside the source would fail a
+        # check that has nothing to say about it.
+        raw = bytes((0x89, 0x50, 0x4E, 0x47, 0x96, 0x80, 0xE2, 0x80, 0x8B))
+        path = self.root / "logo.png"
+        path.write_bytes(raw)
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("logo.png", result.stderr)
+
+    def test_a_bitmap_beside_a_source_file_does_not_mask_it(self):
+        (self.root / "logo.png").write_bytes(bytes((0x96, 0x80)))
+        self.write("notes.md", "a value with a hidden " + chr(0x200B) + "character\n")
+        self.assert_rejected("FMT-2 invisible character", "notes.md")
+
     def assert_rejected(self, rule, path):
         result = self.check()
         self.assertEqual(result.returncode, 1, result.stderr)

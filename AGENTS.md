@@ -43,6 +43,8 @@
 | `personal/` | The owner's own configuration, linked from the default config path; private, refused by the export | Present |
 | `scripts/typescript-suite.py` | Node runtime check and TypeScript suite runner, writing a JUnit report into the folder a gate names | Present |
 | `scripts/host-drift.py` | Check the declared primitive subset against the engine's declaration | Present |
+| `scripts/host-update.py` | Check every Claude home's installed copy against this tree's version and repair it through the host's own update; a home the tree never installed is absent, not stale | Present |
+| `tests/test_host_update.py` | Install-check contract: a stale home is refused with both versions, a repair is proved by reading the record again, and a repair that changes nothing fails | Present |
 | `scripts/render-review.py` | Read the machine and write a pane review page | Present |
 | `scripts/mutation-check.py` | Apply each mutant declared in `mutation/mutants.json` to a copy of the tree, run its suite, and fail on any survivor not declared equivalent | Present |
 | `tests/test_mutation_check.py` | Harness contract: the checkout is never edited, a red suite stops the run, a mutant whose text moved is an error | Present |
@@ -97,6 +99,7 @@
 | `make statusline-demo` | Draw the statusline lines from a payload; point at a recorded one with `STATUSLINE_PAYLOAD` |
 | `make configure` | Write a starter configuration where the plugin reads it; one already there is left as it is |
 | `make doctor` | Say what the pane is missing on this machine, and the setting that fixes each |
+| `make host-update` | Bring every Claude home's installed copy up to this tree's version through the host's own update, and prove it took; `HOST_UPDATE_CHECK=1` only reports drift |
 | `make test-typescript` | Run the TypeScript loader suite; report unavailable without Node 22.6+ |
 | `make test-ci` | Run quality, tests, readers, components, the engine-declaration check, TypeScript suite, config parity, build, isolated export checks, and exported-tree round trip |
 | `make build` | Compile Python; not a plugin package build |
@@ -193,6 +196,7 @@
 | PUB-12 | Scaffolding authorization | Do not infer permission to commit, push, install, or release. |
 | PUB-13 | Personal folder | Refuse any export path under `personal/`, whatever the allowlist says. |
 | PUB-14 | Plugin version | Raise the version in `plugins/fleet/.claude-plugin/plugin.json` with any change a person installing the plugin would notice, set both marketplace entries to the same number in that change, and tag a release `v<version>`; `tests/test_publication.py` fails when they drift. |
+| PUB-16 | Installed copy | Run `make host-update` in the change that raises the version. The host installs a version and does not follow the tree: a home that installed an earlier one keeps loading it, or nothing, until the host's own update runs there, and a session already started does not pick it up. `make host-update` repairs every home and reads each record back; a release that skips it leaves the machine on the last build. |
 | PUB-15 | Plugin name | Keep the plugin named `llm-fleet` in the manifest, both marketplaces, every install line and every `$.state` reference; a rename moves the host's per-plugin state and store, so it is recorded in HANDOFF with the step that moves an installed copy. |
 
 ## Format rules

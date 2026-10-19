@@ -4,6 +4,7 @@ quality: lint doc-format violations plugin-boundary version-check ## Run the imp
 
 version: ## Write the pane's version constant from the manifest
 	$(MAKE) script-version
+	@echo 'A version the host installed does not follow the tree: run make host-update, then restart the sessions that need it.'
 
 version-check: ## Refuse a version written anywhere but the manifest, or generated stale from it
 	$(MAKE) script-version VERSION_CHECK=1

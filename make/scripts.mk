@@ -1,4 +1,7 @@
-.PHONY: script-public-export script-check-doc-format script-typescript-suite script-host-drift script-render-review script-statusline-demo script-plugin-boundary script-mutation-check script-version
+.PHONY: script-public-export script-check-doc-format script-typescript-suite script-host-drift script-render-review script-statusline-demo script-plugin-boundary script-mutation-check script-version script-host-update
+
+script-host-update: ## Invoke host-update.py; HOST_UPDATE_CHECK=1 reports drift instead of repairing it
+	$(PYTHON) scripts/host-update.py $(if $(HOST_UPDATE_CHECK),--check,--write) $(foreach dir,$(HOST_CONFIG_DIRS),--config-dir "$(dir)")
 
 script-version: ## Write the pane's version constant from the manifest; --check refuses drift
 	$(PYTHON) scripts/version.py $(if $(VERSION_CHECK),--check,)

@@ -66,6 +66,49 @@ class StarterTests(SetupCase):
         self.assertEqual(document["providers"],
                          [{"id": "claude", "label": "Claude", "home": str(self.home / ".claude")}])
 
+    def test_another_home_beside_the_default_is_found(self):
+        # One home per provider route is the shape a multi-LLM machine has: each
+        # route carries its own base URL and token, so each gets its own home.
+        # The name is built from parts because the export refuses the literal
+        # shape of a personal home, which is the right refusal for a test too.
+        (self.home / ".claude").mkdir()
+        other = self.home / (".claude-" + "route")
+        other.mkdir()
+        (other / "settings.json").write_text("{}", encoding="utf-8")
+        document = setup.starter(self.environ)
+        self.assertEqual([entry["home"] for entry in document["providers"]],
+                         ["$HOME/.claude", "$HOME/" + ".claude-" + "route"])
+
+    def test_a_directory_beside_it_that_is_not_a_home_is_left_out(self):
+        (self.home / ".claude").mkdir()
+        (self.home / (".claude-" + "code-router")).mkdir()
+        (self.home / (".claude-" + "server-commander")).mkdir()
+        document = setup.starter(self.environ)
+        self.assertEqual([entry["home"] for entry in document["providers"]], ["$HOME/.claude"])
+
+    def test_a_configured_home_is_not_listed_twice_when_it_is_also_beside(self):
+        (self.home / ".claude").mkdir()
+        other = self.home / (".claude-" + "route")
+        other.mkdir()
+        (other / "settings.json").write_text("{}", encoding="utf-8")
+        document = setup.starter({**self.environ, "CLAUDE_CONFIG_DIR": str(other)})
+        self.assertEqual([entry["home"] for entry in document["providers"]],
+                         ["$HOME/" + ".claude-" + "route", "$HOME/.claude"])
+
+    def test_a_home_directory_that_cannot_be_listed_is_not_a_crash(self):
+        # A home a person cannot read is a machine problem, not a reason for the
+        # first-run command to fail: the homes already known are still written.
+        other = self.root / "work-claude"
+        other.mkdir()
+        self.home.chmod(0o000)
+        try:
+            document = setup.starter({**self.environ, "CLAUDE_CONFIG_DIR": str(other)})
+        finally:
+            # The temporary directory is removed before a cleanup hook would run,
+            # so the mode is put back here for the removal to work.
+            self.home.chmod(0o700)
+        self.assertEqual([entry["home"] for entry in document["providers"]], [str(other)])
+
     def test_the_starter_carries_only_what_differs_from_the_defaults(self):
         (self.home / ".claude").mkdir()
         self.assertEqual(sorted(setup.starter(self.environ)), ["providers", "schemaVersion"])

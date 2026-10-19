@@ -24,6 +24,9 @@ EXCLUDED_DIRS = frozenset({".git", ".state", "__pycache__", ".venv", "venv",
                            "node_modules", ".pytest_cache", ".mypy_cache", ".ruff_cache",
                            # Scaffolded by the host engine; never this repository's source.
                            ".claude-plugin"})
+# Formats whose bytes are not text: images, fonts, archives and documents.
+BINARY_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".icns",
+                             ".pdf", ".ttf", ".otf", ".woff", ".woff2", ".zip", ".gz"})
 ASSIGNMENT = re.compile(r"^[^:=]+?(?:::?=|:=|[?+!]?=)")
 STRUCTURAL = re.compile(r"^(?:#{1,6}\s|\||[-*+]\s|\d+[.)]\s)")
 
@@ -100,6 +103,11 @@ def check(root: Path) -> tuple[int, list[str]]:
                 continue
             if path.is_dir():
                 pending.append(path)
+                continue
+            # An image or a font is not source. Read as UTF-8 its bytes turn into
+            # the very punctuation this rule bans, so the check would refuse an
+            # asset it has nothing to say about.
+            if path.suffix.lower() in BINARY_SUFFIXES:
                 continue
             data = path.read_bytes()
             files += 1

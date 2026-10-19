@@ -25,8 +25,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -441,6 +443,7 @@ class SelectionTests(unittest.TestCase):
             return []
         return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
 
+    @unittest.skipUnless(working_shell(), "the selection needs a POSIX shell to run make")
     def test_every_typescript_suite_is_handed_the_report_folder(self) -> None:
         # A change to the TypeScript side alone runs no Python suite, so a
         # report only the Python run writes leaves the gate nothing to count.
@@ -460,6 +463,7 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(all("--junit" not in entry["argv"] for entry in suites))
         self.assertFalse((self.root / "pwned").exists())
 
+    @unittest.skipUnless(working_shell(), "the selection needs a POSIX shell to run make")
     def test_the_python_report_path_stays_one_word(self) -> None:
         log = self.install_recorders()
         self.stage_change("tests/test_thing.py")
@@ -489,9 +493,14 @@ class SelectionTests(unittest.TestCase):
         tools = self.root / "tools"
         tools.mkdir()
         make = tools / "make"
+        # The interpreter running this case, not the name `python3`: Windows
+        # installs `python`, so a stub that spells the other name is a command
+        # that does not exist there.
+        interpreter = shlex.quote(sys.executable)
         make.write_text("#!/bin/sh\n"
-                        "python3 scripts/record.py \"$@\"\n"
-                        "exec python3 scripts/typescript-suite.py --suite components/one.test.ts\n",
+                        + interpreter + " scripts/record.py \"$@\"\n"
+                        + "exec " + interpreter + " scripts/typescript-suite.py"
+                          " --suite components/one.test.ts\n",
                         encoding="utf-8")
         make.chmod(0o755)
         path = str(tools) + os.pathsep + os.environ.get("PATH", "")
@@ -505,6 +514,7 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual([entry["folder"] for entry in entries if "--suite" in entry["argv"]],
                          [str(folder)])
 
+    @unittest.skipUnless(working_shell(), "the selection needs a POSIX shell to run make")
     def test_no_report_folder_hands_none_to_any_suite(self) -> None:
         # A person running the selection by hand asked for no report, and a
         # file written where nobody looks is litter.

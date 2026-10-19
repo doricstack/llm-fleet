@@ -1,4 +1,4 @@
-.PHONY: setup build install link clean configure doctor
+.PHONY: setup build install link clean configure doctor host-update
 
 configure: ## Write a starter configuration where the plugin reads it; one already there is left as it is
 	@$(PYTHON) plugins/fleet/readers/setup.py || test $$? -eq 3
@@ -15,6 +15,9 @@ build: ## Compile scaffold Python into the configured build cache
 
 install: ## Report runtime installation availability
 	@set -euo pipefail; echo 'Unavailable: runtime extraction and packaging are not implemented.' >&2; exit 2
+
+host-update: ## Bring every Claude home's installed copy up to this tree's version; HOST_UPDATE_CHECK=1 only reports drift
+	$(MAKE) script-host-update
 
 link: ## Report Claude-home trial linking availability
 	@set -euo pipefail; echo 'Unavailable: no installable plugin or verified engine link contract exists.' >&2; exit 2

@@ -57,7 +57,16 @@ def _user_home(environ: Mapping[str, str]) -> str | None:
 
 
 def provider_homes(environ: Mapping[str, str]) -> list[str]:
-    """The provider homes on this machine, the configured one first, each once."""
+    """The provider homes on this machine, the configured one first, each once.
+
+    A machine that points Claude Code at more than one model gives each route its
+    own `CLAUDE_CONFIG_DIR`, because the base URL and the token belong to the
+    route: those homes sit beside the default one, each named after its route.
+    Each is found here so a person adding or removing a route re-runs setup
+    rather than editing a list by hand. A directory beside them that is a tool's
+    own folder rather than a home is left out: Claude Code writes `settings.json`
+    into a home and nothing else does.
+    """
     candidates: list[str] = []
     configured = environ.get("CLAUDE_CONFIG_DIR")
     if configured:
@@ -65,6 +74,18 @@ def provider_homes(environ: Mapping[str, str]) -> list[str]:
     home = _user_home(environ)
     if home:
         candidates.append(os.path.join(home, ".claude"))
+        try:
+            beside = sorted(os.listdir(home)) if os.path.isdir(home) else []
+        except OSError:
+            # A home a person cannot read is a machine problem, not a reason for
+            # the first-run command to fail; the homes already named still count.
+            beside = []
+        for child in beside:
+            if not child.startswith(".claude"):
+                continue
+            path = os.path.join(home, child)
+            if os.path.isdir(path) and os.path.isfile(os.path.join(path, "settings.json")):
+                candidates.append(path)
     homes: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:

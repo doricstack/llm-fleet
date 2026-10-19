@@ -1,5 +1,7 @@
 # llm-fleet
 
+![LLM Fleet](assets/logo-horizontal-color-on-light.svg)
+
 llm-fleet is a Claude Code plugin that keeps every session and background job on your machine in one live pane. You see which jobs are working, which wait for you and which failed, with each agent's model, step, context use and cost. A band above the prompt carries what needs you, and an alert reaches you when a job fails or starts waiting.
 
 The machine's load, pull requests, worktrees, skill scans and your own sections can join the pane when you switch them on. Everything it reads comes from one configuration file, so nothing about your machine is written into the plugin.
@@ -12,7 +14,17 @@ Type this at the prompt of a Claude Code session:
 /plugin install llm-fleet --marketplace doricstack/llm-fleet
 ```
 
-Answer `y` to add the marketplace, then pick a scope. The one-step install needs Claude Code 2.1.275 or later. The readers are Python scripts, so you also need Python 3.11 or newer.
+Answer `y` to add the marketplace, then pick a scope. The one-step install needs Claude Code 2.1.295 or later. The readers are Python scripts, so you also need Python 3.11 or newer. On Windows the interpreter is `python`, not `python3`: set the plugin's Python option to `python` when the first `/fleet` says the readers could not start.
+
+## Upgrade
+
+Claude Code installs a version and keeps it: it does not follow the plugin's source, and a session that is already open keeps what it loaded when it started. After a new release, update the plugin and restart:
+
+```
+/plugin update llm-fleet
+```
+
+A session started before the update has no pane until it restarts. From a checkout of this repository, `make host-update` does the same for every Claude home on the machine and reads each one back to prove it took.
 
 ## First run
 

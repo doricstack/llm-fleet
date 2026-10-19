@@ -15,6 +15,29 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "public-export.py"
 
 
+def symlinks_allowed():
+    """Whether this account can create a symlink at all.
+
+    Windows grants the privilege to administrators, and to everyone else only
+    where Developer Mode is on; an ordinary account without it answers every
+    attempt with OSError. The probe is a real symlink in a throwaway folder,
+    because that is the only answer worth trusting.
+    """
+    with tempfile.TemporaryDirectory() as folder:
+        target = Path(folder) / "target"
+        target.write_text("", encoding="utf-8")
+        try:
+            (Path(folder) / "link").symlink_to(target)
+        except (OSError, NotImplementedError):
+            return False
+    return True
+
+
+def posix_shell():
+    """The shell the make recipes run under, or None where the machine has none."""
+    return shutil.which("sh")
+
+
 class ExportTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -138,6 +161,7 @@ class ExportTests(unittest.TestCase):
                 self.assertIn("non-nested", result.stderr)
                 self.assertEqual((self.source / "README.md").read_text(), "Public project\n")
 
+    @unittest.skipUnless(symlinks_allowed(), "this account may not create a symlink")
     def test_selected_symlink_is_rejected(self):
         target = self.base / "target.md"
         target.write_text("outside")
@@ -149,6 +173,7 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(target.read_text(), "outside")
         self.assertFalse(self.destination.exists())
 
+    @unittest.skipUnless(symlinks_allowed(), "this account may not create a symlink")
     def test_symlinked_destination_parent_is_rejected(self):
         real = self.base / "real"
         real.mkdir()
@@ -159,6 +184,7 @@ class ExportTests(unittest.TestCase):
         self.assertIn("symlink", result.stderr)
         self.assertEqual(list(real.iterdir()), [])
 
+    @unittest.skipUnless(symlinks_allowed(), "this account may not create a symlink")
     def test_destination_file_symlink_is_rejected(self):
         self.assertEqual(self.run_export().returncode, 0)
         target = self.base / "outside.txt"
@@ -241,6 +267,22 @@ class ExportTests(unittest.TestCase):
         self.assertEqual((self.destination / "README.md").read_text(), "Public project\n")
 
 
+def make_binary():
+    """The make these cases drive, or None where the machine has none.
+
+    A development machine may put a wrapper ahead of make on PATH; this suite
+    drives the chain with a stub, so it must not claim that lane.
+    """
+    for candidate in ("/usr/bin/make", "/bin/make"):
+        if os.path.exists(candidate):
+            return candidate
+    return shutil.which("make")
+
+
+@unittest.skipUnless(
+    make_binary() and posix_shell(),
+    "make or a POSIX shell is not on this machine",
+)
 class MakeGateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -257,20 +299,12 @@ class MakeGateTests(unittest.TestCase):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, destination)
 
-    def make_binary(self):
-        # A development machine may put a wrapper ahead of make on PATH; this
-        # suite drives the chain with a stub, so it must not claim that lane.
-        for candidate in ("/usr/bin/make", "/bin/make"):
-            if os.path.exists(candidate):
-                return candidate
-        return shutil.which("make") or "make"
-
     def run_make(self, *args):
         env = os.environ.copy()
         for name in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL"):
             env.pop(name, None)
         return subprocess.run(
-            [self.make_binary(), "--no-print-directory", ".SHELLFLAGS=-c", *args],
+            [make_binary(), "--no-print-directory", ".SHELLFLAGS=-c", *args],
             cwd=self.source, env=env, capture_output=True, text=True,
             check=False, timeout=30,
         )
