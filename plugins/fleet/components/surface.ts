@@ -50,7 +50,7 @@ function notice(state: Group["state"], text: string, input: SurfaceInput,
                 primitives: Primitives) {
   const group: Group = {
     name: "the fleet",
-    title: "Fleet",
+    title: "llm-fleet",
     summary: [],
     rows: [],
     state,
@@ -61,7 +61,7 @@ function notice(state: Group["state"], text: string, input: SurfaceInput,
   // only be closed once a reading lands is a pane the person waits on.
   const close = input.options?.keys.close ?? DEFAULT_KEYS.close;
   const pane: Pane = {
-    title: "Fleet",
+    title: "llm-fleet",
     counts: [],
     updated: { text: "" },
     controls: [{ key: CLOSE, label: "Close", hotkey: close, dim: true,

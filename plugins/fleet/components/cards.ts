@@ -145,7 +145,12 @@ function statCell(card: PaneCard, each: number): Node {
   // A press holds words and Text only: the host refuses any other child and
   // the whole pane with it, so the cell's box is unwrapped into what it says.
   return card.press
-    ? { type: "Button", props: { key: card.press.key, label: card.press.label,
+    ? { type: "Button", props: { key: card.press.key,
+                                 // The figure's own words carry its number: a
+                                 // reader of the tree finds "4 Working sessions",
+                                 // and a review page that prints the label alone
+                                 // still shows the figure a change moved.
+                                 label: card.value + " " + card.press.label,
                                  onPress: card.press.onPress },
         children: pressable([cell]) }
     : cell;

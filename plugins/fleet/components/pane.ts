@@ -2458,7 +2458,7 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     : [];
   const unreadable = unreadableSources(snapshot);
   return {
-    title: "Fleet",
+    title: "llm-fleet",
     cards,
     counts,
     updated: { text: "Updated " + ageText(Math.max(0, options.now - snapshot.generated_at)),

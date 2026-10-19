@@ -66,17 +66,17 @@ test("the list marks the current voice and says when the fleet is quiet", () => 
   assert.equal(voiceList({ isOn: true, voice: "female" }, null, VOICES),
                "Voices - female: af_sky*, af_kore, af_nicole | male: am_michael, am_onyx");
   assert.match(voiceList({ isOn: false, voice: "male" }, "am_onyx", VOICES),
-               /am_onyx\*.*Fleet is quiet\.$/);
+               /am_onyx\*.*llm-fleet is quiet\.$/);
 });
 
 test("what /speak says back names the voice, or why none spoke", () => {
   assert.equal(firstName("af_sky"), "Sky");
   assert.equal(firstName("bm_george"), "George");
-  assert.equal(voiceReply("af_sky", null), "Fleet speaks as af_sky now.");
-  assert.match(voiceReply(null, "the synthesizer exited 3"), /^Fleet could not speak: the synthesizer exited 3\./);
+  assert.equal(voiceReply("af_sky", null), "llm-fleet speaks as af_sky now.");
+  assert.match(voiceReply(null, "the synthesizer exited 3"), /^llm-fleet could not speak: the synthesizer exited 3\./);
   assert.match(speakStatus({ isOn: true, voice: "female" }, null,
                            { ...INFO, state: "unavailable", reason: "speech is off in the configuration (speech.enabled)" }),
-               /^Fleet cannot speak: speech is off in the configuration \(speech.enabled\)\./);
-  assert.match(speakStatus({ isOn: false, voice: "male" }, null, INFO), /^Fleet is quiet \(male voice\)\./);
-  assert.match(speakStatus({ isOn: true, voice: "female" }, "af_kore", INFO), /^Fleet speaks as af_kore\./);
+               /^llm-fleet cannot speak: speech is off in the configuration \(speech.enabled\)\./);
+  assert.match(speakStatus({ isOn: false, voice: "male" }, null, INFO), /^llm-fleet is quiet \(male voice\)\./);
+  assert.match(speakStatus({ isOn: true, voice: "female" }, "af_kore", INFO), /^llm-fleet speaks as af_kore\./);
 });

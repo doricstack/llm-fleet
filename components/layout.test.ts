@@ -121,7 +121,7 @@ test("a section names the figures in its columns, once, above its rows", () => {
 });
 
 test("the footer is the pane's last line, drawn dim and cut rather than wrapped", () => {
-  const footer = { text: "llm-fleet 0.3.15 · Doric Stack · MIT", dim: true };
+  const footer = { text: "llm-fleet 0.3.15 · Doric Stack LLC · MIT", dim: true };
   const tree = renderPane(pane({ footer }));
   assert.equal(renderedText(tree).at(-1), footer.text);
   // Dim on the node itself: a footer drawn in the body color competes with what

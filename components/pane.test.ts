@@ -120,7 +120,7 @@ test("the pane names the installed plugin, its author and its license in the foo
   const built = paneFrom(snapshot(), options());
   assert.equal(built.footer?.text, FOOTER_TEXT);
   assert.equal(built.footer?.dim, true);
-  assert.match(FOOTER_TEXT, /^llm-fleet \d+\.\d+\.\d+ · Doric Stack · MIT$/);
+  assert.match(FOOTER_TEXT, /^llm-fleet \d+\.\d+\.\d+ · Doric Stack LLC · MIT$/);
 });
 
 test("every section the pane builds carries its own fold control and hotkey", () => {

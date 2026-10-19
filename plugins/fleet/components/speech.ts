@@ -148,7 +148,7 @@ export function voiceList(setting: VoiceSetting, current: string | null, voices:
   const selected = current ?? setting.name ?? voices[setting.voice][0];
   const groups = KINDS.map((kind) => kind + ": "
     + voices[kind].map((voice) => voice + (voice === selected ? "*" : "")).join(", "));
-  return "Voices - " + groups.join(" | ") + (setting.isOn ? "" : " | Fleet is quiet.");
+  return "Voices - " + groups.join(" | ") + (setting.isOn ? "" : " | llm-fleet is quiet.");
 }
 
 /** How a voice introduces itself: `af_sky` says Sky. */
@@ -160,19 +160,19 @@ export function firstName(voice: string): string {
 /** The reply once a voice has been tried: the one that spoke, or why none did. */
 export function voiceReply(spoke: string | null, reason: string | null): string {
   if (spoke === null) {
-    return "Fleet could not speak: " + (reason ?? "no configured voice answered") + ". "
+    return "llm-fleet could not speak: " + (reason ?? "no configured voice answered") + ". "
       + SPEAK_USAGE;
   }
-  return "Fleet speaks as " + spoke + " now.";
+  return "llm-fleet speaks as " + spoke + " now.";
 }
 
 /** What `/speak` says when asked how things stand. */
 export function speakStatus(setting: VoiceSetting, current: string | null,
                             info: SpeechInfo | null): string {
   if (info !== null && info.state !== "ready") {
-    return "Fleet cannot speak: " + (info.reason ?? "speech is unavailable") + ". " + SPEAK_USAGE;
+    return "llm-fleet cannot speak: " + (info.reason ?? "speech is unavailable") + ". " + SPEAK_USAGE;
   }
   const voice = current ?? setting.name ?? setting.voice + " voice";
-  return (setting.isOn ? "Fleet speaks as " + voice + ". "
-    : "Fleet is quiet (" + setting.voice + " voice). ") + SPEAK_USAGE;
+  return (setting.isOn ? "llm-fleet speaks as " + voice + ". "
+    : "llm-fleet is quiet (" + setting.voice + " voice). ") + SPEAK_USAGE;
 }

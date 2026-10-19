@@ -31,6 +31,9 @@ const DOCUMENTS: ReaderDocuments = {
 
 test("a rendered pane carries the rows, the counts and the warning", () => {
   const text = renderText(DOCUMENTS, 100, NOW, NOW - 4);
+  // A figure is a press, and the page shows the number it counts: a label that
+  // named only the words printed every figure as a bare label.
+  assert.equal(text.includes("1 Waiting on you"), true);
   assert.equal(text.includes("Review adapter behavior"), true);
   assert.equal(text.includes("Waiting for you"), true);
   assert.equal(text.includes("Which source?"), true);
@@ -40,7 +43,7 @@ test("a rendered pane carries the rows, the counts and the warning", () => {
   // not drawn and its heading says so. The review page shows what the pane
   // shows; a page that unfolded it would be showing a pane nobody has.
   assert.equal(text.includes("\u25b8 Worktrees"), true);
-  assert.equal(text.includes("lane"), false);
+  assert.equal(text.includes("lane"), false, text);
 });
 
 test("a folded section still names what it holds, and opens when it is told to", () => {
@@ -250,4 +253,18 @@ test("the drawings come out in the order the tree holds them, a drawn node's chi
   ] };
   assert.deepEqual(vectorsOf(tree as never).map((v) => v.alt), ["first", "second"]);
   assert.deepEqual(vectorsOf("text"), []);
+});
+
+test("a press prints its label and not its children, so a row is never printed twice", () => {
+  // The figures are presses: a card is a Button over a chip and a word. Its
+  // label carries the number, and reading the children as well printed the row
+  // twice on the review page.
+  const figure = { type: "Button",
+                   props: { key: "fleet.focus.working", label: "4 Working sessions" },
+                   children: [{ type: "Box", props: { flexDirection: "row", gap: 1 }, children: [
+                     { type: "Text", props: {}, children: ["4"] },
+                     { type: "Text", props: {}, children: ["Working sessions"] }] }] };
+  assert.deepEqual(nodeLines(figure as never, 80), ["4 Working sessions"]);
+  const heading = { type: "Button", props: { key: "h", label: "Warnings" }, children: [] };
+  assert.deepEqual(nodeLines(heading as never, 80), ["Warnings"]);
 });

@@ -57,12 +57,14 @@ command -v git >/dev/null 2>&1 || { echo "test-impact: git is not installed" >&2
 # it. A name found on the path is not a path from this machine, which is what
 # the selection is not allowed to carry, and a name is not an interpreter
 # either: Windows keeps a `python3` stub that answers every call with a message
-# about the Microsoft Store and exits 49, so each candidate is asked to run
-# something before it is believed.
+# about the Microsoft Store and exits 49, so each candidate is asked to answer
+# something before it is believed. The answer is compared, not the exit status:
+# the same stub has been seen to report zero while it printed that message and
+# started nothing, and a probe that read only the status took it.
 python=""
 for candidate in python3 python; do
   if command -v "$candidate" >/dev/null 2>&1 \
-     && "$candidate" -c "import sys" >/dev/null 2>&1; then
+     && [ "$("$candidate" -c 'import sys; print(sys.version_info[0])' 2>/dev/null)" = "3" ]; then
     python="$candidate"
     break
   fi

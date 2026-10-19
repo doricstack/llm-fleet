@@ -260,7 +260,7 @@ test("the switch is always drawn, and its word says which way a press goes", () 
     const toggle = nodesIn(tree).find((node) => node.props && "key" in node.props
       && (node.props as { key?: string }).key === BAND_TOGGLE);
     assert.equal((toggle?.props as { label?: string }).label,
-                 open ? "\u2261 Close fleet" : "\u2261 Open fleet");
+                 open ? "\u2261 Close llm-fleet" : "\u2261 Open llm-fleet");
     // Nothing to dismiss draws no Dismiss.
     assert.equal(nodesIn(tree).some((node) =>
       (node.props as { key?: string }).key === BAND_DISMISS), false);
@@ -444,17 +444,17 @@ test("the speech switch sits beside the fleet's and says how speech stands every
 });
 
 test("a terminal draws one-cell glyphs on the switches and a picture surface draws emoji", () => {
-  assert.equal(fleetLabel(false), "\u2261 Open fleet");
-  assert.equal(fleetLabel(true, "terminal"), "\u2261 Close fleet");
+  assert.equal(fleetLabel(false), "\u2261 Open llm-fleet");
+  assert.equal(fleetLabel(true, "terminal"), "\u2261 Close llm-fleet");
   assert.equal(speakLabel(true, "terminal"), "\u266A Speak: on");
   for (const surface of ["desktop", "vscode", "mobile"]) {
-    assert.equal(fleetLabel(false, surface), "\u{1F4CB} Open fleet");
+    assert.equal(fleetLabel(false, surface), "\u{1F4CB} Open llm-fleet");
     assert.equal(speakLabel(true, surface), "\u{1F50A} Speak: on");
     assert.equal(speakLabel(false, surface), "\u{1F507} Speak: off");
   }
   const tree = bandTree({ items: [], counts: null, open: true, width: 120, surface: "desktop",
                           speaking: false, onToggle: noop, onDismiss: noop, onSpeak: noop });
-  assert.equal(pressable(tree, BAND_TOGGLE)?.label, "\u{1F4CB} Close fleet");
+  assert.equal(pressable(tree, BAND_TOGGLE)?.label, "\u{1F4CB} Close llm-fleet");
   assert.equal(pressable(tree, BAND_SPEAK)?.label, "\u{1F507} Speak: off");
 });
 
@@ -472,9 +472,12 @@ test("the band's line fits its width with the speech switch drawn too", () => {
       assert.equal(label.startsWith("♪ ") && label.endsWith(speaking ? "on" : "off"), true, label);
     }
   }
+  // The product's name is given up before the speech switch's state word is:
+  // the verb alone still says which way a press goes.
   const narrow = bandTree({ items, counts, open: false, width: 80, speaking: true,
                             onToggle: noop, onDismiss: noop, onSpeak: noop });
-  assert.equal(pressable(narrow, BAND_SPEAK)?.label, "♪ on");
+  assert.equal(pressable(narrow, BAND_TOGGLE)?.label, "≡ Open");
+  assert.equal(pressable(narrow, BAND_SPEAK)?.label, "♪ Speak: on");
   const wide = bandTree({ items, counts, open: false, width: 160, speaking: true,
                           onToggle: noop, onDismiss: noop, onSpeak: noop });
   assert.equal(pressable(wide, BAND_SPEAK)?.label, "♪ Speak: on");

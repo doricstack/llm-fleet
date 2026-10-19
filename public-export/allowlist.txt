@@ -1,6 +1,9 @@
 # Exact files or case-sensitive fnmatch globs; every entry must match a file.
 # Add runtime modules only when their extraction and leak review are complete.
 README.md
+branding/README.md
+branding/ascii-mark.txt
+branding/ascii-logo.txt
 .claude-plugin/marketplace.json
 LICENSE
 .gitignore

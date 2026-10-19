@@ -51,9 +51,14 @@ function icons(surface: string | undefined) {
   return surface === undefined || surface === "terminal" ? ICONS.terminal : ICONS.pictures;
 }
 
-/** The fleet switch's word, which says which way a press goes, after its icon. */
-export function fleetLabel(open: boolean, surface?: string): string {
-  return icons(surface).fleet + " " + (open ? "Close fleet" : "Open fleet");
+/**
+ * The fleet switch's word, which says which way a press goes, after its icon;
+ * `short` keeps the icon and the verb alone, for a band too narrow for the
+ * product's name.
+ */
+export function fleetLabel(open: boolean, surface?: string, short = false): string {
+  const word = short ? (open ? "Close" : "Open") : (open ? "Close llm-fleet" : "Open llm-fleet");
+  return icons(surface).fleet + " " + word;
 }
 
 /**
@@ -377,9 +382,17 @@ export function bandTree(input: BandInput): Node {
     used += PART_GAP + input.note.length;
   }
   const dismiss = input.items.length > 0;
-  // A band too narrow for the whole line says the speech switch's state with
-  // its icon alone, before anything the person needs to read is cut.
-  const fixed = used + (dismiss ? PART_GAP + "Dismiss".length + BUTTON_CHROME : 0);
+  // A band too narrow for the whole line gives up the product's name first,
+  // then the speech switch's state word: the verb still says which way a press
+  // goes, and nothing a person needs to read is cut.
+  const dismissWidth = dismiss ? PART_GAP + "Dismiss".length + BUTTON_CHROME : 0;
+  let fixed = used + dismissWidth;
+  if (fixed > input.width) {
+    const short = fleetLabel(input.open, input.surface, true);
+    parts[0] = button(BAND_TOGGLE, short, input.onToggle, !input.open);
+    used -= toggle.length - short.length;
+    fixed = used + dismissWidth;
+  }
   if (input.onSpeak !== undefined && fixed > input.width) {
     const speaking = input.speaking === true;
     const full = speakLabel(speaking, input.surface);
@@ -387,8 +400,7 @@ export function bandTree(input: BandInput): Node {
     parts[1] = button(BAND_SPEAK, short, input.onSpeak, speaking);
     used -= full.length - short.length;
   }
-  const room = input.width - used - PART_GAP
-    - (dismiss ? PART_GAP + "Dismiss".length + BUTTON_CHROME : 0);
+  const room = input.width - used - PART_GAP - dismissWidth;
   const [first, ...others] = input.items;
   if (first !== undefined && room > 8) {
     const failing = others.filter((item) => item.level === "error").length;

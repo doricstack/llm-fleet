@@ -61,7 +61,7 @@ test("a reading becomes the pane, drawn with the host's own elements", () => {
   // press: the three the declared subset carries, and nothing else.
   assert.deepEqual(drawn.types, ["Box", "Button", "Text"]);
   assert.equal(drawn.text.includes("Review adapter behavior"), true);
-  assert.equal(drawn.text.includes("Fleet"), true);
+  assert.equal(drawn.text.includes("llm-fleet"), true);
 });
 
 test("a pane drawn before a reading still names the plugin and its version", () => {

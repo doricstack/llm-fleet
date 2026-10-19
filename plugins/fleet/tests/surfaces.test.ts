@@ -143,7 +143,7 @@ test("/worktrees opens the pane, probes the worktrees on the next look, and keep
   await $.session.start({ cwd: "/tmp", surface: "terminal", isInteractive: true } as never)
     .catch(() => undefined);
   const ran = await $.command.run({ command: "worktrees", args: "" } as never);
-  expect(JSON.stringify(ran)).toContain("Fleet pane opened on Worktrees");
+  expect(JSON.stringify(ran)).toContain("llm-fleet pane opened on Worktrees");
   expect(opened).toEqual(["fleet"]);
   // The command starts no process: the next look, one interval on, probes.
   expect(runs.some((argv) => argv.includes(FRESH_WORKTREES))).toBe(false);
@@ -153,7 +153,7 @@ test("/worktrees opens the pane, probes the worktrees on the next look, and keep
   // The pane drawn after it holds Worktrees open and the sessions folded.
   const pane = await $.ui.mount({ plugin: "llm-fleet", surface: "terminal", component: "Pane",
                                   requestId: "fleet",
-                                  props: { title: "Fleet", isFocused: true, bodyColumns: 120,
+                                  props: { title: "llm-fleet", isFocused: true, bodyColumns: 120,
                                            placement: "dock" } as never });
   const text = strings(await pane.drawn());
   expect(text).toContain("Worktrees");
@@ -168,10 +168,10 @@ test("/keys opens the pane on Keys", async ($, on) => {
   on("ui.panes", () => ({ value: [] }) as never);
   on("ui.open", () => ({ value: { isPlaced: true } }) as never);
   const ran = await $.command.run({ command: "keys", args: "" } as never);
-  expect(JSON.stringify(ran)).toContain("Fleet pane opened on Keys");
+  expect(JSON.stringify(ran)).toContain("llm-fleet pane opened on Keys");
   const pane = await $.ui.mount({ plugin: "llm-fleet", surface: "terminal", component: "Pane",
                                   requestId: "fleet",
-                                  props: { title: "Fleet", isFocused: true, bodyColumns: 120,
+                                  props: { title: "llm-fleet", isFocused: true, bodyColumns: 120,
                                            placement: "dock" } as never });
   const text = strings(await pane.drawn());
   expect(text).toContain("close this pane");

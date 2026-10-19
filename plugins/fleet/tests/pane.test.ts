@@ -28,7 +28,7 @@ import { expect, mock, test } from "claude-code/testing";
 import { HIDDEN_KEY, READING_KEY, REPLIED_KEY } from "../hooks/fleet.ts";
 
 const PANE_PROPS = {
-  title: "Fleet",
+  title: "llm-fleet",
   isFocused: true,
   bodyColumns: 120,
   placement: "dock",
@@ -65,7 +65,7 @@ test("the pane draws what it could not read rather than an empty fleet", async (
   const drawn = await pane.drawn();
   expect(drawn).toBeDefined();
   const text = JSON.stringify(drawn);
-  expect(text).toContain("Fleet");
+  expect(text).toContain("llm-fleet");
   // The read has no implementation under the kit, so the pane must say the
   // machine did not answer. A drawing that only carried the title would pass a
   // check for the title alone.
@@ -364,15 +364,15 @@ test("the band's switch opens and closes the pane with a press, mid-turn", async
     open.length = 0;
     const band = await $.ui.mount({ plugin: "llm-fleet", surface, component: "AbovePrompt",
                                     props: BAND_PROPS as never });
-    expect(JSON.stringify(await band.drawn())).toContain("Open fleet");
+    expect(JSON.stringify(await band.drawn())).toContain("Open llm-fleet");
     // The figures beside the switch are the reading's, on the band as on the pane.
     expect(texts(await band.drawn())).toContain("1 working");
     await band.press({ key: "fleet.band.toggle" });
     expect(open).toEqual(["fleet"]);
-    expect(JSON.stringify(await band.drawn())).toContain("Close fleet");
+    expect(JSON.stringify(await band.drawn())).toContain("Close llm-fleet");
     await band.press({ key: "fleet.band.toggle" });
     expect(open).toEqual([]);
-    expect(JSON.stringify(await band.drawn())).toContain("Open fleet");
+    expect(JSON.stringify(await band.drawn())).toContain("Open llm-fleet");
   }
 });
 
@@ -456,7 +456,7 @@ test("/speak picks a voice, says hello in it, and keeps the pick", async ($, on)
   });
   await $.session.start({ surface: "terminal" } as never).catch(() => undefined);
   const ran = await $.command.run({ command: "speak", args: "male" } as never);
-  expect(JSON.stringify(ran)).toContain("Fleet speaks as am_michael now.");
+  expect(JSON.stringify(ran)).toContain("llm-fleet speaks as am_michael now.");
   const speakRun = runs.find((argv) => argv[2] === "speak");
   expect(speakRun?.includes("--voice=am_michael")).toBe(true);
   expect(read).toEqual(["/tmp/fleet-speak-abc.wav"]);
@@ -464,7 +464,7 @@ test("/speak picks a voice, says hello in it, and keeps the pick", async ($, on)
   expect(runs.some((argv) => argv[2] === "discard" && argv[3] === "/tmp/fleet-speak-abc.wav"))
     .toBe(true);
   const status = await $.command.run({ command: "speak", args: "" } as never);
-  expect(JSON.stringify(status)).toContain("Fleet speaks as am_michael.");
+  expect(JSON.stringify(status)).toContain("llm-fleet speaks as am_michael.");
 });
 
 /**

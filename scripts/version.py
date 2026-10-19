@@ -46,7 +46,7 @@ def render(value: str) -> str:
         'export const PLUGIN_VERSION = "' + value + '";\n'
         "\n"
         "/** What the footer says: the plugin, who writes it, and the license. */\n"
-        'export const FOOTER_TEXT = "llm-fleet " + PLUGIN_VERSION + " \\u00b7 Doric Stack \\u00b7 MIT";\n'
+        'export const FOOTER_TEXT = "llm-fleet " + PLUGIN_VERSION + " \\u00b7 Doric Stack LLC \\u00b7 MIT";\n'
     )
 
 

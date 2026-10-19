@@ -17,7 +17,7 @@
  */
 
 import type { BoxProps, ButtonProps, Color, InputProps, Node, TextProps, Tree } from "./host.ts";
-import { FOLDED, OPENED, checkDots, chip, historyStrip, rateBar, sparkline, stateColor, statStrip,
+import { FOLDED, OPENED, checkDots, historyStrip, rateBar, sparkline, stateColor, statStrip,
          statusDot, tag, tagTexts, timelineStrip, titleChip } from "./cards.ts";
 import { tileVector } from "./vector.ts";
 
@@ -1462,7 +1462,16 @@ export function renderPane(pane: Pane): Tree {
   // fixed number of rows and every row the head takes is a row of a card cut
   // off below. The figures share the title's line when they fit beside it, and
   // take a line of their own when they do not; the controls take one more.
-  const title = chip(fit(pane.title, Math.max(8, pane.width - 24)), "claude");
+  // The product's name, marked as itself rather than as a status chip. A fill
+  // on the name read as one more state beside the figures, and the name is the
+  // one thing in the head that is not a reading. The mark is the brand's bar
+  // and dot in two cells; the width arithmetic below counts them with the gap
+  // that separates them from the word.
+  const MARK = "▬●";
+  const title = box({ flexDirection: "row", gap: 1, flexShrink: 0 }, [
+    text({ color: "success" }, MARK),
+    text({ bold: true }, fit(pane.title, Math.max(8, pane.width - 24 - MARK.length))),
+  ]);
   const age = line([pane.updated, ...(pane.warning ? [pane.warning] : [])], { italic: true });
   const ageWidth = pane.updated.text.length + (pane.warning ? pane.warning.text.length + 1 : 0);
   // One statement of the figures, never two. The cards are the form a person
@@ -1473,7 +1482,7 @@ export function renderPane(pane: Pane): Tree {
   const cardsWidth = cards.reduce((sum, card) => sum + card.value.length + card.label.length + 3, 0)
     + 3 * Math.max(0, cards.length - 1);
   const beside = cards.length > 0
-    && pane.title.length + 2 + 3 + cardsWidth + 2 + ageWidth <= pane.width;
+    && pane.title.length + MARK.length + 1 + 3 + cardsWidth + 2 + ageWidth <= pane.width;
   const parts: Node[] = [
     box({ flexDirection: "row", justifyContent: "space-between", gap: 1 }, [
       beside ? box({ flexDirection: "row", gap: 3 }, [title, statStrip(cards, cardsWidth, true)])

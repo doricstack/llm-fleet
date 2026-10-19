@@ -789,12 +789,12 @@ test("the command opens the pane, and closes it when it is already open", async 
   assert.deepEqual(opening.calls.opened, [PANE]);
   // The marker is the difference between this plugin and the one it replaces,
   // so it is asserted rather than left to a person to notice.
-  assert.equal(opened.text, `Fleet pane opened (${MARK}).`);
+  assert.equal(opened.text, `llm-fleet pane opened (${MARK}).`);
 
   const closing = stub({ panes: [{ id: PANE }] });
   const closed = await closing.run() as { text: string };
   assert.deepEqual(closing.calls.closed, [PANE]);
-  assert.equal(closed.text, `Fleet pane closed (${MARK}).`);
+  assert.equal(closed.text, `llm-fleet pane closed (${MARK}).`);
 });
 
 test("the pane is opened under a title that names this plugin", async () => {
@@ -805,7 +805,7 @@ test("the pane is opened under a title that names this plugin", async () => {
     return { isPlaced: true };
   };
   await driven.run();
-  assert.equal(title, `Fleet (${MARK})`);
+  assert.equal(title, `llm-fleet (${MARK})`);
 });
 
 test("a surface too narrow to place the pane says so rather than claiming it opened", async () => {
@@ -844,7 +844,7 @@ test("a reading that lands is drawn on the next paint, and the pane is asked to 
   assert.deepEqual(driven.calls.invalidated, ["ui.render"]);
   const text = renderedText(await driven.render() as never).join("\n");
   assert.equal(text.includes("Review adapter behavior"), true);
-  assert.equal(text.includes("Fleet"), true);
+  assert.equal(text.includes("llm-fleet"), true);
 });
 
 test("the reading the last session left is drawn while this session's read is still out", async () => {
@@ -1445,7 +1445,7 @@ test("a configuration that places no sections draws a pane with none", async () 
   assert.equal(text.includes("Worktrees"), false);
   assert.equal(text.includes("Collapse all"), false);
   // The pane still says what it is: an empty pane is not a broken one.
-  assert.equal(text.includes("Fleet"), true);
+  assert.equal(text.includes("llm-fleet"), true);
 });
 
 test("a section the order leaves out keeps the fold it was left in", async () => {
@@ -1530,7 +1530,7 @@ test("the pane is drawn from what the reader printed", async () => {
   assert.deepEqual(elementTypes(tree as never), ["Box", "Button", "Text"]);
   const text = renderedText(tree as never).join("\n");
   assert.equal(text.includes("Review adapter behavior"), true);
-  assert.equal(text.includes("Fleet"), true);
+  assert.equal(text.includes("llm-fleet"), true);
 });
 
 test("a read that failed is named, never drawn as an empty fleet", async () => {
@@ -2796,7 +2796,7 @@ test("the band draws the speech switch beside the fleet's, off until someone tur
   assert.equal(speakWord(await driven.band()), "♪ Speak: off");
   assert.equal(speakWord(await driven.band(140, "desktop")), "\u{1F507} Speak: off");
   const fleet = buttonAddressing(await driven.band(140, "desktop"), BAND_TOGGLE) as { label?: string };
-  assert.equal(fleet.label, "\u{1F4CB} Open fleet");
+  assert.equal(fleet.label, "\u{1F4CB} Open llm-fleet");
 });
 
 test("a press on Speak in one session switches speech in every session", async () => {
@@ -4202,7 +4202,7 @@ test("/worktrees opens the pane on Worktrees alone, probes them on the next look
   const reads = driven.calls.argv.length;
   const answer = await driven.command("worktrees") as { text: string };
   await drain();
-  assert.equal(answer.text, `Fleet pane opened on Worktrees (${MARK}).`);
+  assert.equal(answer.text, `llm-fleet pane opened on Worktrees (${MARK}).`);
   assert.deepEqual(driven.calls.opened, [PANE]);
   // The command starts no process of its own: a probe takes longer than the
   // host lets a command's own work run.
@@ -4236,7 +4236,7 @@ test("/worktrees run again with the pane open on Worktrees closes it, and probes
   await driven.command("worktrees");
   assert.deepEqual(driven.calls.closed, []);
   const again = await driven.command("worktrees") as { text: string };
-  assert.equal(again.text, `Fleet pane closed (${MARK}).`);
+  assert.equal(again.text, `llm-fleet pane closed (${MARK}).`);
   assert.deepEqual(driven.calls.closed, [PANE]);
   // The first run asked for a probe; the pane closed before the look came, so
   // the probe that asked for it is not wanted.
@@ -4264,7 +4264,7 @@ test("/keys opens the pane on Keys", async () => {
   await driven.start();
   await drain();
   const answer = await driven.command("keys") as { text: string };
-  assert.equal(answer.text, `Fleet pane opened on Keys (${MARK}).`);
+  assert.equal(answer.text, `llm-fleet pane opened on Keys (${MARK}).`);
   const text = await drawnText(driven);
   assert.equal(text.includes("\u25be\nKeys"), true);
   assert.equal(text.includes("close this pane"), true);
@@ -4378,7 +4378,7 @@ test("a voice picked while an older line plays is the one the next line tries fi
   assert.deepEqual(voicesSaid(helped), ["--voice=af_sky", "--voice=af_bella"]);
   finish.shift()?.();
   const answer = await within(reply as Promise<{ text: string }>, "the greeting never ended");
-  assert.equal(answer.text, "Fleet speaks as af_bella now.");
+  assert.equal(answer.text, "llm-fleet speaks as af_bella now.");
 });
 
 /** A reading with these jobs and this band document, dated at the stub's clock. */
@@ -4533,7 +4533,7 @@ test("an older voice pick held at its write gives way to the newer pick queued b
   assert.equal(replaced.text.includes("newer"), true, replaced.text);
   assert.deepEqual(voicesSaid(helped), ["--voice=af_sky"]);
   const status = await driven.speak("") as { text: string };
-  assert.equal(status.text.startsWith("Fleet speaks as af_sky."), true, status.text);
+  assert.equal(status.text.startsWith("llm-fleet speaks as af_sky."), true, status.text);
   assert.deepEqual(memory["voice:session-a"], { voice: "female" });
 });
 
@@ -4595,7 +4595,7 @@ test("three picks, the first held while it reads, end on the last in this sessio
   assert.deepEqual(memory["voice:session-a"], { voice: "male", name: "am_adam" });
   assert.deepEqual(voicesSaid(helped), ["--voice=am_adam"]);
   const status = await driven.speak("") as { text: string };
-  assert.equal(status.text.startsWith("Fleet speaks as am_adam."), true, status.text);
+  assert.equal(status.text.startsWith("llm-fleet speaks as am_adam."), true, status.text);
   // A later session under the same identifier opens on the last pick too.
   const again = stub({ memory, sessionId: "session-a", answer: machine([]) });
   await again.start();
@@ -4626,12 +4626,12 @@ test("asking how speech stands while a line plays is not a pick, so the line's v
   await drain();
   assert.equal(driven.calls.played, 1);
   const asked = await driven.speak("") as { text: string };
-  assert.equal(asked.text.startsWith("Fleet speaks as female voice."), true, asked.text);
+  assert.equal(asked.text.startsWith("llm-fleet speaks as female voice."), true, asked.text);
   await driven.speak("list");
   finish.shift()?.();
   await drain();
   const after = await driven.speak("") as { text: string };
-  assert.equal(after.text.startsWith("Fleet speaks as af_sky."), true, after.text);
+  assert.equal(after.text.startsWith("llm-fleet speaks as af_sky."), true, after.text);
 });
 
 test("a reading the paint finds after the keys were read keeps them within its limit", async () => {

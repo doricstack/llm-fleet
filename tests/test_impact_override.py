@@ -619,6 +619,29 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(len(suites), 2, self.ran(log))
 
     @unittest.skipUnless(working_shell(), "the selection needs a POSIX shell to run make")
+    def test_a_stub_that_reports_zero_is_still_passed_over(self) -> None:
+        # The same Store alias has been seen to print its message and exit zero.
+        # A probe that reads only the status believes it and hands every suite
+        # to a program that starts nothing; the answer is what is compared.
+        log = self.install_recorders()
+        tools = self.root / "tools"
+        tools.mkdir()
+        stub = tools / "python3"
+        stub.write_text("#!/bin/sh\necho 'Python was not found'\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+        answering = tools / "python"
+        answering.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + " \"$@\"\n",
+                             encoding="utf-8")
+        answering.chmod(0o755)
+        self.stage_change("plugins/fleet/components/widget.ts")
+        path = str(tools) + os.pathsep + os.environ.get("PATH", "")
+        result = run_selector("--tier", "commit", "--repo", str(self.root), cwd=self.root,
+                              env=clean_environment(STUB_LOG=str(log), PATH=path))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        suites = [entry for entry in self.ran(log) if "--suite" in entry["argv"]]
+        self.assertEqual(len(suites), 2, self.ran(log))
+
+    @unittest.skipUnless(working_shell(), "the selection needs a POSIX shell to run make")
     def test_no_interpreter_that_answers_is_named_rather_than_run(self) -> None:
         # Nothing to fall back to: the selection says so once, by name, rather
         # than starting suites that cannot run and reporting them as failures.

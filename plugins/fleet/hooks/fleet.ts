@@ -2896,16 +2896,16 @@ async function openOn($: Engine, state: State, section: string): Promise<{ text:
     state.freshAsked = false;
     await $.ui.close({ id: PANE });
     $.ui.invalidate("ui.render");
-    return { text: `Fleet pane closed (${MARK}).` };
+    return { text: `llm-fleet pane closed (${MARK}).` };
   }
   state.pressed = { ...state.pressed,
                     ...Object.fromEntries(names.map((name) => [name, name !== section])) };
   keepFold($, state, names);
   state.open = true;
-  const opened = await $.ui.open({ id: PANE, title: `Fleet (${MARK})`, closeOnEscape: true });
+  const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
   $.ui.invalidate("ui.render");
-  return { text: opened.isPlaced ? `Fleet pane opened on ${title} (${MARK}).`
-    : `Fleet pane opens on ${title} once the terminal is wider (${MARK}).` };
+  return { text: opened.isPlaced ? `llm-fleet pane opened on ${title} (${MARK}).`
+    : `llm-fleet pane opens on ${title} once the terminal is wider (${MARK}).` };
 }
 
 /**
@@ -2925,7 +2925,7 @@ async function selectVoice($: Engine, state: State, args: string, generation: nu
   const current = await voiced($, state).catch(() => null) ?? state.voice;
   const info = state.speech;
   if (info === null || current === null) {
-    return { text: info === null ? "Fleet could not read its voices. " + SPEAK_USAGE
+    return { text: info === null ? "llm-fleet could not read its voices. " + SPEAK_USAGE
       : speakStatus(state.voice ?? voiceSetting(undefined, info), state.voiceName, info) };
   }
   const asked = speakRequest(args, current, info.voices);
@@ -2959,7 +2959,7 @@ async function selectVoice($: Engine, state: State, args: string, generation: nu
     }
     const switched = await switchSpeech($, state, asked.isOn).then(() => true, () => false);
     if (!switched) {
-      return { text: "Fleet could not switch speech: the store refused it. " + SPEAK_USAGE };
+      return { text: "llm-fleet could not switch speech: the store refused it. " + SPEAK_USAGE };
     }
   }
   if (!asked.isOn) {
@@ -3212,13 +3212,13 @@ export const register: Register = (on, options) => {
       markSeen($, state);
       await $.ui.close({ id: PANE });
       $.ui.invalidate("ui.render");
-      return { text: `Fleet pane closed (${MARK}).` };
+      return { text: `llm-fleet pane closed (${MARK}).` };
     }
-    const opened = await $.ui.open({ id: PANE, title: `Fleet (${MARK})`, closeOnEscape: true });
+    const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
     $.ui.invalidate("ui.render");
     // A surface too narrow to draw the pane opens once the terminal is wider.
-    return { text: opened.isPlaced ? `Fleet pane opened (${MARK}).`
-                          : `Fleet pane opens once the terminal is wider (${MARK}).` };
+    return { text: opened.isPlaced ? `llm-fleet pane opened (${MARK}).`
+                          : `llm-fleet pane opens once the terminal is wider (${MARK}).` };
   });
 
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {
@@ -3507,7 +3507,7 @@ export const register: Register = (on, options) => {
           }
           $.ui.invalidate("ui.render");
           return isOpen ? $.ui.close({ id: PANE })
-            : $.ui.open({ id: PANE, title: `Fleet (${MARK})`, closeOnEscape: true });
+            : $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
         };
         return $.ui.panes()
           .then((panes) => panes.some((pane) => pane.id === PANE), () => open)
@@ -3535,7 +3535,7 @@ export const register: Register = (on, options) => {
         state.focus = focus ?? null;
         state.open = true;
         $.ui.invalidate("ui.render");
-        return $.ui.open({ id: PANE, title: `Fleet (${MARK})`, closeOnEscape: true })
+        return $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true })
           .catch(() => undefined);
       },
       onDismiss: () => {

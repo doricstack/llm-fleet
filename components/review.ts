@@ -76,9 +76,9 @@ export function nodeLines(node: Node | string, width: number,
     return [String(node.children[0] ?? "")];
   }
   if (node.type === "Button") {
-    // A button draws its label, and a heading is drawn as a button so it can be
-    // pressed: reading only children would print the review page with every
-    // section heading and both controls missing.
+    // A button draws its label. Its children are the words the surface draws
+    // inside the press, and reading them as well prints a row that carries both
+    // twice; a figure's number is in its label for exactly this reason.
     const label = (node.props as { label?: unknown }).label;
     return [typeof label === "string" ? label : ""];
   }
