@@ -58,6 +58,7 @@ review: ## Read the machine and write a pane review page you can open
 
 test-components: ## Run the shared layout, pane view model, masking, and declared binding check
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/layout.test.ts
+	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/pressable.test.ts
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/mask.test.ts
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/statusline.test.ts
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/surface.test.ts
@@ -94,6 +95,7 @@ test-snapshot: ## Run the snapshot assembly behavior suite
 
 test-layout: ## Run the shared layout behavior suite
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/layout.test.ts
+	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/pressable.test.ts
 
 statusline-demo: script-statusline-demo ## Draw the statusline lines from a payload
 

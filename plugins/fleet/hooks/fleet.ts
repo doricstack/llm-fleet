@@ -2936,29 +2936,36 @@ export const register: Register = (on, options) => {
     // Taken first, so speech is off here until a press made from now on; a
     // clock that cannot say leaves it off for the whole session.
     state.startedAt = await $.clock.now().catch(() => null);
-    await $.command.register({
-      name: "fleet",
-      description: "Background jobs, trials and PRs across this machine, in a pane",
-      argumentHint: "[close|unhide|doctor|setup]",
-      immediate: true,
-    });
-    await $.command.register({
-      name: "speak",
-      description: "Pick this session's voice, or switch speech on or off in every session",
-      argumentHint: "[on|off|female|male|list|<voice>]",
-      immediate: true,
-    });
-    await $.command.register({
-      name: "worktrees",
-      description: "Open the fleet pane on Worktrees, probed now; run again to close it",
-      immediate: true,
-    });
-    await $.command.register({
-      name: "keys",
-      description: "Open the fleet pane on Keys, or switch the key tip under the prompt",
-      argumentHint: "[tips off|on]",
-      immediate: true,
-    });
+    // One command at a time, and a refusal costs one command rather than the
+    // session. A name can already belong to the person, whose own /speak wins
+    // it, and the host then refuses the plugin's. Thrown from here, that
+    // refusal took the first read, the band and every fold restore with it:
+    // the pane opened blank.
+    const commands = [
+      { name: "fleet",
+        description: "Background jobs, trials and PRs across this machine, in a pane",
+        argumentHint: "[close|unhide|doctor|setup]",
+        immediate: true },
+      { name: "speak",
+        description: "Pick this session's voice, or switch speech on or off in every session",
+        argumentHint: "[on|off|female|male|list|<voice>]",
+        immediate: true },
+      { name: "worktrees",
+        description: "Open the fleet pane on Worktrees, probed now; run again to close it",
+        immediate: true },
+      { name: "keys",
+        description: "Open the fleet pane on Keys, or switch the key tip under the prompt",
+        argumentHint: "[tips off|on]",
+        immediate: true },
+    ] as const;
+    for (const command of commands) {
+      try {
+        await $.command.register(command);
+      } catch {
+        // The person's command keeps the name; nothing the pane draws depends
+        // on this one having registered.
+      }
+    }
     // A `-p` run or an SDK host has nobody at the prompt: no pane, no band and
     // no tab to show anything in, so it starts no timer and reads nothing on its
     // own. The commands stay, since a command run there is a person asking.

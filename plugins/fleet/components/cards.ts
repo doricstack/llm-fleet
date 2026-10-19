@@ -17,7 +17,7 @@ import type { Color, Node } from "./host.ts";
 // Type-only, so the cycle with layout.ts is erased rather than evaluated: the
 // layout draws with the pieces here, so the pieces cannot draw with it.
 import type { History, PaneCard, Slot } from "./layout.ts";
-import { box, fit, text } from "./layout.ts";
+import { box, fit, pressable, text } from "./layout.ts";
 import { barVector, stripVector } from "./vector.ts";
 
 /**
@@ -142,10 +142,12 @@ function statCell(card: PaneCard, each: number): Node {
   ]);
   // A figure that is a way into what it counts is drawn as the control it is:
   // the whole cell is the press, so a person presses the number they read.
+  // A press holds words and Text only: the host refuses any other child and
+  // the whole pane with it, so the cell's box is unwrapped into what it says.
   return card.press
     ? { type: "Button", props: { key: card.press.key, label: card.press.label,
-                                 onPress: card.press.onPress, hover: { color: "claude" } },
-        children: [cell] }
+                                 onPress: card.press.onPress },
+        children: pressable([cell]) }
     : cell;
 }
 

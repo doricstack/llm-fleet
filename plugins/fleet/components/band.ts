@@ -22,7 +22,7 @@
 
 import type { Color, Node } from "./host.ts";
 import { chip } from "./cards.ts";
-import { box, fit, text } from "./layout.ts";
+import { box, fit, pressable, text } from "./layout.ts";
 import { mask } from "./mask.ts";
 import { active, failedOutcomes, waiting, working } from "./pane.ts";
 import type { Job, Snapshot } from "./state.ts";
@@ -357,7 +357,7 @@ export function bandTree(input: BandInput): Node {
       parts.push(input.onOpen === undefined ? drawn
         : { type: "Button", props: { key: BAND_FOCUS + focus, label,
                                      onPress: () => input.onOpen?.(focus) },
-            children: [drawn] });
+            children: pressable([drawn]) });
       used += PART_GAP + label.length + 2;
     }
   }
@@ -401,7 +401,7 @@ export function bandTree(input: BandInput): Node {
                      : [{ type: "Button",
                           props: { key: BAND_ITEM + first.key, label: lead,
                                    onPress: () => input.onOpen?.() },
-                          children: words }]));
+                          children: pressable(words) }]));
   }
   const left = box({ flexDirection: "row", gap: 2, flexShrink: 1 }, parts);
   const row = dismiss

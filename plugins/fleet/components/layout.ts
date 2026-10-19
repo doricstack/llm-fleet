@@ -1329,15 +1329,45 @@ export function boxed(group: Group): boolean {
     || group.state === "stale";
 }
 
+/** What a press may hold: strings and Text, with a box unwrapped into them.
+ *
+ * The host draws a Button's content as words and refuses any other child, and
+ * a refused Button throws where the pane is being drawn: the whole render is
+ * lost and the person sees an empty frame. A row's press is built from a box
+ * around its figures, so the box is taken apart here and only its words are
+ * kept. Nothing is lost that a press can hold in the first place.
+ */
+export function pressable(children: (Node | string)[]): (Node | string)[] {
+  const out: (Node | string)[] = [];
+  for (const child of children) {
+    if (typeof child === "string") {
+      out.push(child);
+      continue;
+    }
+    if (child.type === "Box") {
+      out.push(...pressable(child.children));
+      continue;
+    }
+    if (child.type === "Text") {
+      out.push(child);
+    }
+  }
+  return out;
+}
+
 /** A pressable control, drawn with the label the pane gave it. */
 function control(item: Control,
                  props: Omit<ButtonProps, "key" | "label" | "onPress"> = {},
                  children: Node[] = []): Node {
+  // No hover: the host draws a hover only under a keyed Box, and a Button with
+  // one and no such box above it is refused, taking the whole pane with it.
+  // The tint comes back when the row a press sits in carries a key.
+  const { hover: _hover, ...rest } = props as { hover?: unknown };
   return {
     type: "Button",
     props: { key: item.key, label: item.label, onPress: item.onPress,
-             hotkey: item.hotkey, dimColor: item.dim, ...props },
-    children,
+             hotkey: item.hotkey, dimColor: item.dim, ...rest },
+    children: pressable(children),
   };
 }
 

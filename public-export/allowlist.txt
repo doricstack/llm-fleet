@@ -72,6 +72,7 @@ plugins/fleet/components/surface.ts
 plugins/fleet/components/cards.ts
 plugins/fleet/components/vector.ts
 plugins/fleet/components/version.ts
+components/pressable.test.ts
 plugins/fleet/assets/readme-header.svg
 plugins/fleet/assets/pane-example.svg
 plugins/fleet/assets/logo-horizontal-color-on-dark.svg

@@ -52,6 +52,36 @@ MACHINE_PATHS = (
 )
 
 
+def recorder_makefile() -> str:
+    """The throwaway Makefile the recording cases drive.
+
+    The interpreter running this case, not the name `python3`: Windows installs
+    `python`, and a recipe naming the other one is a command that does not exist
+    there, so the target fails before it records anything.
+    """
+    interpreter = shlex.quote(sys.executable)
+    return (f"test-report:\n\t@{interpreter} scripts/record.py test-report\n"
+            f"test-ci:\n\t@{interpreter} scripts/record.py test-ci\n"
+            f"\t@{interpreter} scripts/typescript-suite.py --suite components/one.test.ts\n")
+
+
+def shell_environment(base: dict[str, str], platform: str,
+                      shell: str | None) -> dict[str, str]:
+    """The environment a case hands make, with the shell make must use.
+
+    GNU make on Windows starts cmd.exe unless `SHELL` names a POSIX shell, and
+    a recipe written for sh then answers 9009 as a command it cannot find. A
+    Windows machine with Git for Windows installed has the shell; naming it is
+    what makes the recipe run. A platform that already starts sh is left alone,
+    because there make ignores the variable and a nested build should inherit
+    nothing this suite invented.
+    """
+    env = dict(base)
+    if platform == "nt" and shell:
+        env["SHELL"] = shell
+    return env
+
+
 def clean_environment(**overrides: str) -> dict[str, str]:
     """The environment a case runs in: this machine's, less what a case sets.
 
@@ -64,7 +94,8 @@ def clean_environment(**overrides: str) -> dict[str, str]:
            if key not in ("CITS_JUNIT_DIR", "CITS_JUNIT", "FLEET_TS_JUNIT_DIR",
                           "FLEET_JUNIT_XML")}
     env.update(overrides)
-    return env
+    shell = working_shell() if os.name == "nt" else None
+    return shell_environment(env, os.name, shell)
 
 
 def shell_candidates() -> list[str]:
@@ -267,6 +298,46 @@ class ShellTests(unittest.TestCase):
         self.assertIn("Usage:", probe.stdout)
 
 
+class MakeShellTests(unittest.TestCase):
+    """The shell make is told to use.
+
+    Found is not the same as used: a Windows machine with Git for Windows has a
+    POSIX shell and make still starts cmd.exe unless the variable names it, so
+    the recipe answers 9009 and the suite reports a product failure that is the
+    harness. These cases pin the handover, which no machine-specific run can.
+    """
+
+    def test_windows_is_handed_the_shell_it_has(self) -> None:
+        env = shell_environment({}, "nt", "C:/Program Files/Git/bin/bash.exe")
+        self.assertEqual(env.get("SHELL"), "C:/Program Files/Git/bin/bash.exe")
+
+    def test_windows_with_no_shell_is_handed_nothing(self) -> None:
+        # Nothing to name: the skip guard is what keeps this honest, and an
+        # invented path would only move the failure somewhere harder to read.
+        env = shell_environment({"PATH": "/usr/bin"}, "nt", None)
+        self.assertNotIn("SHELL", env)
+        self.assertEqual(env["PATH"], "/usr/bin")
+
+    def test_a_platform_that_already_runs_sh_is_left_alone(self) -> None:
+        env = shell_environment({}, "posix", "/bin/sh")
+        self.assertNotIn("SHELL", env)
+
+    def test_what_a_case_set_still_wins(self) -> None:
+        env = shell_environment({"SHELL": "/chosen/sh"}, "nt", "/found/sh")
+        self.assertEqual(env["SHELL"], "/found/sh")
+
+    def test_the_recorder_makefile_names_the_running_interpreter(self) -> None:
+        # A recipe naming `python3` on Windows is a command that does not exist,
+        # and the target fails before it records what it was handed.
+        recipe = recorder_makefile()
+        self.assertIn(shlex.quote(sys.executable), recipe)
+        # The name alone, not the path: an interpreter may itself be called
+        # `python3`, and what is refused here is a recipe that trusts the name
+        # to resolve on the machine that runs it.
+        self.assertNotIn("@python3 ", recipe)
+        self.assertNotIn("@python ", recipe)
+
+
 class SelectionTests(unittest.TestCase):
     """The plan a real change produces, driven against a throwaway repository."""
 
@@ -429,11 +500,7 @@ class SelectionTests(unittest.TestCase):
             "        'report': os.environ.get('FLEET_JUNIT_XML', '')}) + '\\n')\n")
         (self.root / "scripts" / "typescript-suite.py").write_text(recorder, encoding="utf-8")
         (self.root / "scripts" / "record.py").write_text(recorder, encoding="utf-8")
-        (self.root / "Makefile").write_text(
-            "test-report:\n\t@python3 scripts/record.py test-report\n"
-            "test-ci:\n\t@python3 scripts/record.py test-ci\n"
-            "\t@python3 scripts/typescript-suite.py --suite components/one.test.ts\n",
-            encoding="utf-8")
+        (self.root / "Makefile").write_text(recorder_makefile(), encoding="utf-8")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "recorders")
         return log
