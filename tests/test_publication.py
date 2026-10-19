@@ -101,6 +101,14 @@ class Marketplaces(unittest.TestCase):
                 self.assertEqual(self.entry(path)["description"], manifest["description"])
 
 
+class Assets(unittest.TestCase):
+    def test_the_example_pane_names_the_installed_version(self) -> None:
+        # The demo pane is drawn once as an image and nothing regenerates it, so
+        # this is what keeps its footer from naming a version nobody installed.
+        text = (PLUGIN / "assets" / "pane-example.svg").read_text(encoding="utf-8")
+        self.assertIn("llm-fleet {} | Doric Stack | MIT".format(read(MANIFEST)["version"]), text)
+
+
 class Export(unittest.TestCase):
     def test_the_published_tree_carries_what_an_install_reads(self) -> None:
         listed = set(ALLOWLIST.read_text(encoding="utf-8").splitlines())
