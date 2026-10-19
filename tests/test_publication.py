@@ -106,7 +106,7 @@ class Assets(unittest.TestCase):
         # The demo pane is drawn once as an image and nothing regenerates it, so
         # this is what keeps its footer from naming a version nobody installed.
         text = (PLUGIN / "assets" / "pane-example.svg").read_text(encoding="utf-8")
-        self.assertIn("llm-fleet {} | Doric Stack | MIT".format(read(MANIFEST)["version"]), text)
+        self.assertIn("llm-fleet {} | Doric Stack LLC | MIT".format(read(MANIFEST)["version"]), text)
 
 
 class Export(unittest.TestCase):
