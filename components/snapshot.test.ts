@@ -445,3 +445,23 @@ test("a process under load reaches the pane only with the figures that read", ()
   // than a failed one: nobody asked this machine about its load.
   assert.equal(snapshotFrom({}, NOW).load.state, "empty");
 });
+
+test("a governance document is kept as read, and a failed one carries no scope", () => {
+  const read = snapshotFrom({ governance: { state: "ready", governor: false, controller: true,
+                                            source: "config", path: "/switch.json",
+                                            updated_at: "2026-10-19T10:00:00Z",
+                                            by: "someone", errors: [] } }, NOW);
+  assert.deepEqual(read.governance, { state: "ready", governor: false, controller: true,
+                                      source: "config", path: "/switch.json",
+                                      updated_at: "2026-10-19T10:00:00Z", by: "someone",
+                                      errors: [] });
+  // A document that failed is drawn as a failure, not as the tool's own "both
+  // on" default: the pane would be reporting a state it never read.
+  const failed = snapshotFrom({ governance: { state: "failed", errors: [
+    { source: "governance", reason: "switch file is not JSON" }] } }, NOW);
+  assert.equal(failed.governance?.state, "failed");
+  assert.equal(failed.governance?.governor, null);
+  assert.equal(failed.governance?.controller, null);
+  // A reading from before the switch was read is disabled, never ready.
+  assert.equal(snapshotFrom({}, NOW).governance?.state, "disabled");
+});

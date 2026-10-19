@@ -13,7 +13,7 @@ import type {
   AgentFigures, FanEntry, Job, JobReply, Lease, Load, LoadProcess, Progress, PullRequest, PullRequests, ReaderState, Roster, Run, SkillItem, Skills,
   SessionFigures, Snapshot, SourceState, Trial, TrialBucket, TrialHistory, Trials, Worktree,
   Worktrees, Change, Custom, CustomRow, CustomSection, CheckRun, DigestEvent, Events, SpendSeries,
-  TimelineSegment } from "./state.ts";
+  TimelineSegment, Governance } from "./state.ts";
 
 export type ReaderDocuments = {
   roster?: unknown;
@@ -26,6 +26,7 @@ export type ReaderDocuments = {
   load?: unknown;
   custom?: unknown;
   events?: unknown;
+  governance?: unknown;
 };
 
 const READER_STATES = new Set<ReaderState>([
@@ -679,6 +680,32 @@ function loadFrom(document: unknown): Load {
   };
 }
 
+/** A flag the reader published, kept only when it is a boolean. */
+function flag(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+/**
+ * The governor and controller switch, read as untrusted input.
+ *
+ * A scope is kept only when the reader published a boolean for it, so a
+ * document that failed carries neither and the pane draws the error rather
+ * than the tool's own "both on" default.
+ */
+function governanceFrom(document: unknown): Governance {
+  const source = isObject(document) ? document : {};
+  return {
+    state: stateOf(document, "disabled"),
+    governor: flag(source.governor),
+    controller: flag(source.controller),
+    source: maybeText(source.source),
+    path: maybeText(source.path),
+    updated_at: maybeText(source.updated_at),
+    by: maybeText(source.by),
+    errors: errorsOf(document),
+  };
+}
+
 /**
  * This session's figures, read as untrusted input like every other document.
  *
@@ -789,6 +816,7 @@ export function snapshotFrom(documents: ReaderDocuments, generatedAt: number): S
     worktrees: worktreesFrom(documents.worktrees),
     load: loadFrom(documents.load),
     custom: customFrom(documents.custom),
+    governance: governanceFrom(documents.governance),
     ...(documents.events === undefined || documents.events === null ? {}
       : { events: eventsFrom(documents.events) }),
   };

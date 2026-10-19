@@ -15,9 +15,12 @@
  *
  * Beside the fleet's switch sits the voice's. Speech is one switch for every
  * session on the machine, so the word on it is what the store says, and a press
- * in any session is heard in all of them. Each button carries an icon: a glyph
- * a terminal draws in one cell where the surface is a terminal, and an emoji
- * where the surface draws pictures.
+ * in any session is heard in all of them. Beside the voice sits the machine's
+ * governance switch when the machine has one: it states both scopes in a word
+ * and moves them together, and it is not drawn at all for a person who does not
+ * run the tooling behind it. Each button carries an icon: a glyph a terminal
+ * draws in one cell where the surface is a terminal, and an emoji where the
+ * surface draws pictures.
  */
 
 import type { Color, Node } from "./host.ts";
@@ -33,6 +36,8 @@ export const BAND_TOGGLE = "fleet.band.toggle";
 export const BAND_DISMISS = "fleet.band.dismiss";
 /** The address of the switch that turns speech on or off in every session. */
 export const BAND_SPEAK = "fleet.band.speak";
+/** The address of the machine's governance switch, when the machine has one. */
+export const BAND_GOVERNANCE = "fleet.band.governance";
 /** The address of a press on one of the band's figures, before the state it names. */
 export const BAND_FOCUS = "fleet.band.focus.";
 /** The address of a press on the item the band leads with. */
@@ -43,8 +48,9 @@ const BAND_RULE = "─";
 
 /** The icon each switch carries, as a terminal draws it and as a picture surface does. */
 const ICONS = {
-  terminal: { fleet: "\u2261", speaking: "\u266A", quiet: "\u266A" },
-  pictures: { fleet: "\u{1F4CB}", speaking: "\u{1F50A}", quiet: "\u{1F507}" },
+  terminal: { fleet: "\u2261", speaking: "\u266A", quiet: "\u266A", governance: "\u2699" },
+  pictures: { fleet: "\u{1F4CB}", speaking: "\u{1F50A}", quiet: "\u{1F507}",
+              governance: "\u2699\ufe0f" },
 } as const;
 
 function icons(surface: string | undefined) {
@@ -69,6 +75,19 @@ export function speakLabel(speaking: boolean, surface?: string, short = false): 
   const set = icons(surface);
   const word = short ? "" : "Speak: ";
   return speaking ? set.speaking + " " + word + "on" : set.quiet + " " + word + "off";
+}
+
+/**
+ * The governance switch's word, after its icon: one word for two scopes, so the
+ * band stays one line. A scope the switch did not report is "not read" rather
+ * than folded into either answer.
+ */
+export function governanceLabel(governor: boolean | null, controller: boolean | null,
+                                surface?: string, short = false): string {
+  const word = governor === true && controller === true ? "on"
+    : governor === false && controller === false ? "off"
+    : governor === null || controller === null ? "not read" : "mixed";
+  return icons(surface).governance + " " + (short ? "" : "Gov ") + word;
 }
 
 /** One thing the band can lead with, under a key that names it across readings. */
@@ -300,9 +319,15 @@ export type BandInput = {
   surface?: string;
   /** Whether speech is on in every session; the speech switch is drawn only with `onSpeak`. */
   speaking?: boolean;
+  /**
+   * The machine's governance switch, drawn only when the machine has one: a
+   * reading whose source is unconfigured says nothing here and the button goes.
+   */
+  governance?: { governor: boolean | null; controller: boolean | null } | null;
   onToggle: () => unknown;
   onDismiss: () => void;
   onSpeak?: () => unknown;
+  onGovernance?: () => unknown;
   /**
    * Open the pane, narrowed to one of the figures, or to the whole fleet.
    *
@@ -354,6 +379,18 @@ export function bandTree(input: BandInput): Node {
     parts.push(button(BAND_SPEAK, word, input.onSpeak, speaking));
     used += PART_GAP + word.length + BUTTON_CHROME;
   }
+  // The governance switch sits beside the voice's, and only while the machine
+  // has one: a person who does not run that tooling never sees the button.
+  const governing = input.governance !== undefined && input.governance !== null
+    && input.onGovernance !== undefined;
+  let governanceAt = -1;
+  if (governing) {
+    const word = governanceLabel(input.governance?.governor ?? null,
+                                 input.governance?.controller ?? null, input.surface);
+    governanceAt = parts.length;
+    parts.push(button(BAND_GOVERNANCE, word, input.onGovernance as () => unknown));
+    used += PART_GAP + word.length + BUTTON_CHROME;
+  }
   const figures: [number, string, Color, "working" | "waiting" | "failed"][] =
     input.counts === null ? [] : [
       [input.counts.working, "working", "success", "working"],
@@ -398,6 +435,14 @@ export function bandTree(input: BandInput): Node {
     const full = speakLabel(speaking, input.surface);
     const short = speakLabel(speaking, input.surface, true);
     parts[1] = button(BAND_SPEAK, short, input.onSpeak, speaking);
+    used -= full.length - short.length;
+  }
+  if (governanceAt >= 0 && used + dismissWidth > input.width) {
+    const full = governanceLabel(input.governance?.governor ?? null,
+                                 input.governance?.controller ?? null, input.surface);
+    const short = governanceLabel(input.governance?.governor ?? null,
+                                  input.governance?.controller ?? null, input.surface, true);
+    parts[governanceAt] = button(BAND_GOVERNANCE, short, input.onGovernance as () => unknown);
     used -= full.length - short.length;
   }
   const room = input.width - used - PART_GAP - dismissWidth;

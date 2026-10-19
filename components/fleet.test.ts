@@ -129,7 +129,7 @@ type Stub = {
 const TITLES: Record<string, string> = {
   prs: "Pull requests", sessions: "Background sessions", trials: "Trials", running: "Running",
   session: "This session", worktrees: "Worktrees", skills: "Skills", warnings: "Warnings",
-  keys: "Keys", load: "Load",
+  keys: "Keys", load: "Load", governance: "Governance",
 };
 /**
  * The sections a reading with nothing wrong in it draws, in pane order: the
@@ -155,6 +155,8 @@ const OUTPUT = {
   },
   trials: { state: "empty" }, progress: { state: "empty" }, prs: { state: "empty" },
   skills: { state: "empty" }, worktrees: { state: "empty" },
+  governance: { state: "ready", governor: true, controller: true, source: "config",
+                path: "/tmp/switch.json", updated_at: null, by: null, errors: [] },
 };
 
 /**
@@ -2576,14 +2578,14 @@ test("the entry hands the surface's name to the binding: vectors on the desktop,
   await desktop.start();
   await drain();
   const drawn = await desktop.quiesce(120);
-  assert.equal(vectorAlts(drawn).some((alt) => alt.startsWith("Cost:")), true,
+  assert.equal(vectorAlts(drawn).some((alt) => alt.startsWith("Cost (API):")), true,
                JSON.stringify(vectorAlts(drawn)));
   const terminal = stub({ usage });
   await terminal.start();
   await drain();
   const cells = await terminal.quiesce(120);
   assert.deepEqual(vectorAlts(cells), []);
-  assert.equal(renderedText(cells as never).includes("Cost"), true);
+  assert.equal(renderedText(cells as never).includes("Cost (API)"), true);
 });
 
 test("an engine that reports no usage leaves the reading's session document standing", async () => {

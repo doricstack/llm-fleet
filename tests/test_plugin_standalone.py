@@ -418,6 +418,15 @@ class StandalonePluginTests(unittest.TestCase):
             "session": [
                 Case([*config], codes=(0,), check=json_document),
             ],
+            # No switch path is configured here, so the read says so and a write
+            # is refused rather than writing a switch nobody named.
+            "governance": [
+                Case([*config], codes=(0,), check=json_document),
+                Case([*config, "--set", "governor", "--off"], codes=(0,),
+                     check=lambda test, out: test.assertEqual(json.loads(out)["state"],
+                                                              "unconfigured")),
+                Case([*config, "--set", "governor"], codes=(2,), check=json_document_any_state),
+            ],
             "transcript": [
                 Case([*config, "--path", str(self.transcript), "--model", "claude-opus-4-6"],
                      codes=(0,), check=json_document),

@@ -58,9 +58,9 @@ export type SpendTile = { label: string; value: string; color?: "subtle" };
 export function spendWindowTile(figures: { spendWindowUsd?: unknown }): SpendTile {
   const usd = figures.spendWindowUsd;
   if (typeof usd !== "number" || !Number.isFinite(usd) || usd < 0) {
-    return { label: "24h", value: "not reported", color: "subtle" };
+    return { label: "24h routed", value: "not reported", color: "subtle" };
   }
-  return { label: "24h", value: money(usd) };
+  return { label: "24h routed", value: money(usd) };
 }
 
 /** The figures the reader priced across the machine, kept over the engine's document. */

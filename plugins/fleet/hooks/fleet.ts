@@ -59,7 +59,7 @@
 
 import type { ReaderDocuments } from "../components/snapshot.ts";
 import type { Engine, Register } from "./engine.ts";
-import type { Job } from "../components/state.ts";
+import type { Governance, Job } from "../components/state.ts";
 import type { PaneConfig } from "../components/options.ts";
 import type { FleetDigestSeen, FleetFold } from "../types/index.d.ts";
 import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.ts";
@@ -411,6 +411,13 @@ type State = {
   focus: Focus | null;
   /** The rows a person pressed open, by the key the row carries. */
   details: Record<string, true>;
+  /**
+   * The governance scope whose switch-off is waiting for its confirming press.
+   *
+   * Switching a scope on is one press; switching one off takes two, so this is
+   * what the pane is told while the first press stands.
+   */
+  confirmingGovernance: "governor" | "controller" | null;
   /** Whether the sections this session was left in full have been asked for. */
   shownAllRestored: boolean;
   /** The band items a person dismissed, by key. */
@@ -932,7 +939,7 @@ function keepTime($: Engine, state: State): void {
  * Never awaited by a hook: the answer arrives between paints, which is the only
  * place a process may run.
  */
-function refresh($: Engine, state: State, from: "timer" | "paint" = "timer"): void {
+function refresh($: Engine, state: State, from: "timer" | "paint" | "press" = "timer"): void {
   // Every paint of a stale pane lands here while a look is out, so nothing
   // before this line may ask for a frame: asking on every paint drew sixty
   // frames a second until the read landed. A paint asks only because the whole
@@ -2316,7 +2323,111 @@ function paneActions($: Engine, state: State, surface: string): PaneActions {
     resend: (job) => { void resendReply($, state, job).catch(() => undefined); },
     clearAnswered: () => { void clearAnswered($, state).catch(() => undefined); },
     clearUnreadable: (job) => { void clearUnreadable($, state, job).catch(() => undefined); },
+    governance: (scope) => { void moveGovernance($, state, scope).catch(() => undefined); },
   };
+}
+
+/**
+ * The switch as the reading in hand states it, or null when it states nothing.
+ *
+ * Every press reads the value from here rather than from the drawn row: another
+ * session may have moved the switch since this one painted, and a press that
+ * trusted the paint would run the switch the wrong way.
+ */
+function heldGovernance(state: State): Governance | null {
+  const held = state.held;
+  if (held === null || !("documents" in held)
+      || !isReading(held.documents as ReaderDocuments | null)) {
+    return null;
+  }
+  const governance = snapshotFrom(held.documents as ReaderDocuments,
+                                  "at" in held ? held.at : 0).governance;
+  return governance?.state === "ready" ? governance : null;
+}
+
+/**
+ * Move one governance scope, or ask for the press that confirms switching it off.
+ *
+ * Switching a scope off is a gate going away, so it takes a second press;
+ * switching one on is the gate coming back and does not. The band moves both
+ * scopes at once and has no second press, so it only ever moves them the safe
+ * way when they disagree: anything but both on turns both on.
+ */
+async function moveGovernance($: Engine, state: State, scope: "governor" | "controller") {
+  const governance = heldGovernance(state);
+  const on = scope === "governor" ? governance?.governor : governance?.controller;
+  if (on === null || on === undefined) {
+    return;
+  }
+  if (on && state.confirmingGovernance !== scope) {
+    state.confirmingGovernance = scope;
+    $.ui.invalidate("ui.render");
+    return;
+  }
+  state.confirmingGovernance = null;
+  await switchGovernance($, state, scope, !on);
+}
+
+/** Move both scopes from the band's one press. */
+async function moveGovernanceBoth($: Engine, state: State) {
+  const governance = heldGovernance(state);
+  if (governance === null) {
+    return;
+  }
+  // Both on means both go off; anything else means both come back on, which is
+  // the direction that cannot leave a gate away because a scope was mixed.
+  const bothOn = governance.governor === true && governance.controller === true;
+  state.confirmingGovernance = null;
+  await switchGovernance($, state, "both", !bothOn);
+}
+
+/**
+ * Run the switch, say why when it refused, and read again to show where it went.
+ *
+ * The entry answers a refusal on its standard output and exits nought, so the
+ * printed document is part of what decides whether the switch moved.
+ */
+async function switchGovernance($: Engine, state: State, scope: "governor" | "controller" | "both",
+                                on: boolean) {
+  const args = ["--set", scope, on ? "--on" : "--off"];
+  let run: Awaited<ReturnType<typeof runEntry>>;
+  try {
+    run = await runEntry($, "governance", args, ASK_MS);
+  } catch (error) {
+    const said = cancelled(error) ? "the switch was stopped before it answered"
+      : interpreterAdvice("governance", error instanceof Error ? error.message : String(error));
+    await say($, "fleet: " + said, state.alerts.copyToastMs).catch(() => undefined);
+    $.ui.invalidate("ui.render");
+    return;
+  }
+  if (run.exitCode !== 0) {
+    const reason = run.stderr.trim().split("\n")[0] || "the switch refused it";
+    await say($, "fleet: " + reason, state.alerts.copyToastMs).catch(() => undefined);
+  } else {
+    const printed = printedDocument(run.stdout);
+    if (printed !== null && (printed.state === "failed" || printed.state === "unavailable"
+        || printed.state === "unconfigured")) {
+      const first = Array.isArray(printed.errors) && typeof printed.errors[0] === "object"
+        && printed.errors[0] !== null
+        ? (printed.errors[0] as { reason?: unknown }).reason : undefined;
+      const reason = typeof first === "string" && first ? first : "the switch did not move";
+      await say($, "fleet: " + reason, state.alerts.copyToastMs).catch(() => undefined);
+    }
+  }
+  // The switch wrote a file, and the next reading is what proves it took.
+  refresh($, state, "press");
+  $.ui.invalidate("ui.render");
+}
+
+/** What an entry printed, when it printed one JSON object. */
+function printedDocument(stdout: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(stdout);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -2836,7 +2947,9 @@ function armTips($: Engine, state: State): void {
 }
 
 /** The heading a section is named by in the commands that open the pane on it. */
-const ONE_SECTION_TITLES: Record<string, string> = { worktrees: "Worktrees", keys: "Keys" };
+const ONE_SECTION_TITLES: Record<string, string> = {
+  worktrees: "Worktrees", keys: "Keys", governance: "Governance",
+};
 
 /**
  * The section a band item's row is drawn in, from the key the item carries.
@@ -2979,7 +3092,7 @@ export const register: Register = (on, options) => {
   const state: State = { held: null, looking: false, readingWhole: false, counting: false, hydrated: false, pressed: {},
                          restored: false, shownAll: {}, shownAllRestored: false,
                          putAway: {}, putAwayRestored: false,
-                         focus: null, details: {},
+                         focus: null, details: {}, confirmingGovernance: null,
                          hidden: [], replied: [], replying: new Set(), cleared: [],
                          paused: null,
                          sessionId: "", sessionIdRead: "", open: false,
@@ -3327,6 +3440,14 @@ export const register: Register = (on, options) => {
                              closer(element);
                              return;
                            }
+                           // A governance scope armed for its confirming press
+                           // is put down by any other control: the second press
+                           // has to follow the first, not an afternoon of
+                           // reading between them.
+                           if (state.confirmingGovernance !== null) {
+                             state.confirmingGovernance = null;
+                             $.ui.invalidate("ui.render");
+                           }
                            // Nothing about the pane changed unless the press
                            // named a control it drew, so only then is it asked to
                            // draw again.
@@ -3418,6 +3539,7 @@ export const register: Register = (on, options) => {
                            putAway: state.putAway,
                            focus: state.focus,
                            details: state.details,
+                           confirmingGovernance: state.confirmingGovernance,
                            countsAt: state.shownCountsAt,
                            actions: paneActions($, state, e.surface),
                            replied: state.replied,
@@ -3480,6 +3602,15 @@ export const register: Register = (on, options) => {
       width: e.props.bodyColumns,
       surface: e.surface,
       speaking: state.speechOn === true,
+      // The switch is drawn only for a machine that has one: a reading whose
+      // governance source is unconfigured carries no state to draw.
+      governance: snapshot !== null && snapshot.governance?.state === "ready"
+        ? { governor: snapshot.governance.governor,
+            controller: snapshot.governance.controller }
+        : null,
+      onGovernance: snapshot !== null && snapshot.governance?.state === "ready"
+        ? () => moveGovernanceBoth($, state).catch(() => undefined)
+        : undefined,
       onSpeak: () => {
         // Which way it goes is read from the store at the press, not from the
         // paint: another session may have switched it since this band drew.

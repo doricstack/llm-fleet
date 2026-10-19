@@ -27,6 +27,7 @@ export const ENTRIES = {
   transcript: "readers/transcript.py",
   doctor: "readers/doctor.py",
   setup: "readers/setup.py",
+  governance: "readers/governance.py",
 } as const;
 
 /** A key of the table, which is the only thing a caller names. */

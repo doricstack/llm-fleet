@@ -87,5 +87,5 @@
   <text x="1144" y="710" class="mono" fill="#B9B3A6" text-anchor="end">checks 6 of 6</text>
 
   <line x1="56" y1="742" x2="1144" y2="742" stroke="#2A2633" stroke-width="1"/>
-  <text x="56" y="784" class="small" fill="#8A8578">llm-fleet 0.4.6 | Doric Stack LLC | MIT</text>
+  <text x="56" y="784" class="small" fill="#8A8578">llm-fleet 0.4.7 | Doric Stack LLC | MIT</text>
 </svg>

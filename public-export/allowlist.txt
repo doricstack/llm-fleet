@@ -91,6 +91,7 @@ plugins/fleet/readers/runtime.py
 plugins/fleet/readers/jobs.py
 plugins/fleet/readers/roster.py
 plugins/fleet/readers/trials.py
+plugins/fleet/readers/governance.py
 plugins/fleet/readers/progress.py
 plugins/fleet/readers/prs.py
 plugins/fleet/readers/skills.py
@@ -132,6 +133,7 @@ tests/test_sandbox.py
 tests/test_plugin_contract.py
 tests/test_readers.py
 tests/test_reader_trials.py
+tests/test_reader_governance.py
 tests/test_reader_progress.py
 tests/test_reader_prs_skills.py
 tests/test_reader_worktrees.py

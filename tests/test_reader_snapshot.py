@@ -74,7 +74,7 @@ class SnapshotCase(unittest.TestCase):
     def test_every_document_is_present_when_everything_is_off(self):
         result = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0)
         self.assertEqual(sorted(result), ["alerts", "band", "custom", "events", "generated_at",
-                                          "load", "pane", "progress", "prs", "roster",
+                                          "governance", "load", "pane", "progress", "prs", "roster",
                                           "session", "skills", "trials", "worktrees"])
         # Nothing was read, so the digest holds nothing and says which sources
         # it could not see.
@@ -99,7 +99,7 @@ class SnapshotCase(unittest.TestCase):
         # person; the warnings come last and keep out of sight while empty.
         self.assertEqual(pane["order"],
                          ["load", "prs", "sessions", "trials", "running", "session",
-                          "worktrees", "skills", "warnings", "keys"])
+                          "worktrees", "skills", "warnings", "governance", "keys"])
         self.assertEqual(pane["sections"]["warnings"]["hideWhenEmpty"], True)
         self.assertEqual(pane["sections"]["prs"]["hideWhenEmpty"], False)
         worktrees = pane["sections"]["worktrees"]

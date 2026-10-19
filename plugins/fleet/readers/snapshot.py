@@ -37,6 +37,7 @@ from readers.progress import read_progress
 from readers.roster import keep_job_states, load_job_states, read_providers
 from readers.session import read_session
 from readers.skills import read_skills
+from readers.governance import read_governance
 from readers.trials import read_trials
 from readers.worktrees import read_worktrees
 
@@ -50,6 +51,7 @@ READERS: dict[str, Callable[..., dict[str, Any]]] = {
     "load": read_load,
     "session": read_session,
     "custom": read_custom,
+    "governance": read_governance,
 }
 
 
@@ -57,7 +59,8 @@ def failed(document: str, reason: str) -> dict[str, Any]:
     """The document a reader would have produced had it been able to report this."""
     state_keys = {"roster": "jobs", "trials": "running", "progress": "runs", "prs": "prs",
                   "skills": "items", "worktrees": "worktrees", "load": "processes",
-                  "session": "parameters", "custom": "sections", "events": "events"}
+                  "session": "parameters", "custom": "sections", "events": "events",
+                  "governance": "scopes"}
     body: dict[str, Any] = {"state": "failed", state_keys[document]: [],
                             "errors": [{"source": document, "reason": reason}]}
     if document == "roster":

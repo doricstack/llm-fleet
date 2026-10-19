@@ -376,6 +376,54 @@ test("the band's switch opens and closes the pane with a press, mid-turn", async
   }
 });
 
+test("the band draws no governance switch for a machine that has none", async ($, on) => {
+  mock.clock(on, { now: AT * 1000 });
+  mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
+  on("session.id", () => ({ value: "another-session" }) as never);
+  for (const surface of SURFACES) {
+    const band = await $.ui.mount({ plugin: "llm-fleet", surface, component: "AbovePrompt",
+                                    props: BAND_PROPS as never });
+    expect(JSON.stringify(await band.drawn())).not.toContain("fleet.band.governance");
+  }
+});
+
+test("the band's governance switch moves both scopes without opening the pane", async ($, on) => {
+  mock.clock(on, { now: AT * 1000 });
+  // A reading whose governance source answered is the only one that draws the
+  // button: the switch is tooling this machine has, not one the product ships.
+  mock.store(on, { [READING_KEY]: { at: AT, documents: {
+    ...READING,
+    governance: { state: "ready", governor: true, controller: false, source: "config",
+                  path: "/switch.json", updated_at: null, by: null, errors: [] },
+  } } });
+  const open: string[] = [];
+  const ran: string[][] = [];
+  on("session.id", () => ({ value: "another-session" }) as never);
+  on("ui.panes", () => ({ value: open.map((id) => ({ id })) }) as never);
+  on("ui.open", (_engine, e) => {
+    open.push((e as { id: string }).id);
+    return { value: { isPlaced: true } } as never;
+  });
+  on("process.run", (_engine, e) => {
+    const argv = (e as { argv?: string[] }).argv ?? [];
+    if (argv.some((word) => word.endsWith("governance.py"))) {
+      ran.push(argv);
+      return { value: { exitCode: 0, stdout: JSON.stringify({ state: "ready" }) } } as never;
+    }
+    return { value: { exitCode: 0, stdout: JSON.stringify(READING), stderr: "" } } as never;
+  });
+  const band = await $.ui.mount({ plugin: "llm-fleet", surface: "terminal",
+                                  component: "AbovePrompt", props: BAND_PROPS as never });
+  const drawn = JSON.stringify(await band.drawn());
+  expect(drawn).toContain("fleet.band.governance");
+  expect(drawn).toContain("Gov mixed");
+  await band.press({ key: "fleet.band.governance" });
+  // A mixed machine comes back on both scopes, which is the direction that
+  // cannot leave a gate away because one scope was already off.
+  expect(ran.some((argv) => argv.join(" ").endsWith("--set both --on"))).toBe(true);
+  expect(open).toEqual([]);
+});
+
 test("the band yields to a survey", async ($, on) => {
   mock.clock(on, { now: AT * 1000 });
   mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
@@ -492,7 +540,7 @@ test("this session's section draws the engine's cost and model", async ($, on) =
   // The model is said the way a person says it, and the section opens with tiles.
   expect(drawn).toContain("\"opus 5.5\"");
   expect(drawn).not.toContain("claude-opus-5-5");
-  expect(drawn).toContain("\"Cost\"");
+  expect(drawn).toContain("\"Cost (API)\"");
 });
 
 /** Every node of a drawing of one element type, depth first. */
@@ -536,7 +584,7 @@ test("the desktop draws this session's tiles as vectors, and the terminal as tex
     }
     const vectors = ofType(drawn, "Svg");
     if (surface !== "terminal") {
-      const cost = vectors.find((node) => node.props?.alt === "Cost: $3.75");
+      const cost = vectors.find((node) => node.props?.alt === "Cost (API): $3.75");
       expect(cost).toBeDefined();
       expect(String(cost?.props?.source)).toContain("$3.75");
       expect(String(cost?.props?.source).startsWith("<svg ")).toBe(true);
@@ -544,7 +592,7 @@ test("the desktop draws this session's tiles as vectors, and the terminal as tex
       // The tile's own words, which a terminal Svg would have drawn as nothing:
       // the engine completes the terminal's table with an Svg that is a fragment.
       expect(vectors.length).toBe(0);
-      expect(texts(drawn)).toContain("Cost");
+      expect(texts(drawn)).toContain("Cost (API)");
       expect(texts(drawn)).toContain("$3.75");
     }
   }

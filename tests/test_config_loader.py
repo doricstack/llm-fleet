@@ -838,7 +838,7 @@ class LayoutTests(ConfigTestCase):
         resolved = self.load()
         self.assertEqual(resolved["pane"]["sectionOrder"],
                          ["load", "prs", "sessions", "trials", "running", "session",
-                          "worktrees", "skills", "warnings", "keys"])
+                          "worktrees", "skills", "warnings", "governance", "keys"])
 
     def test_section_collapse_defaults_match_the_pane(self) -> None:
         sections = self.load()["pane"]["sections"]

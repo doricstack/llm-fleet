@@ -19,9 +19,9 @@ import { FOOTER_TEXT } from "./version.ts";
 // before the machine-wide spend tile needed the same rule in that module.
 export { money };
 import type {
-  AgentFigures, Job, Load, LoadProcess, Progress, PullRequest, PullRequests, Roster, Run,
-  SessionFigures, SkillItem, Skills, Snapshot, SpendSeries, Trial, Trials, Worktree, Worktrees,
-  Change, CustomRow, CustomSection } from "./state.ts";
+  AgentFigures, Governance, Job, Load, LoadProcess, Progress, PullRequest, PullRequests, Roster,
+  Run, SessionFigures, SkillItem, Skills, Snapshot, SpendSeries, Trial, Trials, Worktree,
+  Worktrees, Change, CustomRow, CustomSection } from "./state.ts";
 
 /** The prefix a section a person added is named by in the order. */
 export const CUSTOM_PREFIX = "custom:";
@@ -122,7 +122,18 @@ export type PaneActions = {
   clearAnswered?: () => void;
   /** Clear a reply's record that does not read, so the question can take a reply. */
   clearUnreadable?: (job: Job) => void;
+  /**
+   * Move one of the machine's governance scopes.
+   *
+   * A scope that is on is switched off only on a second press, so this is
+   * called once to arm that press and again to make it; the option that says
+   * which scope is armed is `confirmingGovernance`.
+   */
+  governance?: (scope: GovernanceScope) => void;
 };
+
+/** The two scopes the machine's governance switch carries, which the pane can move. */
+export type GovernanceScope = "governor" | "controller";
 
 /**
  * Why replies are paused on this machine, as the helper last refused one: too
@@ -230,6 +241,13 @@ export type PaneOptions = {
   focus?: Focus | null;
   /** The rows a person pressed open, by the key the row carries. */
   details?: Record<string, true>;
+  /**
+   * The scope whose switch-off is waiting for the press that confirms it.
+   *
+   * Switching a scope on takes one press; switching one off is a gate going
+   * away, so the row asks again and this is what says it is asking.
+   */
+  confirmingGovernance?: GovernanceScope | null;
 };
 
 /** The three states a headline figure narrows the pane to. */
@@ -241,6 +259,8 @@ export const FOCUS_PREFIX = "fleet.focus.";
 export const FOCUS_CLEAR = "fleet.focus.clear";
 /** The address of a press that opens the rest of a row. */
 export const DETAILS_PREFIX = "fleet.details.";
+/** The address of a press on one of the machine's governance switches, before the scope. */
+export const GOVERNANCE_PREFIX = "fleet.governance.";
 
 /**
  * Whether a row is one the focused figure counted.
@@ -371,6 +391,7 @@ const DEFAULT_TITLES: Record<string, string> = {
   worktrees: "Worktrees",
   skills: "Skills",
   load: "Load",
+  governance: "Governance",
   warnings: "Warnings",
   keys: "Keys",
 };
@@ -1377,6 +1398,8 @@ const SECTION_TEXT: Record<string, { disabled: string; empty: string }> = {
             empty: "No findings in the configured scan folder." },
   load: { disabled: "The machine's load is switched off in configuration.",
           empty: "The process table held nothing to read." },
+  governance: { disabled: "The governance switch is not configured on this machine.",
+                empty: "The governance switch has nothing to show." },
 };
 
 /**
@@ -1723,9 +1746,11 @@ function sessionGroup(session: SessionFigures, options: PaneOptions): Group {
       ]
       : [
         spend !== undefined
-          ? { label: "Cost", value: money(spend) } : { label: "Cost", ...unreported },
-        // The machine's own day sits beside this session's spend, because the
-        // question a person asks of the card is what everything is costing.
+          ? { label: "Cost (API)", value: money(spend) } : { label: "Cost (API)", ...unreported },
+        // Real money spent on routed providers sits beside the host's own
+        // API-list figure, and the two are labelled apart because they are not
+        // the same currency: one is a subscription session priced at Anthropic's
+        // rates, the other is what another provider actually charged.
         spendWindowTile(session),
         session.remainingPercent !== undefined
           ? { label: "Context", value: percentOf(session.remainingPercent) + "% left",
@@ -2283,6 +2308,81 @@ function keyRow(key: string, does: string): Row {
   return { title: key, meta: [{ text: does }], slot: [] };
 }
 
+/** The title a governance scope is drawn under. */
+function scopeTitle(scope: GovernanceScope): string {
+  return scope === "governor" ? "Governor" : "Controller";
+}
+
+/**
+ * One scope: how it stands, and the press that moves it.
+ *
+ * The word at the right is the switch itself, and the quiet line says what the
+ * next press does. A scope that is on takes two presses to switch off, which is
+ * the one press in this pane that changes a gate in front of every session; the
+ * line says so while the first press stands.
+ */
+function governanceRow(scope: GovernanceScope, on: boolean | null, armed: boolean,
+                       options: PaneOptions): Row {
+  const title = scopeTitle(scope);
+  const key = GOVERNANCE_PREFIX + scope;
+  const word = on === true ? "on" : on === false ? "off" : "not read";
+  const color: Slot["color"] | undefined = on === true ? "success"
+    : on === false ? "warning" : undefined;
+  const does = armed ? "press again to switch off"
+    : on === true ? "press to switch off"
+    : on === false ? "press to switch on" : "the switch did not say";
+  const behind = on === true ? "off" : "on";
+  return {
+    key,
+    title,
+    meta: [{ text: does, ...(armed ? { color: "warning" as const } : { dim: true }) }],
+    slot: [{ text: word, ...(color ? { color } : { dim: true }) }],
+    press: {
+      key,
+      label: "Turn " + title.toLowerCase() + " " + behind,
+      onPress: () => options.actions?.governance?.(scope),
+    },
+  };
+}
+
+/**
+ * The machine's governor and controller switch.
+ *
+ * A machine whose configuration names no switch draws no section at all: the
+ * tooling behind it is the owner's, and a pane that offered the switch to
+ * someone who does not run it would be drawing a card for a control that does
+ * nothing. A source that failed is drawn, because a failure is a reading.
+ */
+function governanceGroup(document: Governance | undefined,
+                         options: PaneOptions): Group | undefined {
+  if (document === undefined || document.state === "disabled"
+      || document.state === "unconfigured") {
+    return undefined;
+  }
+  const state = groupState(document.state);
+  const rows = state === "ready"
+    ? [governanceRow("governor", document.governor,
+                     options.confirmingGovernance === "governor", options),
+       governanceRow("controller", document.controller,
+                     options.confirmingGovernance === "controller", options)]
+    : [];
+  const held: Slot[] = [];
+  if (state === "ready") {
+    const on = [document.governor, document.controller].filter((value) => value === true).length;
+    const word = on === 2 ? "both on" : on === 0 ? "both off"
+      : document.governor === true ? "governor on, controller off"
+      : "governor off, controller on";
+    held.push({ text: word });
+    if (document.updated_at !== null) {
+      const stamp = Date.parse(document.updated_at);
+      const age = Number.isFinite(stamp) ? ageText(options.now - stamp / 1000) : "";
+      held.push({ text: "  " + (document.by ? shown(document.by).text + " " : "") + age,
+                  dim: true });
+    }
+  }
+  return sectionGroup("governance", rows, state, held, options);
+}
+
 /**
  * What this pane's keys do, and the tips the configuration carries with them.
  *
@@ -2334,6 +2434,12 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     warnings: [warningGroup(allErrors(snapshot), snapshot.roster, options)],
     keys: [keyGroup(options)],
   };
+  // A machine that has no switch has no section for one: the section is left
+  // out of what the pane knows, so neither a card nor a picker entry is drawn.
+  const governed = governanceGroup(snapshot.governance, options);
+  if (governed !== undefined) {
+    built.governance = [governed];
+  }
   for (const name of options.sectionOrder) {
     if (name.startsWith(CUSTOM_PREFIX)) {
       built[name] = [customGroup(name, snapshot.custom.sections[name.slice(CUSTOM_PREFIX.length)],

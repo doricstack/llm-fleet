@@ -98,7 +98,7 @@ test("a routed session's Cost card draws the reader's figure over the host's tab
                                   costSource: "provider" });
   const lines = linesOf(documents);
   assert.equal(lines.includes("$149.52"), false, lines.join("\n"));
-  const at = lines.indexOf("Cost");
+  const at = lines.indexOf("Cost (API)");
   assert.notEqual(at, -1);
   assert.equal(lines[at + 1], "$0.97");
   // The heading states the same figure, and the row says which pricing it is.
@@ -114,7 +114,7 @@ test("a routed session priced before the engine answers draws what the reader pr
   const documents = withSession(readingWith({ providerCostUsd: 0.9659,
                                               costSource: "provider" }), null) as ReaderDocuments;
   const lines = linesOf(documents);
-  const at = lines.indexOf("Cost");
+  const at = lines.indexOf("Cost (API)");
   assert.notEqual(at, -1);
   assert.equal(lines[at + 1], "$0.97");
 });
@@ -124,7 +124,7 @@ test("the engine's table stands where the reader priced nothing", () => {
   // figure of its own, so the engine's is the one drawn.
   const documents = readingWith({ costUsd: 149.52, costSource: "host" });
   const lines = linesOf(documents);
-  const at = lines.indexOf("Cost");
+  const at = lines.indexOf("Cost (API)");
   assert.notEqual(at, -1);
   assert.equal(lines[at + 1], "$149.52");
 });
@@ -154,7 +154,7 @@ test("the machine's 24-hour spend is a card beside this session's cost", () => {
   // The reader's window figure survives the engine's document replacing the payload's.
   assert.equal((merged.session as Record<string, unknown>).spendWindowUsd, 3.04);
   const lines = linesOf(merged);
-  const at = lines.indexOf("24h");
+  const at = lines.indexOf("24h routed");
   assert.notEqual(at, -1);
   assert.equal(lines[at + 1], "$3.04");
   assert.equal(lines.includes("$0.00"), false);
@@ -164,7 +164,7 @@ test("a machine spend nobody could price says so, never $0.00", () => {
   const engine = sessionDocument(USAGE, "deepseek-flash[1m]", null, "abc", NOW_MS);
   assert.ok(engine);
   const lines = linesOf(withSession(readingWith({}), engine) as ReaderDocuments);
-  const at = lines.indexOf("24h");
+  const at = lines.indexOf("24h routed");
   assert.notEqual(at, -1);
   assert.equal(lines[at + 1], "not reported");
   assert.equal(lines.includes("$0.00"), false);

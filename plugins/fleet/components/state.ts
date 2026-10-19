@@ -422,6 +422,29 @@ export type Load = {
   errors: ReaderError[];
 };
 
+/**
+ * The machine's governor and controller switch.
+ *
+ * The tool that owns the switch writes one small document, so a state this
+ * layer draws is one the reader read: a file that could not be read is failed
+ * and carries no scope at all, rather than the tool's own "both on" default.
+ */
+export type Governance = {
+  state: ReaderState;
+  /** Whether each scope is on, absent when the document was not a reading. */
+  governor: boolean | null;
+  controller: boolean | null;
+  /** Where the answer came from: the file, a legacy marker, or a missing file's default. */
+  source: string | null;
+  /** The switch file the configuration named. */
+  path: string | null;
+  /** When the switch last moved, as the writer stamped it. */
+  updated_at: string | null;
+  /** Who moved it, as the writer recorded. */
+  by: string | null;
+  errors: ReaderError[];
+};
+
 /** One row a custom section's command printed, checked by the reader. */
 export type CustomRow = {
   title: string;
@@ -470,6 +493,8 @@ export type Snapshot = {
   worktrees: Worktrees;
   load: Load;
   custom: Custom;
+  /** The machine's governor and controller switch; absent from a reading taken before it was read. */
+  governance?: Governance;
   /** The digest's events; absent from a reading taken before they were read, or a part of one. */
   events?: Events;
 };

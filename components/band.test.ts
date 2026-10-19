@@ -11,9 +11,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_ITEM, BAND_SPEAK, BAND_TOGGLE,
+import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_GOVERNANCE, BAND_ITEM, BAND_SPEAK,
+         BAND_TOGGLE,
          bandConfigFrom, bandCounts, bandItems,
-         answeredSources, bandTree, fleetLabel, keptHidden,
+         answeredSources, bandTree, fleetLabel, governanceLabel, keptHidden,
          isOwnJob, speakLabel } from "../plugins/fleet/components/band.ts";
 import { renderedText } from "../plugins/fleet/components/layout.ts";
 import { snapshotFrom, type ReaderDocuments } from "../plugins/fleet/components/snapshot.ts";
@@ -265,6 +266,48 @@ test("the switch is always drawn, and its word says which way a press goes", () 
     assert.equal(nodesIn(tree).some((node) =>
       (node.props as { key?: string }).key === BAND_DISMISS), false);
   }
+});
+
+test("the governance switch is drawn only for a machine that has one", () => {
+  // A person who does not run the tooling behind the switch never sees a
+  // button that would do nothing, and neither does a band drawn before a
+  // reading: null is no button, and an absent field is the same.
+  const plain = nodesIn(bandTree({ items: [], counts: null, open: false, width: 120,
+                                   onToggle: noop, onDismiss: noop }));
+  assert.equal(plain.some((node) =>
+    (node.props as { key?: string }).key === BAND_GOVERNANCE), false);
+  const off = nodesIn(bandTree({ items: [], counts: null, open: false, width: 120,
+                                 governance: null, onGovernance: () => undefined,
+                                 onToggle: noop, onDismiss: noop }));
+  assert.equal(off.some((node) =>
+    (node.props as { key?: string }).key === BAND_GOVERNANCE), false);
+  // A reading without a press is still no switch: the button would do nothing.
+  const inert = nodesIn(bandTree({ items: [], counts: null, open: false, width: 120,
+                                   governance: { governor: true, controller: true },
+                                   onToggle: noop, onDismiss: noop }));
+  assert.equal(inert.some((node) =>
+    (node.props as { key?: string }).key === BAND_GOVERNANCE), false);
+});
+
+test("the governance switch states both scopes in one word and presses through", () => {
+  const pressed: string[] = [];
+  const tree = bandTree({ items: [], counts: null, open: false, width: 140,
+                          governance: { governor: true, controller: false },
+                          onGovernance: () => { pressed.push("pressed"); },
+                          onToggle: noop, onDismiss: noop });
+  const button = nodesIn(tree).find((node) =>
+    (node.props as { key?: string }).key === BAND_GOVERNANCE);
+  assert.equal((button?.props as { label?: string }).label, "⚙ Gov mixed");
+  (button?.props as { onPress?: () => unknown }).onPress?.();
+  assert.deepEqual(pressed, ["pressed"]);
+  // The three answers, and one it cannot answer: a scope the switch did not
+  // report is "not read" rather than folded into on or off.
+  assert.equal(governanceLabel(true, true), "⚙ Gov on");
+  assert.equal(governanceLabel(false, false), "⚙ Gov off");
+  assert.equal(governanceLabel(true, false), "⚙ Gov mixed");
+  assert.equal(governanceLabel(null, true), "⚙ Gov not read");
+  // A band too narrow for the word keeps the icon and the state.
+  assert.equal(governanceLabel(true, true, undefined, true), "⚙ on");
 });
 
 test("a figure is the press that opens the pane narrowed to what it counted", () => {

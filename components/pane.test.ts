@@ -218,6 +218,64 @@ test("the picker draws a section a person put away dim, and the same press bring
   assert.equal(open?.dimColor, undefined);
 });
 
+test("the governance section draws one switch per scope, and names what each press does", () => {
+  const pressed: string[] = [];
+  const actions = { copy: () => undefined, refuse: () => undefined,
+                    reply: () => undefined,
+                    governance: (scope: string) => { pressed.push(scope); } };
+  const reading = snapshot({ governance: { state: "ready", governor: true, controller: false,
+                                           source: "config", path: "/switch.json",
+                                           updated_at: null, by: null, errors: [] } });
+  const built = paneFrom(reading, options({ sectionOrder: ["governance"],
+    sections: { governance: { visible: true, collapsed: false } }, actions }));
+  const section = group(built, "Governance");
+  assert.deepEqual(section.rows.map((row) => row.title), ["Governor", "Controller"]);
+  // The right-hand word is the switch itself, and the quiet line says which way
+  // the next press goes.
+  assert.deepEqual(section.rows.map((row) => row.slot.map((slot) => slot.text)),
+                   [["on"], ["off"]]);
+  assert.deepEqual(section.rows.map((row) => row.meta.map((slot) => slot.text)),
+                   [["press to switch off"], ["press to switch on"]]);
+  assert.deepEqual(section.summary?.map((slot) => slot.text), ["governor on, controller off"]);
+  section.rows[0]?.press?.onPress();
+  section.rows[1]?.press?.onPress();
+  assert.deepEqual(pressed, ["governor", "controller"]);
+  // The first press on a scope that is on only arms the one that switches it
+  // off: the row says so, and the press is not made until it is pressed again.
+  const armed = paneFrom(reading, options({ sectionOrder: ["governance"],
+    sections: { governance: { visible: true, collapsed: false } }, actions,
+    confirmingGovernance: "governor" }));
+  assert.equal(group(armed, "Governance").rows[0]?.meta[0]?.text,
+               "press again to switch off");
+});
+
+test("a machine with no governance switch draws no switch and no section", () => {
+  const reading = snapshot({ governance: { state: "unconfigured", governor: null,
+                                           controller: null, source: null, path: null,
+                                           updated_at: null, by: null, errors: [] } });
+  const built = paneFrom(reading, options({ sectionOrder: ["governance"],
+    sections: { governance: { visible: true, collapsed: false } } }));
+  assert.equal(built.groups.some((entry) => entry.title === "Governance"), false);
+  assert.equal((built.picker ?? []).some((item) => item.name === "governance"), false);
+  // A reading taken before the switch was read draws the same way: an absent
+  // document is not a machine whose gates are on.
+  const older = paneFrom(snapshot(), options({ sectionOrder: ["governance"],
+    sections: { governance: { visible: true, collapsed: false } } }));
+  assert.equal(older.groups.some((entry) => entry.title === "Governance"), false);
+});
+
+test("a governance document that failed draws the failure and no state", () => {
+  const reading = snapshot({ governance: { state: "failed", governor: null, controller: null,
+                                           source: null, path: null, updated_at: null, by: null,
+                                           errors: [{ source: "governance",
+                                                      reason: "switch file is not JSON" }] } });
+  const built = paneFrom(reading, options({ sectionOrder: ["governance"],
+    sections: { governance: { visible: true, collapsed: false } } }));
+  const section = group(built, "Governance");
+  assert.equal(section.state, "failed");
+  assert.deepEqual(section.rows, []);
+});
+
 function options(overrides: Partial<PaneOptions> = {}): PaneOptions {
   return {
     width: 120,
@@ -862,8 +920,8 @@ test("this session's figures are drawn, and a figure nobody sent is not a zero",
                             "Context window", "Five-hour window", "Weekly window"]);
   // The figures a person looks at their own session for lead it, as tiles, with
   // the machine's day beside the session's own spend.
-  assert.deepEqual(drawn.tiles, [{ label: "Cost", value: "$12.50" },
-                                 { label: "24h", value: "not reported", color: "subtle" },
+  assert.deepEqual(drawn.tiles, [{ label: "Cost (API)", value: "$12.50" },
+                                 { label: "24h routed", value: "not reported", color: "subtle" },
                                  { label: "Context", value: "42.5% left" },
                                  { label: "Time", value: "15m 0s" }]);
   const values = texts(paneFrom(built, options()));
@@ -978,7 +1036,7 @@ test("a cost below a cent is not drawn as nothing", () => {
   // machine's 24-hour spend sits second, beside the session's own cost.
   const unread = group(paneFrom(tiny, options()), "This session").tiles ?? [];
   assert.deepEqual(unread.map((tile) => tile.label),
-                   ["Cost", "24h", "Context", "Time"]);
+                   ["Cost (API)", "24h routed", "Context", "Time"]);
   assert.deepEqual(unread.map((tile) => tile.value),
                    ["~<$0.01", "not reported", "not reported", "not reported"]);
   assert.equal(unread[1]?.color, "subtle");
