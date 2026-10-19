@@ -204,6 +204,44 @@ class ExportTests(unittest.TestCase):
         self.assertIn("binary", result.stderr)
         self.assertFalse(self.destination.exists())
 
+    def icon(self, name="assets/icon.png"):
+        path = self.source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00binary")
+        return path
+
+    def test_a_binary_asset_is_written_byte_for_byte(self):
+        self.write("public-export/allowlist.txt", "README.md\nassets/icon.png\n")
+        self.write("public-export/assets.txt", "assets/icon.png\n")
+        icon = self.icon()
+        result = self.run_export()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        copied = (self.destination / "assets" / "icon.png").read_bytes()
+        self.assertEqual(copied, icon.read_bytes())
+
+    def test_a_binary_asset_is_listed_and_refused_without_the_asset_list(self):
+        self.write("public-export/allowlist.txt", "README.md\nassets/icon.png\n")
+        self.icon()
+        result = self.run_export()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("binary", result.stderr)
+
+    def test_an_asset_not_allowlisted_is_refused(self):
+        self.write("public-export/assets.txt", "assets/icon.png\n")
+        self.icon()
+        result = self.run_export()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not allowlisted", result.stderr)
+
+    def test_a_dry_run_writes_no_asset(self):
+        self.write("public-export/allowlist.txt", "README.md\nassets/icon.png\n")
+        self.write("public-export/assets.txt", "assets/icon.png\n")
+        self.icon()
+        result = self.run_export("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Asset added: assets/icon.png", result.stdout)
+        self.assertFalse(self.destination.exists())
+
     def test_invalid_policy_and_missing_allowlist_match_are_rejected(self):
         for policy in ("", "../outside.md\n", "missing.md\n"):
             with self.subTest(policy=policy):

@@ -188,7 +188,7 @@ def read_progress(config: Mapping[str, Any], *, now: float | None = None,
     # The switch is a state of the machine rather than of the source: a governor
     # switched off in configuration is still off, and a person reading the pane
     # wants to know which of the two is keeping their work from running.
-    state = switch_state(source)
+    state = switch_state(source, config["sources"].get("governance"), "governor")
     if state is not None:
         result["switch"] = state
     if not source["enabled"]:

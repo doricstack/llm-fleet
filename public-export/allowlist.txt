@@ -22,6 +22,7 @@ docs/pane-design.md
 docs/private-to-public-export.md
 public-export/allowlist.txt
 public-export/denylist.txt
+public-export/assets.txt
 .cits/test-impact.sh
 scripts/public-export.py
 scripts/test-report.py
@@ -97,6 +98,7 @@ plugins/llm-fleet/readers/prs.py
 plugins/llm-fleet/readers/skills.py
 plugins/llm-fleet/readers/host.py
 plugins/llm-fleet/.claude-plugin/plugin.json
+plugins/llm-fleet/.claude-plugin/icon.png
 plugins/llm-fleet/.claude-plugin/marketplace.json
 plugins/llm-fleet/README.md
 plugins/llm-fleet/types/index.d.ts

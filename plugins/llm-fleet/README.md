@@ -77,7 +77,18 @@ The pane draws in the terminal, the Claude desktop app and the VS Code extension
 
 The plugin makes no network request of its own. Every fact in the pane is read on this machine and printed to it, and the only messages it sends are `$.session.send` notes to the other Claude sessions on the same machine, which carry a job identifier and a short line such as a speech reply. The one reader that reaches out is the pull-request one, through the `gh` command and your own GitHub login; leave that source off and no pull-request query is made. A custom section runs whatever command you give it, so a command that reaches the network does so because you configured it. It reads the conversation only through the transcripts and events the host hands it, and it never changes one.
 
-Every hook it registers either answers its own command or drawing and returns, or passes the event on unchanged with `next(event)`. It registers no permission event and never decides whether a tool call may run; that stays with you and your settings.
+Every hook it registers either answers its own command or drawing and returns, or passes the event on unchanged with `next(event)`. It registers no permission event and never decides whether a tool call may run; that stays with you and your settings. Its `command.run` hooks are matched to the commands it registers itself, so no other command's answer passes through it.
+
+The hooks, and what each does:
+
+- `session.start` registers the four commands and reads this session's identity.
+- `command.run` answers `/llm-fleet`, `/speak`, `/worktrees` and `/keys`, and nothing else.
+- `ui.render` draws the pane, the band above the prompt and the tip under it.
+- `ui.close` records that this pane shut and, for Escape, the digest it showed as seen.
+- `prompt.submit` hands the prompt on unchanged; it never edits or drops one.
+- `session.end` stops the timers this session started.
+
+It reads no credential and stores none. The environment it reads is terminal identity only: `TERM_PROGRAM`, `TMUX`, `ITERM_SESSION_ID` and `LC_TERMINAL`. Every mods API call it makes is part of Claude Code's own surface; it adds no namespace and calls no method another plugin adds.
 
 It runs two kinds of program. The first are its own Python entries, started through the interpreter you set in the plugin's options: `readers/read.py` for the reading, and the doctor and setup commands. The second are the commands your configuration or the pane's fixed set name, listed above. Both kinds run as your user, with no credentials of their own: the plugin's options hold no key, and the outside commands the readers start get the provider variables stripped, as above.
 

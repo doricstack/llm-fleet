@@ -2412,10 +2412,41 @@ async function switchGovernance($: Engine, state: State, scope: "governor" | "co
         ? (printed.errors[0] as { reason?: unknown }).reason : undefined;
       const reason = typeof first === "string" && first ? first : "the switch did not move";
       await say($, "fleet: " + reason, state.alerts.copyToastMs).catch(() => undefined);
+    } else if (printed !== null && printed.state === "ready") {
+      // The entry answers with the state the file now holds, which is newer than
+      // the shared reading every session is drawing. A look at the store finds
+      // that reading fresh and skips the machine, so a press that only asked for
+      // a look went on drawing the old word for a whole interval: the button
+      // looked dead. Its own answer is drawn here at once.
+      await carryGovernance($, state, printed);
+      return;
     }
   }
-  // The switch wrote a file, and the next reading is what proves it took.
+  // A switch that printed nothing usable is read again, like a refusal: the
+  // file is the proof, and the next reading draws it.
   refresh($, state, "press");
+  $.ui.invalidate("ui.render");
+}
+
+/**
+ * Draw the switch's own answer at once, here and for the next session to open.
+ *
+ * The reading's own age is kept: only the governance part is fresher than it,
+ * and resetting the date would put off the next whole read, which is what says
+ * whether anything else on the machine moved. Every other session draws the
+ * patched reading from the store when it next looks, and reads the file for
+ * itself on its next whole read.
+ */
+async function carryGovernance($: Engine, state: State,
+                               printed: Record<string, unknown>): Promise<void> {
+  const held = state.held;
+  if (held !== null && "documents" in held
+      && isReading(held.documents as ReaderDocuments | null)) {
+    const documents = { ...(held.documents as Record<string, unknown>), governance: printed };
+    const progressAt = typeof held.progressAt === "number" ? held.progressAt : held.at;
+    state.held = { documents, at: held.at, progressAt };
+    await $.store.set(READING_KEY, { at: held.at, progressAt, documents }).catch(() => undefined);
+  }
   $.ui.invalidate("ui.render");
 }
 
@@ -2767,7 +2798,8 @@ function followSpeech($: Engine, state: State): void {
 /** Switch speech on or off in every session, from this one. */
 async function switchSpeech($: Engine, state: State, isOn: boolean): Promise<void> {
   heard($, state, isOn);
-  await $.store.set(SPEECH_ON_KEY, isOn ? await $.clock.now() : false);
+  const turnedAt = isOn ? await $.clock.now() : false;
+  await $.store.set(SPEECH_ON_KEY, turnedAt);
 }
 
 /**
@@ -3382,7 +3414,8 @@ export const register: Register = (on, options) => {
   });
 
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {
-    const primitives = bindPrimitives($.ui.resolve(e) as unknown as HostElements, e.surface);
+    const elements = $.ui.resolve(e) as unknown as HostElements;
+    const primitives = bindPrimitives(elements, e.surface);
     const now = (await $.clock.now()) / 1000;
     // A pane opened on the reading the last session left has had no read to
     // ask alongside, so its first paint asks for this session's figures itself.
@@ -3426,7 +3459,8 @@ export const register: Register = (on, options) => {
         hydrate($, state);
       }
       // A read still in flight, named as such: never an empty fleet.
-      return surfaceTree({ documents: null, width, now, onPress: closer }, primitives);
+      return surfaceTree({ documents: null, width, now, surface: e.surface,
+                           onPress: closer }, primitives);
     }
     // Too old to draw as current, and too new to be true: a reading dated ahead
     // of this clock makes every age negative, and one that never ages is held
@@ -3437,8 +3471,8 @@ export const register: Register = (on, options) => {
       refresh($, state, "paint");
     }
     if ("reason" in state.held) {
-      return surfaceTree({ documents: null, width, now, reason: state.held.reason,
-                           onPress: closer }, primitives);
+      return surfaceTree({ documents: null, width, now, surface: e.surface,
+                           reason: state.held.reason, onPress: closer }, primitives);
     }
     // What the pane's own configuration resolves to, read off the reading: it
     // travels with the reading because a plugin has no file of its own to read.
@@ -3466,7 +3500,7 @@ export const register: Register = (on, options) => {
     // reading carried over from the last session is that old, and a reading
     // whose own clock is missing is still no newer than when it was read.
     return surfaceTree({ documents: withSession(shown, state.engineSession) as never,
-                         width, now,
+                         width, now, surface: e.surface,
                          takenAt: state.held.at,
                          transform: (drawn: Pane) => {
                            // What the digest drew is what closing the pane marks seen.
@@ -3605,7 +3639,8 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) {
       return next(e);
     }
-    const primitives = bindPrimitives($.ui.resolve(e) as unknown as HostElements, e.surface);
+    const elements = $.ui.resolve(e) as unknown as HostElements;
+    const primitives = bindPrimitives(elements, e.surface);
     const now = (await $.clock.now()) / 1000;
     // Which way the switch points is the engine's answer when it gives one, and
     // the last press otherwise: a band that threw here would draw no switch at

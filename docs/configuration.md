@@ -127,10 +127,10 @@
 | `sources.trials.database` | path or null | Local controller database; `FLEET_CHANGE_DB` override | `null`; required when trials enabled |
 | `sources.trials.paused_when_exists` | path or null | Optional pause marker | `null`; absent means never paused. Checked on every read before opening the database, including lease lookups. |
 | `sources.trials.stages` | string array | Not present | `NEW,PLANNED,TRIALED,PUSHED,MERGED,PUBLISHED,VERIFIED,CLEANUP_ELIGIBLE,CLEANED`: the controller's stage path. A change not at the last stage that moved within `history.trialsSeconds` is drawn in flight with a bar of its place on the path; a state the path does not name keeps its row without a bar |
-| `sources.trials.offSwitch` | path or null | Not present | `null`: a file whose presence switches the change controller off for the whole machine. The heading says which way it is set; the file's contents are never read. Unset draws no switch state |
+| `sources.trials.offSwitch` | path or null | Not present | `null`: the older marker, whose presence switches the change controller off. Read only when no governance switch path is configured; with one, the controller's boolean in that document decides |
 | `sources.progress.enabled` | boolean | Reads shared governor files | `false` |
 | `sources.progress.directory` | path or null | Personal tooling state path; `FLEET_PROGRESS_DIR` override | `null`; required when progress enabled |
-| `sources.progress.offSwitch` | path or null | Not present | `null`: the governor's switch, on the same terms as `sources.trials.offSwitch` |
+| `sources.progress.offSwitch` | path or null | Not present | `null`: the older marker for the governor, on the same terms as `sources.trials.offSwitch`; the governance document's governor boolean decides when one is configured |
 | `sources.progress.paused_when_exists` | path or null | Optional pause marker | `null`; absent means never paused. Checked on every read before inspecting the run directory. |
 | `sources.worktrees.enabled` | boolean | Cached rows, fresh probe on section opening | `false` |
 | `sources.worktrees.roots` | path array | One personal worktree root; `FLEET_WORKTREES_DIR` override | `[]`; required when enabled |

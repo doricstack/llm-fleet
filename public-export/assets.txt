@@ -1,0 +1,1 @@
+plugins/llm-fleet/.claude-plugin/icon.png

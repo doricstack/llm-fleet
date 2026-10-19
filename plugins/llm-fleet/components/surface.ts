@@ -40,6 +40,12 @@ export type SurfaceInput = {
   reason?: string;
   /** What a press on one of the pane's controls does, when the caller answers. */
   onPress?: (element: string) => void;
+  /**
+   * The surface drawing the pane. A picture surface draws its sections as
+   * cards; the terminal, and a caller that names none, draws them as the runs
+   * of lines a terminal reads best.
+   */
+  surface?: string;
   options?: PaneOptions;
   /** What the caller changes on the pane before it is drawn, such as what is moving. */
   transform?: (pane: Pane) => Pane;
@@ -72,7 +78,7 @@ function notice(state: Group["state"], text: string, input: SurfaceInput,
     width: input.width,
     narrowAt: 60,
   };
-  return mount(recolor(renderPane(pane), input.options?.theme ?? THEME), primitives);
+  return mount(recolor(renderPane(pane, input.surface), input.options?.theme ?? THEME), primitives);
 }
 
 /** Whether the documents are the loader's refusal, rather than a reading. */
@@ -157,6 +163,7 @@ export function surfaceTree(input: SurfaceInput, primitives: Primitives) {
   // a caller that passes its own options still gets working controls.
   const options = input.onPress ? { ...base, onPress: input.onPress } : base;
   const pane = paneFrom(snapshot, options);
-  return mount(recolor(renderPane(input.transform ? input.transform(pane) : pane), options.theme ?? THEME),
+  return mount(recolor(renderPane(input.transform ? input.transform(pane) : pane, input.surface),
+                       options.theme ?? THEME),
                primitives);
 }

@@ -78,12 +78,22 @@ export function nodeLines(node: Node | string, width: number,
   if (node.type === "Button") {
     // A button draws its label. Its children are the words the surface draws
     // inside the press, and reading them as well prints a row that carries both
-    // twice; a figure's number is in its label for exactly this reason.
+    // twice; a figure's number is in its label for exactly this reason. A press
+    // with no label is the exception: a row's figures are one press over the
+    // slot they sit in, and the label alone printed nothing at all.
     const label = (node.props as { label?: unknown }).label;
-    return [typeof label === "string" ? label : ""];
+    if (typeof label === "string" && label.length > 0) {
+      return [label];
+    }
   }
   const props = node.props as { flexDirection?: string; justifyContent?: string;
-                                borderStyle?: string; width?: number };
+                                borderStyle?: string; width?: number; display?: string };
+  // A box hidden at rest is not on the pane: the surface draws it only while the
+  // pointer is on the row it belongs to, or never at all. Drawn here, a hover
+  // card printed the row a second time under itself.
+  if (props.display === "none") {
+    return [];
+  }
   const children = node.children;
   if (props.flexDirection === "row" && props.justifyContent === "space-between") {
     const left = children[0];
@@ -171,8 +181,12 @@ function paneTree(documents: ReaderDocuments, width: number, now: number, genera
     ? base
     : { ...base, sections: { ...base.sections, ...sections } };
   // Drawn in the reading's theme as the live pane is, so a review page shows the
-  // colors a person configured and not the packaged ones.
-  return recolor(renderPane(paneFrom(snapshotFrom(documents, generatedAt), options)), options.theme ?? THEME);
+  // colors a person configured and not the packaged ones. It is drawn as a
+  // picture surface draws it: the cards are what the page exists to show a
+  // person before anything mounts them, and the terminal's version adds nothing
+  // the cards do not carry.
+  return recolor(renderPane(paneFrom(snapshotFrom(documents, generatedAt), options), "desktop"),
+                 options.theme ?? THEME);
 }
 
 export function renderText(documents: ReaderDocuments, width: number, now: number,

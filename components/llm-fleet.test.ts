@@ -26,7 +26,8 @@ import { AFTER_PAINT_MS, AHEAD_SECONDS, CLAIM_KEY, END_WRITES_MS, COUNTS_KEY, FO
          SETTINGS_MS, SETTINGS_ONLY, STALE_SECONDS, TAB_HELPER, TIPS_KEY, alertConfigFrom, repliedLimitFrom,
          CLOCK_MS, STREAM_MS, needsSessionRead, notPlaced,
          register } from "../plugins/llm-fleet/hooks/llm-fleet.ts";
-import { BAND_DISMISS, BAND_SPEAK, BAND_TOGGLE } from "../plugins/llm-fleet/components/band.ts";
+import { BAND_DISMISS, BAND_GOVERNANCE, BAND_SPEAK, BAND_TOGGLE }
+  from "../plugins/llm-fleet/components/band.ts";
 import type { CommandEvent, Engine, Next, On, PromptHintEvent, RenderEvent, StartupEvent }
   from "../plugins/llm-fleet/hooks/engine.ts";
 
@@ -2887,6 +2888,34 @@ test("the band draws the speech switch beside the fleet's, off until someone tur
   assert.equal(speakWord(await driven.band(140, "desktop")), "\u{1F507} Speak: off");
   const fleet = buttonAddressing(await driven.band(140, "desktop"), BAND_TOGGLE) as { label?: string };
   assert.equal(fleet.label, "\u{1F4CB} Open llm-fleet");
+});
+
+/** The word on the band's governance switch, as last drawn. */
+function governanceWord(tree: unknown): unknown {
+  return (buttonAddressing(tree, BAND_GOVERNANCE) as { label?: unknown } | null)?.label;
+}
+
+test("a press on the band's governance switch runs the switch and draws where it went", async () => {
+  // Both scopes off is the one state where the press is the safe direction: the
+  // band moves both at once, and anything but both on moves them on.
+  let governance = { state: "ready", governor: false, controller: false, source: "config",
+                     path: "/tmp/switch.json", updated_at: null, by: null, errors: [] };
+  const ran: string[][] = [];
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("governance.py")) {
+      ran.push(argv.slice(2));
+      governance = { ...governance, governor: true, controller: true };
+      return { exitCode: 0, stdout: JSON.stringify(governance) };
+    }
+    return { exitCode: 0, stdout: JSON.stringify({ ...OUTPUT, governance }) };
+  } });
+  await driven.start();
+  await drain();
+  assert.equal(governanceWord(await driven.band()), "⚙ Gov off");
+  await driven.pressBand(BAND_GOVERNANCE);
+  await drain();
+  assert.deepEqual(ran[0], ["--set", "both", "--on"]);
+  assert.equal(governanceWord(await driven.band()), "⚙ Gov on");
 });
 
 test("a press on Speak in one session switches speech in every session", async () => {

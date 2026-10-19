@@ -233,7 +233,7 @@ def read_trials(config: Mapping[str, Any], *, now: float | None = None) -> dict[
                               "history": None, "changes": [], "errors": errors}
     # The change controller shares the machine switch with the governor, so the
     # pane can say which of them a person switched off and which is only idle.
-    state = switch_state(source)
+    state = switch_state(source, config["sources"].get("governance"), "controller")
     if state is not None:
         result["switch"] = state
     if not source["enabled"]:

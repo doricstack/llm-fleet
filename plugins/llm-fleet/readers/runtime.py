@@ -243,14 +243,47 @@ def valid_job_id(job_id: Any) -> bool:
     return isinstance(job_id, str) and bool(JOB_ID.fullmatch(job_id))
 
 
-def switch_state(source: Mapping[str, Any]) -> str | None:
-    """Whether a source's machine switch is on, by whether its marker exists.
+def switch_state(source: Mapping[str, Any],
+                 governance: Mapping[str, Any] | None = None,
+                 scope: str | None = None) -> str | None:
+    """Whether a scope's machine switch is on: the document first, the marker after.
 
-    The governor and the change controller share a switch a person sets for the
-    whole machine: the file is touched to switch them off and removed to switch
-    them back on. Its contents are never read, because the file is a flag rather
-    than a document, and a note somebody left in it is not policy.
+    The governor and the change controller share one switch, and the tool that
+    owns it writes a document holding a boolean per scope. A machine set up
+    before that document existed switched both by touching a marker file, and a
+    source that still names one is read on those terms. The document is asked
+    first: the marker is the older answer to the same question, and the tool
+    that writes the document does not keep it in step.
     """
+    if governance:
+        declared = governance.get("switchPath")
+        if isinstance(declared, str) and declared:
+            path = Path(declared).expanduser()
+            if (path.parent / "governor-controller.off").exists():
+                return "off"
+            try:
+                raw = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                # The tool says a missing switch means both on, and saying so is
+                # the difference between "gates are on" and "nobody knows".
+                return "on"
+            except OSError:
+                return None
+            try:
+                document = json.loads(raw)
+            except ValueError:
+                return None
+            if not isinstance(document, dict):
+                return None
+            fallback = document.get("enabled")
+            fallback = True if fallback is None else fallback
+            if scope is None:
+                answers = [document.get(key, fallback) for key in ("governor", "controller")]
+                if not all(isinstance(answer, bool) for answer in answers):
+                    return None
+                return ("on" if all(answers) else "off" if not any(answers) else None)
+            answer = document.get(scope, fallback)
+            return "on" if answer is True else "off" if answer is False else None
     declared = source.get("offSwitch")
     if not declared:
         return None

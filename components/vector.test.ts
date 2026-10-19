@@ -235,6 +235,91 @@ test("a bar's drawing says what the label beside it says", () => {
   assert.equal(drawn?.vector?.alt, "4m left");
 });
 
+test("a surface that fills every button keeps each press to its own words", () => {
+  // The VS Code extension ignores `plain`, so an unbounded Button is a filled
+  // block at its parent's width: a row of actions becomes a wall of green.
+  const table = recordingPrimitives({ links: true });
+  const tree = { type: "Button", props: { key: "open", label: "Open",
+                                          onPress: () => undefined }, children: [] } as Node;
+  const filled = mount(tree, bindPrimitives(table, "vscode")) as Node;
+  assert.equal(filled.type, "Box");
+  assert.equal((filled.props as { width?: number }).width, 6);
+  const inside = filled.children[0] as Node;
+  assert.equal(inside.type, "Button");
+  assert.equal((inside.props as { label?: string }).label, "Open");
+  // The words a press carries set the width: a row's figures, not its label.
+  const figures = { type: "Button", props: { key: "figures", label: "",
+                                             onPress: () => undefined },
+                    children: ["48%", " ", "$1.24"] } as Node;
+  const bounded = mount(figures, bindPrimitives(table, "vscode")) as Node;
+  assert.equal((bounded.props as { width?: number }).width, 11);
+  // A surface that draws a plain button keeps the host's own element.
+  const plain = mount(tree, bindPrimitives(table, "terminal")) as Node;
+  assert.equal(plain.type, "Button");
+});
+
+test("no action on the VS Code surface is drawn as an unbounded fill", () => {
+  // The extension draws every Button as a filled block at its parent's width,
+  // so this walks the whole mounted pane: each press must sit in a box whose
+  // width is its own words, or a row of actions becomes a wall of solid green.
+  const table = recordingPrimitives({ vectors: true, fields: true });
+  const pane = measured();
+  const row = pane.groups[0].rows[0];
+  row.press = { key: "row-open", label: "Open", onPress: () => undefined };
+  pane.groups[0].toggle = { key: "group-fold", label: "Background sessions",
+                            onPress: () => undefined };
+  const mounted = mount(renderPane(pane), bindPrimitives(table, "vscode")) as Node;
+  const presses: { node: Node; parent: Node | null }[] = [];
+  const walk = (node: Node, parent: Node | null): void => {
+    if (node.type === "Button") {
+      presses.push({ node, parent });
+    }
+    for (const child of node.children) {
+      if (typeof child !== "string") {
+        walk(child, node);
+      }
+    }
+  };
+  walk(mounted, null);
+  assert.ok(presses.length > 0, "the pane drew no press at all");
+  for (const { parent } of presses) {
+    assert.notEqual(parent, null, "a press was mounted with no parent");
+    assert.equal(parent?.type, "Box", "a press was mounted outside a bounding box");
+    const width = (parent?.props as { width?: unknown }).width;
+    assert.equal(typeof width, "number",
+                 "a press is bounded by no width, so the fill takes the row");
+    assert.ok((width as number) > 0 && (width as number) < 200,
+              "a press is bounded to a width a row can hold");
+  }
+});
+
+test("a picture surface draws each section as a card and no rail of glyphs", () => {
+  // A panel is not a terminal: a section there is a rounded card with air
+  // inside it, and the rows are lines in the card rather than branches hanging
+  // off a run of box-drawing glyphs.
+  const graphical = renderPane(measured(), "desktop");
+  // A tile draws its own small rule on both surfaces; the section's card is the
+  // one that pads above and below as well as beside.
+  const cards = nodes(graphical).filter((node) => {
+    const props = node.props as { borderStyle?: string; paddingY?: number };
+    return props.borderStyle === "round" && props.paddingY === 1;
+  });
+  assert.equal(cards.length, 1);
+  const card = cards[0].props as { paddingX?: number; paddingY?: number; borderDimColor?: boolean };
+  assert.equal(card.paddingX, 1);
+  assert.equal(card.paddingY, 1);
+  assert.equal(card.borderDimColor, true);
+  const drawn = renderedText(graphical).join("");
+  for (const glyph of ["├", "└", "│ "]) {
+    assert.ok(!drawn.includes(glyph), "a picture surface drew the rail glyph " + glyph);
+  }
+  // The terminal keeps its rail and draws no section card.
+  const plain = renderPane(measured());
+  assert.ok(!nodes(plain).some((node) =>
+    (node.props as { paddingY?: number }).paddingY === 1));
+  assert.ok(renderedText(plain).some((value) => value.includes("├") || value.includes("└")));
+});
+
 test("the Svg is bound by the surface's name, never by the table holding one", () => {
   // The engine completes every table with every element name, the terminal's
   // included, and a name the terminal does not draw is an empty fragment there.

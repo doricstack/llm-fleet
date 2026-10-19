@@ -8,6 +8,7 @@ import base64
 import binascii
 import difflib
 import fnmatch
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -110,7 +111,11 @@ def text_file(path: Path) -> str:
     if not stat.S_ISREG(path.lstat().st_mode) or path.is_symlink():
         raise ExportError("selected path is not a regular file")
     # Strict decoding refuses binary assets instead of silently skipping bytes.
-    value = path.read_bytes().decode("utf-8")
+    try:
+        value = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ExportError(
+            "binary content requires a separate asset policy: not UTF-8") from error
     if "\0" in value:
         raise ExportError("binary content requires a separate asset policy")
     return value
@@ -253,15 +258,30 @@ def release_lock(lock: Path) -> None:
         pass
 
 
-def prepare(source: Path) -> tuple[dict[str, str], list[re.Pattern[str]], list[str]]:
+def asset_digest(value: bytes) -> str:
+    """What a binary asset is compared by, since its bytes cannot be a diff."""
+    return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def prepare(source: Path) -> tuple[dict[str, str], dict[str, bytes],
+                                   list[re.Pattern[str]], list[str]]:
     allow = lines(source / "public-export" / "allowlist.txt")
     if any(not safe_name(pattern) for pattern in allow):
         raise ExportError("unsafe allowlist path")
+    # A binary file is copied byte for byte, and only where this list names it:
+    # the allowlist alone cannot carry it, because a text scan would refuse to
+    # decode it.
+    asset_list = source / "public-export" / "assets.txt"
+    binary = set(lines(asset_list)) if asset_list.is_file() else set()
+    for name in binary:
+        if not safe_name(name):
+            raise ExportError("unsafe asset path")
     patterns = [re.compile(pattern, re.IGNORECASE) for pattern in
                 lines(source / "public-export" / "denylist.txt")]
     terms = identity_terms(source)
     candidates = inventory(source)
-    selected = {}
+    selected: dict[str, str] = {}
+    assets: dict[str, bytes] = {}
     for pattern in allow:
         matched = [name for name in candidates if fnmatch.fnmatchcase(name, pattern)]
         if not matched:
@@ -269,19 +289,33 @@ def prepare(source: Path) -> tuple[dict[str, str], list[re.Pattern[str]], list[s
         for name in matched:
             if not safe_name(name):
                 raise ExportError("unsafe selected path")
-            value = text_file(candidates[name])
-            scan(name, value, patterns, terms)
-            selected[name] = value
-    if not selected:
+            if name in binary:
+                path = candidates[name]
+                if not stat.S_ISREG(path.lstat().st_mode) or path.is_symlink():
+                    raise ExportError("selected asset is not a regular file")
+                value = path.read_bytes()
+                # Its name is still read by every rule; only its bytes are not.
+                scan(name, "", patterns, terms)
+                assets[name] = value
+            else:
+                value = text_file(candidates[name])
+                scan(name, value, patterns, terms)
+                selected[name] = value
+    listed = set(binary) - set(assets)
+    if listed:
+        raise ExportError("asset list entry is not allowlisted: " + sorted(listed)[0])
+    if not selected and not assets:
         raise ExportError("empty export")
-    return dict(sorted(selected.items())), patterns, terms
+    return dict(sorted(selected.items())), dict(sorted(assets.items())), patterns, terms
 
 
-def previous_tree(destination: Path, selected: dict[str, str]) -> dict[str, str]:
+def previous_tree(destination: Path, selected: dict[str, str],
+                  assets: dict[str, bytes]) -> dict[str, str]:
     candidates = inventory(destination)
     candidates.pop(LOCK, None)
     manifest = candidates.pop(MANIFEST, None)
     old_names: set[str] = set()
+    old_assets: set[str] = set()
     if manifest is not None:
         record = json.loads(text_file(manifest))
         if not isinstance(record, dict) or record.get("format") != 1:
@@ -292,6 +326,12 @@ def previous_tree(destination: Path, selected: dict[str, str]) -> dict[str, str]
         ):
             raise ExportError("unsafe export manifest")
         old_names = set(names)
+        binaries = record.get("assets", [])
+        if not isinstance(binaries, list) or not all(
+            isinstance(name, str) and safe_name(name) for name in binaries
+        ):
+            raise ExportError("unsafe export manifest")
+        old_assets = set(binaries)
     elif candidates:
         raise ExportError("destination is not empty or exporter-owned")
     if set(candidates) - old_names:
@@ -305,8 +345,9 @@ def previous_tree(destination: Path, selected: dict[str, str]) -> dict[str, str]
                 raise ExportError("symlink in destination")
     previous = {}
     for name, path in candidates.items():
-        previous[name] = text_file(path)
-    for name in selected:
+        previous[name] = asset_digest(path.read_bytes()) if name in old_assets \
+            else text_file(path)
+    for name in list(selected) + list(assets):
         path = destination / name
         reject_link_ancestors(path)
         if path.exists() and not path.is_file():
@@ -326,14 +367,24 @@ def flags(value: str, patterns: list[re.Pattern[str]], terms: list[str]) -> bool
             or any(term in form for term in terms for form in forms))
 
 
-def print_plan(selected: dict[str, str], previous: dict[str, str],
+def print_plan(selected: dict[str, str], assets: dict[str, bytes],
+               previous: dict[str, str],
                patterns: list[re.Pattern[str]], terms: list[str]) -> None:
-    print(f"Export files ({len(selected)}):")
-    for name in selected:
+    print(f"Export files ({len(selected) + len(assets)}):")
+    for name in sorted(set(selected) | set(assets)):
         print(name)
     print("Diff:")
     changed = False
-    for name in sorted(set(selected) | set(previous)):
+    asset_forms = {name: asset_digest(value) for name, value in assets.items()}
+    for name in sorted(set(selected) | set(asset_forms) | set(previous)):
+        if name in asset_forms:
+            old, new = previous.get(name, ""), asset_forms[name]
+            if old == new:
+                continue
+            changed = True
+            print(f"Asset {'replaced' if old else 'added'}: "
+                  f"{name} ({len(assets[name])} bytes)")
+            continue
         old, new = previous.get(name, ""), selected.get(name, "")
         if name in previous and name in selected and old == new:
             continue
@@ -360,9 +411,9 @@ def export(source: Path, destination: Path, dry_run: bool) -> None:
     source, destination = source.resolve(), destination.resolve()
     if source == destination or source in destination.parents or destination in source.parents:
         raise ExportError("source and destination must be separate, non-nested trees")
-    selected, patterns, terms = prepare(source)
-    previous = previous_tree(destination, selected)
-    print_plan(selected, previous, patterns, terms)
+    selected, assets, patterns, terms = prepare(source)
+    previous = previous_tree(destination, selected, assets)
+    print_plan(selected, assets, previous, patterns, terms)
     if dry_run:
         return
     # Every policy, byte and destination path is checked before the first write,
@@ -371,7 +422,7 @@ def export(source: Path, destination: Path, dry_run: bool) -> None:
     lock = acquire_lock(destination)
     try:
         # Only files from a prior export manifest may be removed.
-        for name in sorted(set(previous) - set(selected)):
+        for name in sorted(set(previous) - set(selected) - set(assets)):
             (destination / name).unlink()
         for name, value in selected.items():
             path = destination / name
@@ -379,13 +430,18 @@ def export(source: Path, destination: Path, dry_run: bool) -> None:
             path.write_bytes(value.encode("utf-8"))
             if executable(source / name):
                 path.chmod(EXECUTABLE_MODE)
+        for name, value in assets.items():
+            path = destination / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(value)
         # The manifest is written last: a tree without one is not owned by an export.
-        manifest = {"format": 1, "files": list(selected)}
+        manifest = {"format": 1, "files": sorted(set(selected) | set(assets)),
+                    "assets": sorted(assets)}
         (destination / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n",
                                            encoding="utf-8")
     finally:
         release_lock(lock)
-    print(f"Wrote {len(selected)} files. Git metadata was not changed.")
+    print(f"Wrote {len(selected) + len(assets)} files. Git metadata was not changed.")
 
 
 def main() -> int:

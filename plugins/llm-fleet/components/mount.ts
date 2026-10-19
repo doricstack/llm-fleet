@@ -43,6 +43,52 @@ export function drawsFields(surface: string): boolean {
 }
 
 /**
+ * The surfaces that draw a `plain` Button as the pane means it: as words among
+ * the row, not as a filled control.
+ *
+ * The VS Code extension ignores `plain` and draws every Button as a filled
+ * block at the width its parent gives it. In a row of actions that is a wall of
+ * solid buttons, which is what a person sees instead of the pane's own words.
+ */
+const PLAIN_SURFACES = new Set(["terminal", "desktop", "mobile"]);
+
+function plainButtons(surface: string): boolean {
+  return PLAIN_SURFACES.has(surface);
+}
+
+/** How many cells the words of a button take: its label, or its children. */
+function cellsOf(children: unknown[], label: string): number {
+  const text = (child: unknown): number => {
+    if (typeof child === "string") {
+      return child.length;
+    }
+    if (child === null || typeof child !== "object") {
+      return 0;
+    }
+    const node = child as { children?: unknown[]; props?: { label?: unknown } };
+    const own = typeof node.props?.label === "string" ? node.props.label.length : 0;
+    const inner = (node.children ?? []).reduce<number>((sum, one) => sum + text(one), 0);
+    return Math.max(own, inner);
+  };
+  return Math.max(label.length, children.reduce<number>((sum, one) => sum + text(one), 0));
+}
+
+/**
+ * A Button bound for a surface that fills every button, kept to the width its
+ * own words take. The press stays a press; only the box around it is bounded.
+ */
+function pressedInline(button: unknown, box: unknown): Primitives["Button"] {
+  const make = button as (props: unknown) => unknown;
+  const wrap = box as (props: unknown) => unknown;
+  return ((props: { label?: string; children?: unknown[] }) => {
+    const label = typeof props.label === "string" ? props.label : "";
+    const children = props.children ?? [];
+    const drawn = make({ ...props, children });
+    return wrap({ width: cellsOf(children, label) + 2, flexShrink: 0, children: [drawn] });
+  }) as Primitives["Button"];
+}
+
+/**
  * The host's elements, declared as the narrow subset the layout uses.
  *
  * The host passes the elements it resolved for its own surface. Every surface
@@ -59,7 +105,9 @@ export function bindPrimitives(elements: HostElements, surface: string): Primiti
   return {
     Box: elements.Box as Primitives["Box"],
     Text: elements.Text as Primitives["Text"],
-    Button: elements.Button as Primitives["Button"],
+    Button: plainButtons(surface)
+      ? elements.Button as Primitives["Button"]
+      : pressedInline(elements.Button, elements.Box),
     ...(VECTOR_SURFACES.has(surface) && elements.Svg
       ? { Svg: elements.Svg as Primitives["Svg"] } : {}),
     // Every surface draws a link, so one is bound wherever the table holds it.

@@ -364,7 +364,24 @@ class ChangeTests(StoreCase):
 
 
 class SwitchTests(StoreCase):
-    """The change controller's switch, as the marker file states it."""
+    """The change controller's switch, as the machine states it."""
+
+    def test_the_governance_document_decides_before_the_marker_it_replaced(self):
+        # The tool writes a document holding a boolean per scope, and the marker
+        # the older configuration names is not kept beside it: asked of the
+        # marker alone, a controller that is off reads on.
+        switch = self.root / "state" / "governor-switch.json"
+        switch.parent.mkdir()
+        switch.write_text(json.dumps({"governor": False, "controller": False}),
+                          encoding="utf-8")
+        config = self.config(governance={"switchPath": str(switch)})
+        self.assertEqual(trials.read_trials(config, now=NOW)["switch"], "off")
+        switch.write_text(json.dumps({"governor": True, "controller": True}), encoding="utf-8")
+        self.assertEqual(trials.read_trials(config, now=NOW)["switch"], "on")
+        # One scope moved alone says where the controller stands, whatever the
+        # governor's answer is.
+        switch.write_text(json.dumps({"governor": False, "controller": True}), encoding="utf-8")
+        self.assertEqual(trials.read_trials(config, now=NOW)["switch"], "on")
 
     def test_a_marker_that_is_there_reads_off_and_one_that_is_not_reads_on(self):
         marker = self.root / "governor-controller.off"

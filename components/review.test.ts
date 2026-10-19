@@ -35,7 +35,10 @@ test("a rendered pane carries the rows, the counts and the warning", () => {
   // named only the words printed every figure as a bare label.
   assert.equal(text.includes("1 Waiting on you"), true);
   assert.equal(text.includes("Review adapter behavior"), true);
-  assert.equal(text.includes("Waiting for you"), true);
+  // The state the row itself draws. What the row says only under the pointer is
+  // not on the page: the surface draws the pane at rest, and a hover card is
+  // not part of that.
+  assert.equal(text.includes("waiting 2m"), true, text);
   assert.equal(text.includes("Which source?"), true);
   assert.equal(text.includes("1 checked out"), true);
   assert.equal(text.includes("3 cleaned this week"), true);
@@ -267,4 +270,18 @@ test("a press prints its label and not its children, so a row is never printed t
   assert.deepEqual(nodeLines(figure as never, 80), ["4 Working sessions"]);
   const heading = { type: "Button", props: { key: "h", label: "Warnings" }, children: [] };
   assert.deepEqual(nodeLines(heading as never, 80), ["Warnings"]);
+});
+
+test("a box hidden at rest draws nothing, so a hover card is not the row again", () => {
+  // A row's hover card is out of the flow and hidden until the pointer is on
+  // the row. Read by the page, it printed the row a second time under itself.
+  const card = { type: "Box", props: { display: "none", position: "absolute" },
+                 children: [{ type: "Box", props: { flexDirection: "row", gap: 1 },
+                              children: [{ type: "Text", props: {}, children: ["● "] },
+                                         { type: "Text", props: {}, children: ["the row"] }] }] };
+  assert.deepEqual(nodeLines(card as never, 40), []);
+  const shown = { type: "Box", props: { display: "flex" },
+                  children: [{ type: "Text", props: {}, children: ["the row"] }] };
+  // A nested box indents what it holds, as the page has always drawn it.
+  assert.deepEqual(nodeLines(shown as never, 40), ["  the row"]);
 });

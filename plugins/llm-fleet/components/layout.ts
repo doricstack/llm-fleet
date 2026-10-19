@@ -438,9 +438,13 @@ export function box(props: BoxProps, children: (Node | string)[]): Node {
  * readings placed next to each other without a gap read as one wrong reading.
  */
 export function line(slots: Slot[], props: TextProps = {}): Node {
+  // A segment stays on its line. The layout already cuts each one to the room
+  // it has; the host, given a narrower cell than the layout measured on, would
+  // otherwise wrap the remainder onto a second line and take the row's height
+  // with it. A cut word is a cut word; a wrapped one is a broken row.
   return box({ flexDirection: "row", gap: 0 },
              slots.map((slot, index) => text(
-               { ...props, ...slotProps(slot) },
+               { wrap: "truncate-end", ...props, ...slotProps(slot) },
                index === 0 || slot.text.startsWith(" ") ? slot.text : " " + slot.text)));
 }
 
@@ -582,11 +586,16 @@ export function ageText(seconds: number): string {
  * rather than the section's total, which its heading already states.
  */
 function renderProject(project: { root: string; count: number }, width: number,
-                       rail: Rail): Node {
-  const label = fit(project.root, Math.max(8, width - rail.first.length - 12));
+                       rail?: Rail): Node {
+  // A picture surface draws no rail glyph: the root is the card's own line,
+  // and the rows under it are set apart by the card rather than by a branch.
+  const drawn = rail === undefined ? [] : [
+    text({ color: rail.color, ...(rail.dim ? { dimColor: true } : {}) }, rail.first),
+  ];
+  const label = fit(project.root, Math.max(8, width - (rail?.first.length ?? 0) - 12));
   const count = project.count + (project.count === 1 ? " item" : " items");
   return box({ flexDirection: "row", gap: 1 }, [
-    text({ color: rail.color, ...(rail.dim ? { dimColor: true } : {}) }, rail.first),
+    ...drawn,
     text({ color: "claude", bold: true }, label),
     text({ dimColor: true }, count),
   ]);
@@ -982,7 +991,13 @@ export function groupTone(group: Group): Color {
  * keeps its warning line: an error hidden behind a folded card is a claim that
  * nothing is wrong, which is the one thing this design will not do.
  */
-export function renderGroup(given: Group, width: number, narrowAt: number): Node {
+export function renderGroup(given: Group, width: number, narrowAt: number,
+                            surface = "terminal"): Node {
+  // A picture surface is drawn as cards: a rounded rule round each section and
+  // air inside it, which is what a person expects of a panel rather than of a
+  // run of terminal lines. The rule and the padding take four columns, two more
+  // than the terminal's padding alone, so the section holds four fewer.
+  const graphical = surface !== "terminal";
   // A row arriving while another leaves takes its place: drawn together for the
   // length of the slide, the section grew by the leaving row and shrank back,
   // and every section below it went down and up. With nothing arriving, a
@@ -993,7 +1008,7 @@ export function renderGroup(given: Group, width: number, narrowAt: number): Node
   // given, so what the card holds is four less. Budgeting two less left the
   // contents two columns wider than the card draws, and the padding each row
   // added took it to four.
-  const inner = Math.max(8, width - 2);
+  const inner = Math.max(8, width - (graphical ? 4 : 2));
   // The section's name is drawn in the tone its card is drawn in, behind the
   // accent, so a person finds the section that needs them by its color before
   // reading a word of it. It is on no fill: a column of names on blocks of
@@ -1003,6 +1018,9 @@ export function renderGroup(given: Group, width: number, narrowAt: number): Node
   // New warnings blink: the heading and the rail swap between the warning and
   // the error color for a few seconds, then hold the section's own tone.
   const shown: Color = group.blink === undefined ? tone : group.blink ? "warning" : "error";
+  // A calm section's rail, and on a picture surface its card rule, rests dim; a
+  // section that warns is drawn at full strength.
+  const calm = group.blink === undefined && (tone === "subtle" || tone === "success");
   // The mark is texts and no box: a button holds strings and text only, and the
   // engine refuses a heading that puts a box inside its fold control.
   const named = (room: number): Node[] => tagTexts(fit(group.title, room), shown);
@@ -1076,7 +1094,6 @@ export function renderGroup(given: Group, width: number, narrowAt: number): Node
   if (group.rows.length && !group.collapsed) {
     // The section is the parent and its items hang off one rail in its tone. A
     // calm rail rests dim; one that warns is drawn at full strength.
-    const calm = group.blink === undefined && (tone === "subtle" || tone === "success");
     const count = group.rows.length;
     // A section drawn as a tree prints each project root once, in the theme's
     // accent, and hangs that project's rows one rail deeper: the section's own
@@ -1093,7 +1110,7 @@ export function renderGroup(given: Group, width: number, narrowAt: number): Node
           rest: project.last ? RAIL_END : RAIL_ON,
           color: shown, ...(calm ? { dim: true } : {}),
         };
-        drawn.push(renderProject(project, inner, rail));
+        drawn.push(renderProject(project, inner, graphical ? undefined : rail));
       }
       const next = group.rows[index + 1];
       // A row without a project closes its own rail at the section's end; a
@@ -1108,7 +1125,8 @@ export function renderGroup(given: Group, width: number, narrowAt: number): Node
       drawn.push(renderRow(
         row, inner, narrowAt,
         "row:" + groupKey(group) + ":" + (row.key ?? String(index)),
-        { first, rest, prefix, color: shown, ...(calm ? { dim: true } : {}) }));
+        graphical ? undefined
+          : { first, rest, prefix, color: shown, ...(calm ? { dim: true } : {}) }));
     });
     parts.push(box({ flexDirection: "column", gap: 0 }, drawn));
     // What the ceiling held back is drawn under the section while the pointer is
@@ -1122,9 +1140,10 @@ export function renderGroup(given: Group, width: number, narrowAt: number): Node
                      group.held.map((row, index) => renderRow(
                        row, inner, narrowAt,
                        "held:" + groupKey(group) + ":" + (row.key ?? String(index)),
-                       { first: index === heldCount - 1 ? RAIL_LAST : RAIL_BRANCH,
-                         rest: index === heldCount - 1 ? RAIL_END : RAIL_ON,
-                         color: shown, ...(calm ? { dim: true } : {}) }))));
+                       graphical ? undefined
+                         : { first: index === heldCount - 1 ? RAIL_LAST : RAIL_BRANCH,
+                             rest: index === heldCount - 1 ? RAIL_END : RAIL_ON,
+                             color: shown, ...(calm ? { dim: true } : {}) }))));
     }
   }
   // A row still sliding out is still on the pane, so a section is not yet
@@ -1155,10 +1174,17 @@ export function renderGroup(given: Group, width: number, narrowAt: number): Node
       parts.push(line([{ text: "" }]));
     }
   }
-  // No card border: the heading's chip and the rail its items hang off are what
-  // group a section, and the border's two lines and four columns go to the rows.
+  // No card border in a terminal: the heading's chip and the rail its items hang
+  // off are what group a section, and the border's two lines and four columns go
+  // to the rows. A picture surface has the room and a panel's expectations, so
+  // there each section is a rounded card with air inside it, and its rule is
+  // drawn dim while the section is calm.
   return box({ key: "group:" + groupKey(group), flexDirection: "column", gap: 0, width,
-               marginBottom: 1, paddingX: 1 }, parts);
+               marginBottom: 1, paddingX: 1,
+               ...(graphical
+                 ? { borderStyle: "round" as const, paddingY: 1,
+                     ...(calm ? { borderDimColor: true } : { borderColor: shown }) }
+                 : {}) }, parts);
 }
 
 /**
@@ -1453,7 +1479,7 @@ function pickerRows(picker: PickerItem[], width: number): Node[] {
 }
 
 /** The whole pane, in reading order. */
-export function renderPane(pane: Pane): Tree {
+export function renderPane(pane: Pane, surface = "terminal"): Tree {
   // The title is a chip in the host's own accent, the mark the pane is known by
   // at a glance; the age beside it is set in italic, as a note on the reading
   // rather than a figure of it.
@@ -1535,7 +1561,7 @@ export function renderPane(pane: Pane): Tree {
   // One empty row between the head and the first card, and no more.
   parts.push(box({ flexDirection: "column", gap: 0, marginBottom: 1 }, []));
   for (const group of pane.groups) {
-    parts.push(renderGroup(group, pane.width, pane.narrowAt));
+    parts.push(renderGroup(group, pane.width, pane.narrowAt, surface));
   }
   // The footer is the pane's one line of identity, under everything it reports:
   // a person reading a screenshot or quoting a version in a report takes it
