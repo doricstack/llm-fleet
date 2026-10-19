@@ -443,7 +443,7 @@ class FleetContract(unittest.TestCase):
         # The store is keyed by free text, which the host does not check, so the
         # contract is where a key and the shape it holds are written down: a key
         # the entry names and the contract does not is a value nobody can list.
-        entry = (PLUGIN / "hooks" / "fleet.ts").read_text(encoding="utf-8")
+        entry = (PLUGIN / "hooks" / "llm-fleet.ts").read_text(encoding="utf-8")
         named = set(STORE_KEY.findall(entry))
         self.assertTrue(named, "no store key was read from the entry")
         declared = store_keys(self.contract())

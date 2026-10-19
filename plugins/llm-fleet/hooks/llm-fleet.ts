@@ -2983,7 +2983,24 @@ function sectionOfKey(key: string): string | null {
  * pane on Worktrees finds it there in the next session. A second run, with the
  * pane open and the section unfolded, closes the pane, the way `/llm-fleet` does.
  */
-async function openOn($: Engine, state: State, section: string): Promise<{ text: string }> {
+/**
+ * What a pane that the host would not place says.
+ *
+ * On a terminal the reason is a width: the pane opens once there is room. On a
+ * surface that draws no dock at all, a width is not the reason, and saying so
+ * would send a person looking for a wider window that cannot help.
+ */
+export function notPlaced(surface: string | undefined, on?: string): string {
+  if (surface === undefined || surface === "terminal") {
+    return `llm-fleet pane opens${on === undefined ? "" : " on " + on} once the terminal is wider (${MARK}).`;
+  }
+  return on === undefined
+    ? `llm-fleet pane cannot open on the ${surface} surface; run /llm-fleet in the terminal (${MARK}).`
+    : `llm-fleet cannot draw its ${on} section on the ${surface} surface; run /llm-fleet in the terminal (${MARK}).`;
+}
+
+async function openOn($: Engine, state: State, section: string,
+                     surface?: string): Promise<{ text: string }> {
   const title = ONE_SECTION_TITLES[section] ?? section;
   const now = (await $.clock.now()) / 1000;
   const held = state.held !== null && "documents" in state.held ? state.held : null;
@@ -3018,7 +3035,7 @@ async function openOn($: Engine, state: State, section: string): Promise<{ text:
   const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
   $.ui.invalidate("ui.render");
   return { text: opened.isPlaced ? `llm-fleet pane opened on ${title} (${MARK}).`
-    : `llm-fleet pane opens on ${title} once the terminal is wider (${MARK}).` };
+    : notPlaced(surface, title) };
 }
 
 /**
@@ -3224,8 +3241,8 @@ export const register: Register = (on, options) => {
     return next(event);
   });
 
-  on("command.run", { command: "worktrees" }, async ($) => {
-    const answer = await openOn($, state, "worktrees");
+  on("command.run", { command: "worktrees" }, async ($, event) => {
+    const answer = await openOn($, state, "worktrees", event.surface);
     // Opened, the worktrees are probed on the next look, within one look's
     // interval: a person who asks for them is asking how they stand, not how
     // they stood at the last cached probe. The pane opens on the reading it
@@ -3243,7 +3260,7 @@ export const register: Register = (on, options) => {
       return { text: KEYS_USAGE };
     }
     if (asked === "open") {
-      return openOn($, state, "keys");
+      return openOn($, state, "keys", event.surface);
     }
     state.tipsWord = asked.tips;
     state.tipsSet = true;
@@ -3331,7 +3348,7 @@ export const register: Register = (on, options) => {
     $.ui.invalidate("ui.render");
     // A surface too narrow to draw the pane opens once the terminal is wider.
     return { text: opened.isPlaced ? `llm-fleet pane opened (${MARK}).`
-                          : `llm-fleet pane opens once the terminal is wider (${MARK}).` };
+                          : notPlaced(event.surface) };
   });
 
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {
@@ -3661,7 +3678,7 @@ export const register: Register = (on, options) => {
         const section = key === undefined ? null : sectionOfKey(key);
         if (section !== null) {
           state.focus = null;
-          return openOn($, state, section).catch(() => undefined);
+          return openOn($, state, section, e.surface).catch(() => undefined);
         }
         state.focus = focus ?? null;
         state.open = true;

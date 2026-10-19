@@ -24,7 +24,7 @@ import { SECTIONS } from "../plugins/llm-fleet/components/options.ts";
 import { AFTER_PAINT_MS, AHEAD_SECONDS, CLAIM_KEY, END_WRITES_MS, COUNTS_KEY, FOLDS_KEY, FRAME_MS, FRESH_WORKTREES, HIDDEN_KEY, LIVE_MS, LOOK_MS,
          MARK, PANE, PROGRESS_CLAIM_KEY, READER, READING_KEY, REPLIED_LIMIT, SPEECH_ON_KEY, SPEECH_POLL_MS,
          SETTINGS_MS, SETTINGS_ONLY, STALE_SECONDS, TAB_HELPER, TIPS_KEY, alertConfigFrom, repliedLimitFrom,
-         CLOCK_MS, STREAM_MS, needsSessionRead,
+         CLOCK_MS, STREAM_MS, needsSessionRead, notPlaced,
          register } from "../plugins/llm-fleet/hooks/llm-fleet.ts";
 import { BAND_DISMISS, BAND_SPEAK, BAND_TOGGLE } from "../plugins/llm-fleet/components/band.ts";
 import type { CommandEvent, Engine, Next, On, PromptHintEvent, RenderEvent, StartupEvent }
@@ -797,6 +797,21 @@ test("the command opens the pane, and closes it when it is already open", async 
   const closed = await closing.run() as { text: string };
   assert.deepEqual(closing.calls.closed, [PANE]);
   assert.equal(closed.text, `llm-fleet pane closed (${MARK}).`);
+});
+
+test("a pane the host will not place names the surface, and blames width only on a terminal", () => {
+  // A desktop surface has no dock to place the pane in, so a width is not the
+  // reason and saying so sends a person looking for a wider window.
+  assert.equal(notPlaced("terminal"),
+               `llm-fleet pane opens once the terminal is wider (${MARK}).`);
+  assert.equal(notPlaced(undefined),
+               `llm-fleet pane opens once the terminal is wider (${MARK}).`);
+  assert.equal(notPlaced("terminal", "Keys"),
+               `llm-fleet pane opens on Keys once the terminal is wider (${MARK}).`);
+  assert.equal(notPlaced("desktop"),
+               `llm-fleet pane cannot open on the desktop surface; run /llm-fleet in the terminal (${MARK}).`);
+  assert.equal(notPlaced("desktop", "Keys"),
+               `llm-fleet cannot draw its Keys section on the desktop surface; run /llm-fleet in the terminal (${MARK}).`);
 });
 
 test("the pane is opened under a title that names this plugin", async () => {

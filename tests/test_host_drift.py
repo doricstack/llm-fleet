@@ -25,7 +25,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "host-drift.py"
 DECLARED_SUBSET = ROOT / "plugins" / "llm-fleet" / "components" / "host.ts"
-SCAFFOLDED = (Path("plugins") / "fleet" / ".claude-plugin" / "types" / "claude-code"
+SCAFFOLDED = (Path("plugins") / "llm-fleet" / ".claude-plugin" / "types" / "claude-code"
               / "index.d.ts")
 
 
