@@ -11,24 +11,24 @@
  * engine in a way this repository has not declared fails to compile against the
  * stub rather than failing in a live session.
  *
- * Run with: node --test components/fleet.test.ts
+ * Run with: node --test components/llm-fleet.test.ts
  */
 
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { test } from "node:test";
 
-import { elementTypes, renderedText } from "../plugins/fleet/components/layout.ts";
-import { recordingPrimitives } from "../plugins/fleet/components/mount.ts";
-import { SECTIONS } from "../plugins/fleet/components/options.ts";
+import { elementTypes, renderedText } from "../plugins/llm-fleet/components/layout.ts";
+import { recordingPrimitives } from "../plugins/llm-fleet/components/mount.ts";
+import { SECTIONS } from "../plugins/llm-fleet/components/options.ts";
 import { AFTER_PAINT_MS, AHEAD_SECONDS, CLAIM_KEY, END_WRITES_MS, COUNTS_KEY, FOLDS_KEY, FRAME_MS, FRESH_WORKTREES, HIDDEN_KEY, LIVE_MS, LOOK_MS,
          MARK, PANE, PROGRESS_CLAIM_KEY, READER, READING_KEY, REPLIED_LIMIT, SPEECH_ON_KEY, SPEECH_POLL_MS,
          SETTINGS_MS, SETTINGS_ONLY, STALE_SECONDS, TAB_HELPER, TIPS_KEY, alertConfigFrom, repliedLimitFrom,
          CLOCK_MS, STREAM_MS, needsSessionRead,
-         register } from "../plugins/fleet/hooks/fleet.ts";
-import { BAND_DISMISS, BAND_SPEAK, BAND_TOGGLE } from "../plugins/fleet/components/band.ts";
+         register } from "../plugins/llm-fleet/hooks/llm-fleet.ts";
+import { BAND_DISMISS, BAND_SPEAK, BAND_TOGGLE } from "../plugins/llm-fleet/components/band.ts";
 import type { CommandEvent, Engine, Next, On, PromptHintEvent, RenderEvent, StartupEvent }
-  from "../plugins/fleet/hooks/engine.ts";
+  from "../plugins/llm-fleet/hooks/engine.ts";
 
 // Every whole read names the session and the model it is drawn for: a routed
 // session's spend lives in a file the status line keeps for that session, and
@@ -291,7 +291,7 @@ function stub(options: { exitCode?: number; stdout?: string; placed?: boolean;
     } else if (event === "prompt.submit") {
       promptHandler = handler as typeof promptHandler;
     } else if (event === "command.run"
-               && (matchOrHandler as { command?: string }).command === "fleet") {
+               && (matchOrHandler as { command?: string }).command === "llm-fleet") {
       // `/speak` registers on the same event; these cases run the pane's.
       commandHandler = handler as typeof commandHandler;
     } else if (event === "command.run"
@@ -416,7 +416,7 @@ function stub(options: { exitCode?: number; stdout?: string; placed?: boolean;
       },
     },
     env: { get: async (name) => options.env?.[name] },
-    plugin: { root: "/plugin/fleet" },
+    plugin: { root: "/plugin/llm-fleet" },
     // Only the key the entry documents is answered, so a case that passes a
     // stored reading also proves the entry reads it under that key.
     store: {
@@ -746,10 +746,10 @@ function within<T>(work: Promise<T>, what: string, ms = 2000): Promise<T> {
 test("the entry registers the command that opens the pane", async () => {
   const driven = stub();
   await driven.start();
-  assert.deepEqual(driven.calls.commands, ["fleet", "speak", "worktrees", "keys"]);
+  assert.deepEqual(driven.calls.commands, ["llm-fleet", "speak", "worktrees", "keys"]);
   // A command queued behind a running turn is a switch that waits for the
   // model, so every one runs at once.
-  assert.deepEqual(driven.calls.immediate, ["fleet", "speak", "worktrees", "keys"]);
+  assert.deepEqual(driven.calls.immediate, ["llm-fleet", "speak", "worktrees", "keys"]);
 });
 
 test("a session whose identifier cannot be read still gets its command", async () => {
@@ -761,7 +761,7 @@ test("a session whose identifier cannot be read still gets its command", async (
   const driven = stub({ sessionThrows: true });
   const result = await driven.start() as { continued?: boolean };
   assert.equal(result?.continued, true);
-  assert.deepEqual(driven.calls.commands, ["fleet", "speak", "worktrees", "keys"]);
+  assert.deepEqual(driven.calls.commands, ["llm-fleet", "speak", "worktrees", "keys"]);
 });
 
 test("unhide brings back what was dismissed from the band, and opens nothing", async () => {
@@ -823,7 +823,7 @@ test("the engine's own startup reads the machine through the plugin's own reader
   assert.equal(driven.calls.argv.length, 1);
   const argv = driven.calls.argv[0];
   assert.equal(argv[0], "python3");
-  assert.equal(argv[1], "/plugin/fleet/" + READER);
+  assert.equal(argv[1], "/plugin/llm-fleet/" + READER);
 });
 
 test("a paint that has no reading yet says it is reading rather than waiting", async () => {
@@ -3538,7 +3538,7 @@ test("the pane counts what the band hides that the reading still names", async (
   const driven = await pressedPane({ memory: { [HIDDEN_KEY]: ["job:job-2:blocked:1789999700",
                                                               "job:gone:blocked:1"] } });
   const text = renderedText(await driven.quiesce(140) as never);
-  assert.equal(text.includes("1 hidden from the band; /fleet unhide shows them again."), true);
+  assert.equal(text.includes("1 hidden from the band; /llm-fleet unhide shows them again."), true);
 });
 
 /** A pull request whose checks fail: a failure the band leads with. */
@@ -3842,7 +3842,7 @@ test("a -p or SDK session starts no timer and reads nothing on its own", async (
   await drain();
   assert.equal(result.continued, true);
   // The commands are still there for a person who runs one.
-  assert.deepEqual(driven.calls.commands, ["fleet", "speak", "worktrees", "keys"]);
+  assert.deepEqual(driven.calls.commands, ["llm-fleet", "speak", "worktrees", "keys"]);
   assert.deepEqual(driven.calls.every, []);
   assert.deepEqual(driven.calls.argv, []);
   assert.deepEqual(machine.tabs, []);
@@ -3932,7 +3932,7 @@ test("/keys answers words it does not take with its usage, and says when the sto
   await driven.start();
   for (const words of ["tips", "tips sideways", "open", "tips on now"]) {
     assert.equal((await driven.command("keys", words) as { text: string }).text,
-                 "Use /keys to open the fleet pane on its keys, or /keys tips off|on.");
+                 "Use /keys to open the llm-fleet pane on its keys, or /keys tips off|on.");
   }
   const refused = await driven.command("keys", "tips off") as { text: string };
   assert.match(refused.text, /^Key tips off for this session; the store refused/);
@@ -3958,7 +3958,7 @@ test("the machine is read within the configured time, and a worktree probe withi
   const first = stub({});
   await first.start();
   await drain();
-  const readerAt = first.calls.argv.findIndex((argv) => argv[1] === "/plugin/fleet/" + READER);
+  const readerAt = first.calls.argv.findIndex((argv) => argv[1] === "/plugin/llm-fleet/" + READER);
   assert.notEqual(readerAt, -1);
   assert.equal(first.calls.runTimeouts[readerAt], 25_000);
   // A reading that carries the times sets them for the reads after it.
@@ -3980,7 +3980,7 @@ test("the machine is read within the configured time, and a worktree probe withi
   driven.tick(LOOK_MS);
   await drain();
   const plain = driven.calls.argv.findIndex((argv, index) => index > probed
-    && argv[1] === "/plugin/fleet/" + READER && !argv.includes(FRESH_WORKTREES));
+    && argv[1] === "/plugin/llm-fleet/" + READER && !argv.includes(FRESH_WORKTREES));
   assert.notEqual(plain, -1);
   assert.equal(driven.calls.runTimeouts[plain], 4_000);
 });
@@ -3993,7 +3993,7 @@ test("a session with no reading learns its read time from the settings before it
   await slow.start();
   await drain();
   assert.deepEqual(slow.calls.settings, [SETTINGS_MS]);
-  const first = slow.calls.argv.findIndex((argv) => argv[1] === "/plugin/fleet/" + READER);
+  const first = slow.calls.argv.findIndex((argv) => argv[1] === "/plugin/llm-fleet/" + READER);
   assert.notEqual(first, -1);
   assert.equal(slow.calls.runTimeouts[first], 90_000);
   // Known once, so the reads after it ask the machine alone.
@@ -4012,7 +4012,7 @@ test("a session with no reading learns its read time from the settings before it
   failing.tick(LOOK_MS);
   await drain();
   const reads = failing.calls.argv.flatMap((argv, index) =>
-    argv[1] === "/plugin/fleet/" + READER ? [failing.calls.runTimeouts[index]] : []);
+    argv[1] === "/plugin/llm-fleet/" + READER ? [failing.calls.runTimeouts[index]] : []);
   assert.ok(reads.length >= 2);
   assert.ok(reads.every((ms) => ms === 90_000));
   assert.deepEqual(failing.calls.settings, [SETTINGS_MS]);
@@ -4038,31 +4038,31 @@ test("settings that answer after another session's reading landed do not replace
   }
   release();
   await drain();
-  const first = driven.calls.argv.findIndex((argv) => argv[1] === "/plugin/fleet/" + READER);
+  const first = driven.calls.argv.findIndex((argv) => argv[1] === "/plugin/llm-fleet/" + READER);
   assert.notEqual(first, -1);
   assert.equal(driven.calls.runTimeouts[first], 4_000);
 });
 
 test("every script starts under the person's interpreter and with their configuration file", async () => {
-  const driven = stub({ pluginOptions: { python: "/opt/py/bin/python3.12", configPath: "/etc/fleet/config.json" } });
+  const driven = stub({ pluginOptions: { python: "/opt/py/bin/python3.12", configPath: "/etc/llm-fleet/config.json" } });
   await driven.start();
   await drain();
   await driven.command("worktrees");
   driven.tick(LOOK_MS);
   await drain();
-  const scripts = driven.calls.launches.filter((run) => run.argv[1]?.startsWith("/plugin/fleet/readers/"));
+  const scripts = driven.calls.launches.filter((run) => run.argv[1]?.startsWith("/plugin/llm-fleet/readers/"));
   // The settings read, the whole read and the tab helper at least, each started the same way.
   assert.ok(scripts.length >= 3, String(scripts.length));
   for (const run of scripts) {
     assert.equal(run.argv[0], "/opt/py/bin/python3.12", run.argv.join(" "));
-    assert.deepEqual(run.env, { FLEET_CONFIG: "/etc/fleet/config.json" }, run.argv.join(" "));
+    assert.deepEqual(run.env, { FLEET_CONFIG: "/etc/llm-fleet/config.json" }, run.argv.join(" "));
   }
   assert.ok(scripts.some((run) => run.argv.includes(SETTINGS_ONLY)));
   // Options left out start every script as the package does, with no variables set.
   const plain = stub({});
   await plain.start();
   await drain();
-  const packaged = plain.calls.launches.filter((run) => run.argv[1]?.startsWith("/plugin/fleet/readers/"));
+  const packaged = plain.calls.launches.filter((run) => run.argv[1]?.startsWith("/plugin/llm-fleet/readers/"));
   assert.ok(packaged.length >= 2);
   for (const run of packaged) {
     assert.equal(run.argv[0], "python3");
@@ -4070,7 +4070,7 @@ test("every script starts under the person's interpreter and with their configur
   }
 });
 
-test("/fleet doctor answers with the doctor's own lines, started like every other script", async () => {
+test("/llm-fleet doctor answers with the doctor's own lines, started like every other script", async () => {
   const report = "Fleet doctor: 1 thing to fix\n  Source jobs: unconfigured; fix: add a provider";
   const driven = stub({ pluginOptions: { python: "/opt/py/bin/python3.12" },
                         answer: (argv) => (argv[1]?.endsWith("readers/doctor.py")
@@ -4108,7 +4108,7 @@ test("an interpreter that cannot be started is named with the option that sets i
   }
 });
 
-test("/fleet setup answers with what it wrote, and the next read learns the new file's times", async () => {
+test("/llm-fleet setup answers with what it wrote, and the next read learns the new file's times", async () => {
   const wrote = "Wrote a starter configuration at ~/.config/llm-fleet/config.json with $HOME/.claude.";
   const driven = stub({ answer: (argv) => (argv[1]?.endsWith("readers/setup.py")
     ? { exitCode: 0, stdout: wrote + "\n" } : undefined) });
@@ -4174,7 +4174,7 @@ test("settings that fail or are refused leave the packaged time, and the next re
     const driven = stub({ settings: async () => answer, exitCode: 1, stdout: "" });
     await driven.start();
     await drain();
-    const first = driven.calls.argv.findIndex((argv) => argv[1] === "/plugin/fleet/" + READER);
+    const first = driven.calls.argv.findIndex((argv) => argv[1] === "/plugin/llm-fleet/" + READER);
     assert.notEqual(first, -1, answer.stdout);
     assert.equal(driven.calls.runTimeouts[first], 25_000, answer.stdout);
     driven.advance(STALE_SECONDS + 1);
@@ -4215,7 +4215,7 @@ test("/worktrees opens the pane on Worktrees alone, probes them on the next look
   await drain();
   const fresh = driven.calls.argv.slice(reads).filter((argv) => argv.includes(FRESH_WORKTREES));
   assert.equal(fresh.length, 1);
-  assert.equal(fresh[0]?.[1], "/plugin/fleet/" + READER);
+  assert.equal(fresh[0]?.[1], "/plugin/llm-fleet/" + READER);
   // Once: the look after it reads nothing while the reading is new.
   driven.tick(LOOK_MS);
   await drain();

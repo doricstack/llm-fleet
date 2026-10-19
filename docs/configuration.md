@@ -2,7 +2,7 @@
 
 | ID | Context | Statement or required action |
 | --- | --- | --- |
-| DOC6-1 | Configuration | `plugins/fleet/config/schema.json` is the versioned contract; `plugins/fleet/config/loader.py` and `config/loader.ts` are the two loaders that read it. The schema and the Python loader sit in the plugin folder because an install copies that folder alone. |
+| DOC6-1 | Configuration | `plugins/llm-fleet/config/schema.json` is the versioned contract; `plugins/llm-fleet/config/loader.py` and `config/loader.ts` are the two loaders that read it. The schema and the Python loader sit in the plugin folder because an install copies that folder alone. |
 | DOC6-2 | Configuration | The loaders validate, resolve, and derive source state. They read no provider data and start no process. |
 | DOC6-3 | Configuration | The existing implementation mixed environment overrides, plugin-store preferences, plugin options, and source constants. |
 | DOC6-4 | Configuration | The loaders replace that mixing for the loading contract and the sources-and-paths group below. The later groups remain an inventory. |
@@ -19,14 +19,14 @@
 
 | Step | What it does |
 | --- | --- |
-| `/fleet setup` (or `make configure`) | Writes a starter configuration where the loader reads it: the file `$FLEET_CONFIG` names, otherwise the default place. It holds the provider homes found on this machine (the one `CLAUDE_CONFIG_DIR` names and `~/.claude`) and nothing else, with paths under the home written as `$HOME/...`. It never overwrites: a file or link already there is left as it is, and the command says so. |
-| `/fleet doctor` (or `make doctor`) | Says what the pane is missing: the interpreter and its version, where the configuration was read from and whether the loader took it, each provider and source with its state, and the commands the readers start. Every fix it names is a key from this document, taken from the schema's own rule for that source. |
+| `/llm-fleet setup` (or `make configure`) | Writes a starter configuration where the loader reads it: the file `$FLEET_CONFIG` names, otherwise the default place. It holds the provider homes found on this machine (the one `CLAUDE_CONFIG_DIR` names and `~/.claude`) and nothing else, with paths under the home written as `$HOME/...`. It never overwrites: a file or link already there is left as it is, and the command says so. |
+| `/llm-fleet doctor` (or `make doctor`) | Says what the pane is missing: the interpreter and its version, where the configuration was read from and whether the loader took it, each provider and source with its state, and the commands the readers start. Every fix it names is a key from this document, taken from the schema's own rule for that source. |
 
 ## Plugin options
 
 | Option | Default | What it sets |
 | --- | --- | --- |
-| Python interpreter (`python`) | `python3` | The interpreter every reader runs under: a name on the PATH or a full path, Python 3.11 or newer. A value the session cannot start is named by `/fleet doctor` with this option. |
+| Python interpreter (`python`) | `python3` | The interpreter every reader runs under: a name on the PATH or a full path, Python 3.11 or newer. A value the session cannot start is named by `/llm-fleet doctor` with this option. |
 | Configuration file (`configPath`) | empty | A full path to the configuration, passed to every reader as `$FLEET_CONFIG`. Empty reads the default place. A relative path is refused by name. |
 | Desktop notifications (`notify`) | `true` | Raises a desktop notification beside the in-session toast when a job fails or waits. |
 
@@ -110,7 +110,7 @@
 | Proposed key | Type | Existing value or behavior | Proposed default / absence |
 | --- | --- | --- | --- |
 | `schemaVersion` | integer | No unified schema | `1`; unsupported version is an error |
-| `stateDir` | path | Fleet cache under the user's local state directory; `FLEET_STATE_DIR` override | `$XDG_STATE_HOME/llm-fleet`, else `$HOME/.local/state/llm-fleet` |
+| `stateDir` | path | llm-fleet cache under the user's local state directory; `FLEET_STATE_DIR` override | `$XDG_STATE_HOME/llm-fleet`, else `$HOME/.local/state/llm-fleet` |
 | `providers` | array of objects | Three hardcoded routes, with `FLEET_HOMES` override | `[]`; show setup-needed, not zero jobs |
 | `providers[].id` | nonempty string | Route key duplicated between helper and UI | Required; duplicate IDs rejected |
 | `providers[].label` | string | Claude, DeepSeek, Kimi | ID if absent |

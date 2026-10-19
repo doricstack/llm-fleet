@@ -9,10 +9,10 @@
  *          "width": 120, "now": 1790000000}
  * Output: one line per line, as plain text.
  *
- * Run with: node plugins/fleet/components/statusline-run.ts < request.json
+ * Run with: node plugins/llm-fleet/components/statusline-run.ts < request.json
  */
 
-import { composeLines, renderedLines, type StatuslineInput } from "../plugins/fleet/components/statusline.ts";
+import { composeLines, renderedLines, type StatuslineInput } from "../plugins/llm-fleet/components/statusline.ts";
 
 const WIDTH_FALLBACK = 100;
 const MAX_REQUEST_BYTES = 1_048_576;

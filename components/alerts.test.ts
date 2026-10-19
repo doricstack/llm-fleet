@@ -7,8 +7,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { eventsOf, newEvents } from "../plugins/fleet/components/alerts.ts";
-import { snapshotFrom, type ReaderDocuments } from "../plugins/fleet/components/snapshot.ts";
+import { eventsOf, newEvents } from "../plugins/llm-fleet/components/alerts.ts";
+import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
 
 const AT = 1_790_000_000;
 const KEY = ["sk-", "ant-", "api03-", "A".repeat(24)].join("");

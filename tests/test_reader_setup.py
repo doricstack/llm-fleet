@@ -197,7 +197,7 @@ class CommandLineTests(SetupCase):
         completed = self.run_setup()
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("~/.config/llm-fleet/config.json", completed.stdout)
-        self.assertIn("/fleet doctor", completed.stdout)
+        self.assertIn("/llm-fleet doctor", completed.stdout)
 
     def test_an_existing_file_exits_three(self):
         self.default.parent.mkdir(parents=True)

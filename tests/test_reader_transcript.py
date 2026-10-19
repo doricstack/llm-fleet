@@ -22,7 +22,7 @@ from readers import transcript
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "plugins" / "fleet" / "readers" / "transcript.py"
+SCRIPT = ROOT / "plugins" / "llm-fleet" / "readers" / "transcript.py"
 # The `sources.agents` group as the schema defaults it, for the current
 # generation of each family: the session section prices its cache saving from
 # the same rates the agent cards do. A key names a generation, which is what the

@@ -22,7 +22,7 @@ Both figures are reported as read. A cold session can show a negative difference
 and this layer states it rather than clamping it: the renderer suppresses a
 negative saving from the line, and it cannot do that if the number never arrives.
 
-Run with: python3 plugins/fleet/readers/transcript.py --path <transcript.jsonl>
+Run with: python3 plugins/llm-fleet/readers/transcript.py --path <transcript.jsonl>
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { firstName, speakRequest, speakStatus, speechInfo, voiceList, voiceOrder, voiceReply,
-         voiceSetting, type SpeechInfo } from "../plugins/fleet/components/speech.ts";
+         voiceSetting, type SpeechInfo } from "../plugins/llm-fleet/components/speech.ts";
 
 const VOICES = { female: ["af_sky", "af_kore", "af_nicole"], male: ["am_michael", "am_onyx"] };
 const INFO: SpeechInfo = { state: "ready", reason: null, group: "female", voice: null, voices: VOICES };

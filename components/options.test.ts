@@ -14,8 +14,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { GEOMETRY, NARROW_AT, SECTIONS, paneConfigFrom, paneOptions }
-  from "../plugins/fleet/components/options.ts";
-import { DEFAULT_KEYS } from "../plugins/fleet/components/pane.ts";
+  from "../plugins/llm-fleet/components/options.ts";
+import { DEFAULT_KEYS } from "../plugins/llm-fleet/components/pane.ts";
 
 const NOW = 1_700_000_000;
 

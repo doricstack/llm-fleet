@@ -1,6 +1,6 @@
 {
   "name": "llm-fleet",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Every Claude Code session, background job and open pull request on this machine in one live pane, with alerts when one fails or waits for you.",
   "types": "./types/index.d.ts",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "configPath": {
       "type": "string",
       "title": "Configuration file",
-      "description": "The full path of your fleet configuration, when you keep it somewhere other than the default place (~/.config/llm-fleet/config.json). Leave empty to use the default. /fleet setup writes a starter file there.",
+      "description": "The full path of your fleet configuration, when you keep it somewhere other than the default place (~/.config/llm-fleet/config.json). Leave empty to use the default. /llm-fleet setup writes a starter file there.",
       "required": false,
       "default": ""
     },

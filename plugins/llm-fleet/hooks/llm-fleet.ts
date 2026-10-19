@@ -1,9 +1,9 @@
 /**
- * Fleet: the pane, drawn by the engine.
+ * llm-fleet: the pane, drawn by the engine.
  *
  * This is the entry the engine loads. It is deliberately thin: it registers one
  * command, opens one pane, and hands the reading it already has to
- * `plugins/fleet/components/surface.ts`, which decides the tree. Everything the
+ * `plugins/llm-fleet/components/surface.ts`, which decides the tree. Everything the
  * pane shows is therefore testable without the engine, and this file holds only
  * what needs it: the plugin's own root, the resolved element table, the process
  * runner, and the clock.
@@ -15,7 +15,7 @@
  * inside a paint, and the surface would draw the pane empty while it waited.
  *
  * The engine gives a render hook its element constructors through `$.ui.resolve`,
- * which is exactly the subset this repository declares in `plugins/fleet/components/host.ts`.
+ * which is exactly the subset this repository declares in `plugins/llm-fleet/components/host.ts`.
  * Nothing here writes JSX: the layout builds the tree as data, so the same code
  * that a terminal draws is the code the review renderer measures.
  *
@@ -645,7 +645,7 @@ function runEntry($: Engine, entry: Entry, args: readonly string[], timeoutMs: n
                        env === undefined ? { timeoutMs } : { timeoutMs, env });
 }
 
-/** How long `/fleet doctor` and `/fleet setup` may take: a load and a look, no source read. */
+/** How long `/llm-fleet doctor` and `/llm-fleet setup` may take: a load and a look, no source read. */
 export const ASK_MS = 10_000;
 
 /** What a person is told when the configured interpreter could not run a script. */
@@ -655,7 +655,7 @@ function interpreterAdvice(entry: string, detail: string): string {
 }
 
 /**
- * Run `/fleet doctor` or `/fleet setup` and answer with what the script printed.
+ * Run `/llm-fleet doctor` or `/llm-fleet setup` and answer with what the script printed.
  *
  * Both print lines meant for a person, so their output is the answer. A script
  * that printed nothing is one the interpreter never ran, which is the one thing
@@ -2704,7 +2704,7 @@ async function alert($: Engine, state: State, event: FleetEvent) {
   if ((await helper($, ["claim", event.key])).exitCode !== 0) {
     return;
   }
-  await $.ui.notify(mask(event.text).text, { title: "fleet" }).catch(() => undefined);
+  await $.ui.notify(mask(event.text).text, { title: "llm-fleet" }).catch(() => undefined);
   // Said aloud by the one session that took the claim, so the machine says it
   // once. Not awaited: a voice that is slow must not hold up the next alert.
   if (event.spoken !== undefined) {
@@ -2981,7 +2981,7 @@ function sectionOfKey(key: string): string | null {
  * Every other section is folded, so the one asked for is in view without
  * scrolling, and the folds are kept as a press keeps them: a person who left the
  * pane on Worktrees finds it there in the next session. A second run, with the
- * pane open and the section unfolded, closes the pane, the way `/fleet` does.
+ * pane open and the section unfolded, closes the pane, the way `/llm-fleet` does.
  */
 async function openOn($: Engine, state: State, section: string): Promise<{ text: string }> {
   const title = ONE_SECTION_TITLES[section] ?? section;
@@ -2990,13 +2990,13 @@ async function openOn($: Engine, state: State, section: string): Promise<{ text:
   const pane = paneConfigFrom(held?.documents);
   const names = sectionNames(pane);
   if (!names.includes(section)) {
-    return { text: `The fleet pane draws no ${title} section: the configuration leaves it out `
+    return { text: `The llm-fleet pane draws no ${title} section: the configuration leaves it out `
       + `of pane.sectionOrder (${MARK}).` };
   }
   // A section the configuration hides draws nothing however it is folded, so
   // folding the rest around it would open an empty pane and keep that fold.
   if (pane?.sections[section]?.visible === false) {
-    return { text: `The fleet pane hides its ${title} section: set pane.sections.${section}.visible `
+    return { text: `The llm-fleet pane hides its ${title} section: set pane.sections.${section}.visible `
       + `to true to show it (${MARK}).` };
   }
   const isOpen = await $.ui.panes()
@@ -3124,7 +3124,7 @@ export const register: Register = (on, options) => {
     // refusal took the first read, the band and every fold restore with it:
     // the pane opened blank.
     const commands = [
-      { name: "fleet",
+      { name: "llm-fleet",
         description: "Background jobs, trials and PRs across this machine, in a pane",
         argumentHint: "[close|unhide|doctor|setup]",
         immediate: true },
@@ -3133,10 +3133,10 @@ export const register: Register = (on, options) => {
         argumentHint: "[on|off|female|male|list|<voice>]",
         immediate: true },
       { name: "worktrees",
-        description: "Open the fleet pane on Worktrees, probed now; run again to close it",
+        description: "Open the llm-fleet pane on Worktrees, probed now; run again to close it",
         immediate: true },
       { name: "keys",
-        description: "Open the fleet pane on Keys, or switch the key tip under the prompt",
+        description: "Open the llm-fleet pane on Keys, or switch the key tip under the prompt",
         argumentHint: "[tips off|on]",
         immediate: true },
     ] as const;
@@ -3299,7 +3299,7 @@ export const register: Register = (on, options) => {
     return { text: voiceReply(spoke.voice, spoke.reason) };
   });
 
-  on("command.run", { command: "fleet" }, async ($, event) => {
+  on("command.run", { command: "llm-fleet" }, async ($, event) => {
     // What a person dismissed from the band comes back, here and in the store,
     // so the next session draws it too.
     const asked = (event.args ?? "").trim();

@@ -1,5 +1,5 @@
 /**
- * The fleet plugin's contract with the engine: the values it keeps in `$.state`,
+ * The llm-fleet plugin's contract with the engine: the values it keeps in `$.state`,
  * and the keys it keeps in `$.store`.
  *
  * Written by hand and named as "types" in .claude-plugin/plugin.json. The

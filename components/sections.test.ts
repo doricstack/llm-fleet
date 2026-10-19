@@ -8,10 +8,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { emptyGroup, paneFrom } from "../plugins/fleet/components/pane.ts";
-import { paneOptions } from "../plugins/fleet/components/options.ts";
-import { renderedText, renderPane } from "../plugins/fleet/components/layout.ts";
-import { snapshotFrom, type ReaderDocuments } from "../plugins/fleet/components/snapshot.ts";
+import { emptyGroup, paneFrom } from "../plugins/llm-fleet/components/pane.ts";
+import { paneOptions } from "../plugins/llm-fleet/components/options.ts";
+import { renderedText, renderPane } from "../plugins/llm-fleet/components/layout.ts";
+import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
 
 const AT = 1_790_000_000;
 

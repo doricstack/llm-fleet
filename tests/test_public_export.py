@@ -474,12 +474,12 @@ class HardeningTests(unittest.TestCase):
     def test_the_engines_manifest_directory_is_not_a_provider_home(self):
         # Every plugin carries .claude-plugin/plugin.json; the rule that keeps a
         # personal provider home out of the export matches the same prefix.
-        self.write("plugins/fleet/.claude-plugin/plugin.json", '{"name": "fleet"}\n')
-        self.write("public-export/allowlist.txt", "plugins/fleet/.claude-plugin/plugin.json\n")
+        self.write("plugins/llm-fleet/.claude-plugin/plugin.json", '{"name": "fleet"}\n')
+        self.write("public-export/allowlist.txt", "plugins/llm-fleet/.claude-plugin/plugin.json\n")
         result = self.run_export()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            (self.destination / "plugins" / "fleet" / ".claude-plugin" / "plugin.json").read_text(),
+            (self.destination / "plugins" / "llm-fleet" / ".claude-plugin" / "plugin.json").read_text(),
             '{"name": "fleet"}\n')
 
     def test_the_engines_environment_noun_is_not_an_environment_file(self):

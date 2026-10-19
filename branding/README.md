@@ -1,6 +1,6 @@
 # Brand files
 
-The vector marks live in `plugins/fleet/assets/`: the symbol, the horizontal logo and the mono ink mark, each with its light and dark pairing. Those are what the README and the desktop surfaces draw.
+The vector marks live in `plugins/llm-fleet/assets/`: the symbol, the horizontal logo and the mono ink mark, each with its light and dark pairing. Those are what the README and the desktop surfaces draw.
 
 A terminal draws no images, so the same mark travels as text:
 

@@ -9,7 +9,7 @@ difference between turning the queue off and turning the controller off.
 
 import json
 from pathlib import Path
-import stat
+import sys
 import tempfile
 import unittest
 
@@ -107,9 +107,10 @@ class GovernanceCase(unittest.TestCase):
             "target.write_text(json.dumps({'governor': sys.argv[1] == 'on',\n"
             "                              'controller': True}))\n",
             encoding="utf-8")
-        stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+        # The switch runs under the interpreter, the way a configuration names
+        # one on every platform: Windows does not run a script by its shebang.
         config = self.config(switchPath=str(self.switch),
-                             switchCommand=[str(stub)])
+                             switchCommand=[sys.executable, str(stub)])
         result = governance.set_governance(config, "governor", False)
         self.assertEqual(result["state"], "ready")
         self.assertEqual(result["governor"], False)
@@ -127,9 +128,9 @@ class GovernanceCase(unittest.TestCase):
         stub = self.root / "refuse.py"
         stub.write_text("#!/usr/bin/env python3\nimport sys\nsys.stderr.write('refused')\n"
                         "sys.exit(3)\n", encoding="utf-8")
-        stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
         result = governance.set_governance(
-            self.config(switchPath=str(self.switch), switchCommand=[str(stub)]),
+            self.config(switchPath=str(self.switch),
+                        switchCommand=[sys.executable, str(stub)]),
             "governor", False)
         self.assertEqual(result["state"], "failed")
         self.assertIn("refused", result["errors"][0]["reason"])

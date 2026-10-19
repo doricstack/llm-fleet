@@ -47,7 +47,7 @@ Their targets fail with an explanation. Typechecking requires an explicit
 
 ## The host payload
 
-`plugins/fleet/readers/host.py` reads what the session host hands the statusline on
+`plugins/llm-fleet/readers/host.py` reads what the session host hands the statusline on
 stdin: session, model, cost, context window, rate limits, prompt cache, effort,
 thinking, pull request and worktree. The host is a separate program, so the payload
 is untrusted input rather than a contract it keeps.
@@ -70,7 +70,7 @@ second line reading the same payload disagreed with it.
 
 ### Session economics
 
-`plugins/fleet/readers/transcript.py` sums this session's own transcript, because
+`plugins/llm-fleet/readers/transcript.py` sums this session's own transcript, because
 the statusline only runs when someone interacts with it: an accumulator folded at
 render time misses every API call between two renders and undercounts badly. The
 saving is what the cached tokens would have cost at the input rate, less what was
@@ -95,7 +95,7 @@ money figure is absent rather than zero when no assistant record was read.
 
 ### The lines
 
-`plugins/fleet/components/statusline.ts` composes three lines from those two readings, and it is
+`plugins/llm-fleet/components/statusline.ts` composes three lines from those two readings, and it is
 pure: the lines are slots a host draws, so every rule is tested without a terminal.
 The identity line carries the clock, the session, the model with its effort, the
 version, and the project with its branch. The context line carries the fill and
@@ -116,13 +116,13 @@ payload was recorded from a real session or built from the sample shape.
 
 ## The engine entry
 
-`plugins/fleet/hooks/fleet.ts` is the module the engine loads. It is deliberately
-thin, because everything the pane draws is decided in `plugins/fleet/components/`: it registers
+`plugins/llm-fleet/hooks/llm-fleet.ts` is the module the engine loads. It is deliberately
+thin, because everything the pane draws is decided in `plugins/llm-fleet/components/`: it registers
 the `fleet` command, opens one pane, and on every render runs the read command and
-hands the answer to `plugins/fleet/components/surface.ts`.
+hands the answer to `plugins/llm-fleet/components/surface.ts`.
 
-The plugin is a plugin because `plugins/fleet/.claude-plugin/plugin.json` names it
-and `plugins/fleet/hooks/hooks.json` names the module. The engine requires its
+The plugin is a plugin because `plugins/llm-fleet/.claude-plugin/plugin.json` names it
+and `plugins/llm-fleet/hooks/hooks.json` names the module. The engine requires its
 manifest directory to be called `.claude-plugin`, which is the prefix the denylist
 refuses as a personal provider home, so that one reserved name is exempted in the
 rule and a case proves a real home is still refused.
@@ -131,7 +131,7 @@ The engine loads the plugin as a folder. It refuses an import that resolves
 outside the folder, and it evaluates what it loads without node, so a module
 that reads a process or writes to standard input throws while it is being
 loaded. Both rules shape the tree. Everything the entry needs lives in
-`plugins/fleet/components/`, never in a directory beside the plugin, because a
+`plugins/llm-fleet/components/`, never in a directory beside the plugin, because a
 layout one level up compiles here and is refused there with the pane simply
 never appearing. Work that belongs to a command line, the review tool that
 prints the pane and the statusline command line, lives in `components/` at the
@@ -141,7 +141,7 @@ under each plugin folder and refuses one that escapes, and it refuses a module
 reaching for a node global, naming the file, the line and the specifier.
 The readers are held to the same folder from the Python side: an install
 copies the plugin folder and nothing beside it, so the loader and the schema
-live in `plugins/fleet/config/`, a reader imports `config.loader` and
+live in `plugins/llm-fleet/config/`, a reader imports `config.loader` and
 `readers.<name>` from the plugin root, and a reader started by path reaches that
 root through `readers/plugin_root.py`, the one module allowed to set the import
 path. The plugin names the scripts it starts in one table,
@@ -155,7 +155,7 @@ entry from a lone copy of the folder with every source on.
 
 The engine publishes a generated declaration of its whole API. Importing it, or
 copying it here, is what the host binding rule refuses, so
-`plugins/fleet/hooks/engine.ts` declares the narrow subset the entry calls: the
+`plugins/llm-fleet/hooks/engine.ts` declares the narrow subset the entry calls: the
 command registration, the pane open, close and list calls, the element table a
 render hook resolves, the clock, the process runner, and the plugin's own root.
 Adding a call means adding it to that file first, which keeps the surface this
@@ -265,7 +265,7 @@ The roster and job readers are extracted, and they are the shape every later
 reader copies. Three things are structural rather than stylistic.
 
 A reader does not touch the machine itself; it calls the surface in
-`plugins/fleet/readers/runtime.py`. That module owns command resolution, the
+`plugins/llm-fleet/readers/runtime.py`. That module owns command resolution, the
 bounded run, the bounded file read, text sanitizing, and job-identifier
 validation, and it holds the three invariants a configuration file may not
 weaken: a child process never inherits a provider credential, a job identifier
@@ -353,7 +353,7 @@ and any fixed leading arguments; a reader appends its own arguments to them.
 ## Shared layout
 
 The rendering layers share one layout, built from two primitives and nothing
-else. `plugins/fleet/components/host.ts` declares the subset this repository uses, `layout.ts`
+else. `plugins/llm-fleet/components/host.ts` declares the subset this repository uses, `layout.ts`
 turns a description of the pane into a tree of Box and Text nodes, and
 `mount.ts` is the single boundary where those nodes become the host's own
 elements. Nothing draws a raster, which is the terminal's alone. A bar, a strip
@@ -401,7 +401,7 @@ prove without a host. It does not claim to prove how either surface paints.
 
 ## Reading, and looking at what was read
 
-`plugins/fleet/readers/snapshot.py` is the command a view layer calls: it resolves
+`plugins/llm-fleet/readers/snapshot.py` is the command a view layer calls: it resolves
 the configuration, runs the seven readers once, and prints one object. A reader
 that raises does not remove its document; the slot is filled with a failed source
 that names the reason, because a missing key reads downstream as a source nobody
@@ -418,7 +418,7 @@ would erase the evidence that the pane let it through.
 
 ## The pane view model
 
-`plugins/fleet/components/pane.ts` turns reader output into the descriptions the layout draws.
+`plugins/llm-fleet/components/pane.ts` turns reader output into the descriptions the layout draws.
 It is a pure function, so every rule the design cares about is tested without a
 terminal.
 
@@ -435,7 +435,7 @@ denominators. A group's primary count is stated even at zero, since zero observe
 is a reading; the legend entries after it omit the states nothing is in.
 
 The six reader documents arrive as parsed JSON from another process, so
-`plugins/fleet/components/snapshot.ts` checks every field before it is used. An absent document
+`plugins/llm-fleet/components/snapshot.ts` checks every field before it is used. An absent document
 is a source nothing was claimed for, which reads as empty; a document that is
 present and unreadable, or that names a state this layer does not know, reads as
 failed, because reading it as empty would claim nothing is running when nothing
@@ -448,7 +448,7 @@ not answer, that it was not rechecked.
 
 ## Masking
 
-`plugins/fleet/components/mask.ts` runs over every field the pane prints that a person wrote:
+`plugins/llm-fleet/components/mask.ts` runs over every field the pane prints that a person wrote:
 session names, questions, branch names, worktree names, pull-request titles,
 skill findings and failure reasons. The pane is a display surface, so it masks
 before it renders rather than trusting the text it was handed.
@@ -467,7 +467,7 @@ does not. The masker hides only what it can defend hiding, because a masker that
 eats ordinary words makes the pane lie about what it is showing.
 
 This is the masker the `plugins/secret-shield/` mod will own. It lives in
-`plugins/fleet/components/` for now because the pane needs it before that mod is extracted; the
+`plugins/llm-fleet/components/` for now because the pane needs it before that mod is extracted; the
 mod keeps its own thresholds, and this one only has to be honest about what it
 hides.
 
@@ -677,7 +677,7 @@ session ends. There is no configurable notification-tone asset system yet.
 
 ## Controller boundary and truthful states
 
-Fleet observes the controller; it is not the controller. Worktree rows copy a
+llm-fleet observes the controller; it is not the controller. Worktree rows copy a
 cleanup command, not execute cleanup. Trial execution, preservation, cleanup
 authorization, and scheduling remain external. An optional controller adapter
 must allow fleet to run without that personal workflow.

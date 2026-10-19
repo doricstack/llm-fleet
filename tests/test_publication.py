@@ -15,7 +15,7 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-PLUGIN = ROOT / "plugins" / "fleet"
+PLUGIN = ROOT / "plugins" / "llm-fleet"
 MANIFEST = PLUGIN / ".claude-plugin" / "plugin.json"
 PUBLISHED = ROOT / ".claude-plugin" / "marketplace.json"
 LOCAL = PLUGIN / ".claude-plugin" / "marketplace.json"

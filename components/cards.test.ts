@@ -14,8 +14,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { BAR_FILLED, BAR_TRACK, DOT_FILLED, historyStrip, rateBar, statStrip,
-         stateColor, statusDot } from "../plugins/fleet/components/cards.ts";
-import { renderedText } from "../plugins/fleet/components/layout.ts";
+         stateColor, statusDot } from "../plugins/llm-fleet/components/cards.ts";
+import { renderedText } from "../plugins/llm-fleet/components/layout.ts";
 
 type Drawn = { props?: Record<string, unknown>; children?: unknown };
 

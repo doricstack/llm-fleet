@@ -22,7 +22,7 @@ or priced is counted as skipped rather than drawn as spend.
 
 Read-only by design: this opens files and reports what they hold.
 
-Run with: python3 plugins/fleet/readers/session.py --config <path>
+Run with: python3 plugins/llm-fleet/readers/session.py --config <path>
 """
 
 from __future__ import annotations

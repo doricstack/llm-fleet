@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DECLARATIONS = ROOT / "mutation" / "mutants.json"
 # The manifest a declaration may name the shipped version from, and the token it
 # writes it as.
-MANIFEST = ("plugins", "fleet", ".claude-plugin", "plugin.json")
+MANIFEST = ("plugins", "llm-fleet", ".claude-plugin", "plugin.json")
 VERSION_TOKEN = "{version}"
 KILLED = "killed"
 SURVIVED = "survived"

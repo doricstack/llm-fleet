@@ -8,13 +8,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ENTRIES, entryArgv, entryEnv, LAUNCH, launchFrom, PYTHON } from "../plugins/fleet/components/entries.ts";
-import { ALERTS, READER, TAB_HELPER } from "../plugins/fleet/hooks/fleet.ts";
+import { ENTRIES, entryArgv, entryEnv, LAUNCH, launchFrom, PYTHON } from "../plugins/llm-fleet/components/entries.ts";
+import { ALERTS, READER, TAB_HELPER } from "../plugins/llm-fleet/hooks/llm-fleet.ts";
 
 test("a command starts the interpreter on the declared script under the plugin root", () => {
-  assert.deepEqual(entryArgv("/plugin/fleet", "snapshot", ["--pretty"]),
-                   [PYTHON, "/plugin/fleet/readers/snapshot.py", "--pretty"]);
-  assert.deepEqual(entryArgv("/plugin/fleet", "tab"), [PYTHON, "/plugin/fleet/readers/tab.py"]);
+  assert.deepEqual(entryArgv("/plugin/llm-fleet", "snapshot", ["--pretty"]),
+                   [PYTHON, "/plugin/llm-fleet/readers/snapshot.py", "--pretty"]);
+  assert.deepEqual(entryArgv("/plugin/llm-fleet", "tab"), [PYTHON, "/plugin/llm-fleet/readers/tab.py"]);
 });
 
 test("the arguments follow the script in order and are not changed", () => {
@@ -23,10 +23,10 @@ test("the arguments follow the script in order and are not changed", () => {
 });
 
 test("the person's interpreter starts every entry, and their configuration file reaches it", () => {
-  const launch = launchFrom({ python: "  /opt/py/bin/python3.12 ", configPath: "/etc/fleet/config.json" });
-  assert.deepEqual(entryArgv("/plugin/fleet", "snapshot", ["--pretty"], launch),
-                   ["/opt/py/bin/python3.12", "/plugin/fleet/readers/snapshot.py", "--pretty"]);
-  assert.deepEqual(entryEnv(launch), { FLEET_CONFIG: "/etc/fleet/config.json" });
+  const launch = launchFrom({ python: "  /opt/py/bin/python3.12 ", configPath: "/etc/llm-fleet/config.json" });
+  assert.deepEqual(entryArgv("/plugin/llm-fleet", "snapshot", ["--pretty"], launch),
+                   ["/opt/py/bin/python3.12", "/plugin/llm-fleet/readers/snapshot.py", "--pretty"]);
+  assert.deepEqual(entryEnv(launch), { FLEET_CONFIG: "/etc/llm-fleet/config.json" });
 });
 
 test("options left out, empty or of the wrong kind leave the packaged launch", () => {

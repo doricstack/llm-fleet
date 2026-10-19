@@ -7,7 +7,7 @@
  * prove the terminal is handed no Svg and the desktop is handed no glyph bar.
  *
  * They read the markup, not a painted drawing. What a desktop paints is the
- * host kit's case in plugins/fleet/tests/pane.test.ts and a live look.
+ * host kit's case in plugins/llm-fleet/tests/pane.test.ts and a live look.
  *
  * Run with: node --test components/vector.test.ts
  */
@@ -15,14 +15,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { Node } from "../plugins/fleet/components/host.ts";
-import { BAR_FILLED, historyStrip, rateBar } from "../plugins/fleet/components/cards.ts";
-import type { Group, Pane, Row } from "../plugins/fleet/components/layout.ts";
-import { elementTypes, renderPane, renderedText } from "../plugins/fleet/components/layout.ts";
-import { bindPrimitives, mount, recordingPrimitives } from "../plugins/fleet/components/mount.ts";
+import type { Node } from "../plugins/llm-fleet/components/host.ts";
+import { BAR_FILLED, historyStrip, rateBar } from "../plugins/llm-fleet/components/cards.ts";
+import type { Group, Pane, Row } from "../plugins/llm-fleet/components/layout.ts";
+import { elementTypes, renderPane, renderedText } from "../plugins/llm-fleet/components/layout.ts";
+import { bindPrimitives, mount, recordingPrimitives } from "../plugins/llm-fleet/components/mount.ts";
 import { CELL_PIXELS, barVector, cutTo, escapeXml, stripVector,
-         tileVector } from "../plugins/fleet/components/vector.ts";
-import { renderGroup, renderRow } from "../plugins/fleet/components/layout.ts";
+         tileVector } from "../plugins/llm-fleet/components/vector.ts";
+import { renderGroup, renderRow } from "../plugins/llm-fleet/components/layout.ts";
 
 /** The engine's bound on an Svg's source. */
 const SOURCE_LIMIT = 131072;

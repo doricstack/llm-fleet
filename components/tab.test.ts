@@ -15,8 +15,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { afterSend, endNeeded, levelWord, nextSend, passesThrough, serially, tabArgs, tabLevel,
-         tabSender, tabTerminal, TINT_DEFAULTS, tintFrom } from "../plugins/fleet/components/tab.ts";
-import { KEYS_USAGE, keysRequest, tipAt, tipsShown, withTip } from "../plugins/fleet/components/tips.ts";
+         tabSender, tabTerminal, TINT_DEFAULTS, tintFrom } from "../plugins/llm-fleet/components/tab.ts";
+import { KEYS_USAGE, keysRequest, tipAt, tipsShown, withTip } from "../plugins/llm-fleet/components/tips.ts";
 
 test("a failure outranks a wait, and a band with nothing in it is the tab's own color", () => {
   assert.equal(tabLevel([]), null);

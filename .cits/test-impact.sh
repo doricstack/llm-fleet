@@ -156,16 +156,16 @@ add() { commands="${commands}$1
 # of what the Python tests are. A caller that wants a report names where, and
 # the gate that reads one passes its destination in CITS_JUNIT_DIR. unittest
 # writes no report of its own, which is why the repository carries one. The
-# schema both loaders read lives in the plugin folder, under plugins/fleet/config,
+# schema both loaders read lives in the plugin folder, under plugins/llm-fleet/config,
 # so a change there plans this side and the TypeScript side alike.
-if has '\.py$|^tests/|^config/|^plugins/fleet/config/|^public-export/|^Makefile$|^make/|^\.cits/'; then
+if has '\.py$|^tests/|^config/|^plugins/llm-fleet/config/|^public-export/|^Makefile$|^make/|^\.cits/'; then
   add "make test-report"
 fi
 
 # The TypeScript layer, suite by suite through the repository's own runner. A
 # changed .ts runs the layer whole, because a suite that names the changed
 # module and is not selected is the failure this file exists to fix.
-if has '\.tsx?$|^components/|^config/|^plugins/fleet/config/'; then
+if has '\.tsx?$|^components/|^config/|^plugins/llm-fleet/config/'; then
   # Tracked and not-yet-added alike: a suite written for this change is often
   # not staged yet, and a suite nobody lists is a suite nobody runs.
   suites="$({ git ls-files -- 'components/*.test.ts' 'config/*.test.ts'
@@ -186,8 +186,8 @@ fi
 # Named rather than left out: this suite runs under the host's own test kit,
 # which plain node cannot load, and a selection that drops what it cannot run
 # without saying so is the failure this file exists to fix.
-if has '^plugins/fleet/'; then
-  echo "  - plugins/fleet runs through the host's test kit; CI covers it (make test-pane)"
+if has '^plugins/llm-fleet/'; then
+  echo "  - plugins/llm-fleet runs through the host's test kit; CI covers it (make test-pane)"
 fi
 
 # The header is printed only over a plan. An empty selection is stated as one,

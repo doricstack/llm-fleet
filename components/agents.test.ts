@@ -15,13 +15,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { snapshotFrom } from "../plugins/fleet/components/snapshot.ts";
+import { snapshotFrom } from "../plugins/llm-fleet/components/snapshot.ts";
 import {
   DEFAULT_KEYS, agentStrip, modelName, paneFrom, spentText, tokensOf, type PaneOptions,
-} from "../plugins/fleet/components/pane.ts";
-import { GEOMETRY } from "../plugins/fleet/components/options.ts";
-import { renderedText, renderPane } from "../plugins/fleet/components/layout.ts";
-import type { Job } from "../plugins/fleet/components/state.ts";
+} from "../plugins/llm-fleet/components/pane.ts";
+import { GEOMETRY } from "../plugins/llm-fleet/components/options.ts";
+import { renderedText, renderPane } from "../plugins/llm-fleet/components/layout.ts";
+import type { Job } from "../plugins/llm-fleet/components/state.ts";
 
 const NOW = 1_700_000_000;
 

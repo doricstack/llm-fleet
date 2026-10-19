@@ -64,7 +64,7 @@ class ConfigurationTests(DoctorCase):
         self.assertEqual(diagnosis["config"]["path"],
                          str(self.home / ".config" / "llm-fleet" / "config.json"))
         text = "\n".join(doctor.render(diagnosis))
-        self.assertIn("/fleet setup", text)
+        self.assertIn("/llm-fleet setup", text)
 
     def test_a_refused_file_names_every_error_and_counts_as_a_problem(self):
         self.config({"providers": "none", "sources": {"jobs": {"enabled": "yes"}}})
@@ -181,7 +181,7 @@ class CommandLineTests(DoctorCase):
     def test_problems_exit_one_and_print_the_count_first(self):
         completed = self.run_doctor()
         self.assertEqual(completed.returncode, 1, completed.stderr)
-        self.assertRegex(completed.stdout.splitlines()[0], r"^Fleet doctor: \d+ things? to fix$")
+        self.assertRegex(completed.stdout.splitlines()[0], r"^llm-fleet doctor: \d+ things? to fix$")
 
     def test_json_is_the_same_diagnosis(self):
         completed = self.run_doctor("--json")
@@ -195,7 +195,7 @@ class CommandLineTests(DoctorCase):
         self.config({"providers": [{"id": "claude", "home": "$HOME/.claude"}]})
         completed = self.run_doctor()
         self.assertEqual(completed.returncode, 0, completed.stdout)
-        self.assertEqual(completed.stdout.splitlines()[0], "Fleet doctor: nothing to fix")
+        self.assertEqual(completed.stdout.splitlines()[0], "llm-fleet doctor: nothing to fix")
 
 
 if __name__ == "__main__":

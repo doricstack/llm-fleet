@@ -10,7 +10,7 @@ did not send stays absent rather than becoming a zero: a statusline that reports
 Absent fields are named in `absent`. The renderer decides what to do about them,
 and it cannot do that if this layer quietly fills them in.
 
-Run with: python3 plugins/fleet/readers/host.py < payload.json
+Run with: python3 plugins/llm-fleet/readers/host.py < payload.json
 """
 
 from __future__ import annotations

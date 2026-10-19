@@ -13,7 +13,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "fleet"
+PLUGIN = ROOT / "plugins" / "llm-fleet"
 
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))

@@ -1,11 +1,11 @@
 .PHONY: setup build install link clean configure doctor host-update
 
 configure: ## Write a starter configuration where the plugin reads it; one already there is left as it is
-	@$(PYTHON) plugins/fleet/readers/setup.py || test $$? -eq 3
+	@$(PYTHON) plugins/llm-fleet/readers/setup.py || test $$? -eq 3
 	@echo 'Run make doctor to see what the pane is still missing.'
 
 doctor: ## Say what the pane is missing on this machine, and the setting that fixes each
-	$(PYTHON) plugins/fleet/readers/doctor.py
+	$(PYTHON) plugins/llm-fleet/readers/doctor.py
 
 setup: ## Verify the scaffold's Python 3.11+ prerequisite
 	@$(PYTHON) -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11+ required")'

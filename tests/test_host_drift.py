@@ -24,7 +24,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "host-drift.py"
-DECLARED_SUBSET = ROOT / "plugins" / "fleet" / "components" / "host.ts"
+DECLARED_SUBSET = ROOT / "plugins" / "llm-fleet" / "components" / "host.ts"
 SCAFFOLDED = (Path("plugins") / "fleet" / ".claude-plugin" / "types" / "claude-code"
               / "index.d.ts")
 
@@ -279,7 +279,7 @@ class DriftCase(unittest.TestCase):
         if not in_a_repository(ROOT):
             self.skipTest("this tree carries no repository, so nothing in it was committed")
         self.primitives.write_text(PRIMITIVES, encoding="utf-8")
-        self.declaration = ROOT / "plugins" / "fleet" / "components" / "host.ts"
+        self.declaration = ROOT / "plugins" / "llm-fleet" / "components" / "host.ts"
         code, output = self.run_check()
         self.assertEqual(code, 1, output)
         self.assertIn("committed to this repository", output)

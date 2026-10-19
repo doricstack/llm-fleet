@@ -12,7 +12,7 @@ loader would act on.
 Read-only by design: this loads the configuration and looks for commands on the
 PATH. It starts nothing and writes nothing.
 
-Run with: python3 plugins/fleet/readers/doctor.py [--config <path>] [--json]
+Run with: python3 plugins/llm-fleet/readers/doctor.py [--config <path>] [--json]
 """
 
 from __future__ import annotations
@@ -154,7 +154,7 @@ def render(diagnosis: Mapping[str, Any]) -> list[str]:
     """The diagnosis for a person: the count first, then one line per thing checked."""
     home = diagnosis["config"].get("home")
     count = diagnosis["problems"]
-    lines = ["Fleet doctor: " + ("nothing to fix" if count == 0
+    lines = ["llm-fleet doctor: " + ("nothing to fix" if count == 0
                                  else "{0} thing{1} to fix".format(count, "" if count == 1 else "s"))]
     python = diagnosis["python"]
     lines.append("  Python {0} ({1}): {2}".format(
@@ -190,7 +190,7 @@ def render(diagnosis: Mapping[str, Any]) -> list[str]:
             lines.append("  Command {0}: not found on PATH{1}{2}{3}".format(shown, needed, names[key],
                                                                              closing))
     if config["state"] == "absent":
-        lines.append("Run /fleet setup to write a starter configuration at "
+        lines.append("Run /llm-fleet setup to write a starter configuration at "
                      + _shown(config["path"], home) + ".")
     return lines
 

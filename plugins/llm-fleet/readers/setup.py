@@ -17,7 +17,7 @@ The destination is the one a load would read: the file `$FLEET_CONFIG` names,
 otherwise the default place. The starter is read back through the loader before
 it is written, so a file this writes is one the loader takes.
 
-Run with: python3 plugins/fleet/readers/setup.py [--path <file>] [--dry-run]
+Run with: python3 plugins/llm-fleet/readers/setup.py [--path <file>] [--dry-run]
 """
 
 from __future__ import annotations
@@ -195,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_WRITTEN
     if result["state"] == "exists":
         sys.stdout.write("A configuration is already at {0}; it was left as it is. "
-                         "Run /fleet doctor to see what it is missing.\n".format(shown))
+                         "Run /llm-fleet doctor to see what it is missing.\n".format(shown))
         return EXIT_EXISTS
     if result["state"] == "refused":
         unwritable = [entry for entry in result["errors"] if entry.get("code") == "E_SETUP_WRITE"]
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     providers = result["document"]["providers"]
     found = ", ".join(entry["home"] for entry in providers) or "no provider home"
     sys.stdout.write("Wrote a starter configuration at {0} with {1}. "
-                     "Run /fleet doctor to see what else you can switch on.\n".format(shown, found))
+                     "Run /llm-fleet doctor to see what else you can switch on.\n".format(shown, found))
     return EXIT_WRITTEN
 
 

@@ -7,14 +7,14 @@
  * configuration must come back as that refusal rather than as a drawer of empty
  * sections.
  *
- * Run with: node --test plugins/fleet/components/review.test.ts
+ * Run with: node --test plugins/llm-fleet/components/review.test.ts
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { documentsOf, nodeLines, renderText, renderVectors, vectorsOf } from "./review.ts";
-import type { ReaderDocuments } from "../plugins/fleet/components/snapshot.ts";
+import type { ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
 
 const NOW = 1_700_000_000;
 

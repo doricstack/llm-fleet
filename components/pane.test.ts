@@ -6,7 +6,7 @@
  * it is, a count is never invented, the same entity is never counted twice, and
  * the header keeps different denominators apart.
  *
- * Run with: node --test plugins/fleet/components/pane.test.ts
+ * Run with: node --test plugins/llm-fleet/components/pane.test.ts
  */
 
 import assert from "node:assert/strict";
@@ -15,17 +15,17 @@ import { test } from "node:test";
 import { DEFAULT_KEYS, HIDE_PREFIX, SHOW_ALL_PREFIX, allErrors, paneFrom, prUrl, replyKey,
          replyText, unreadableSources,
          worktreeNextStep, worktreeOwnerNote, type PaneOptions }
-  from "../plugins/fleet/components/pane.ts";
-import { GEOMETRY } from "../plugins/fleet/components/options.ts";
+  from "../plugins/llm-fleet/components/pane.ts";
+import { GEOMETRY } from "../plugins/llm-fleet/components/options.ts";
 import { fitSlots, groupMessage, renderedText, renderPane, renderRow }
-  from "../plugins/fleet/components/layout.ts";
-import { NARROW_AT } from "../plugins/fleet/components/options.ts";
-import { themeFrom, type Theme } from "../plugins/fleet/components/palette.ts";
-import { FOOTER_TEXT } from "../plugins/fleet/components/version.ts";
+  from "../plugins/llm-fleet/components/layout.ts";
+import { NARROW_AT } from "../plugins/llm-fleet/components/options.ts";
+import { themeFrom, type Theme } from "../plugins/llm-fleet/components/palette.ts";
+import { FOOTER_TEXT } from "../plugins/llm-fleet/components/version.ts";
 import type {
   Group, Row,
-} from "../plugins/fleet/components/layout.ts";
-import type { Snapshot } from "../plugins/fleet/components/state.ts";
+} from "../plugins/llm-fleet/components/layout.ts";
+import type { Snapshot } from "../plugins/llm-fleet/components/state.ts";
 
 const NOW = 1_700_000_000;
 
@@ -1661,7 +1661,7 @@ test("the warnings say how many interactive sessions each provider runs, and wha
   assert.equal(warnings.rows.length, 0);
   assert.deepEqual(warnings.notes?.map((note) => note.map((slot) => slot.text)),
                    [["Interactive sessions:", "Provider A 2", " · other 1"],
-                    ["3 hidden from the band; /fleet unhide shows them again."]]);
+                    ["3 hidden from the band; /llm-fleet unhide shows them again."]]);
   assert.deepEqual(warnings.summary.map((slot) => slot.text), ["none", "  3 interactive"]);
   // Notes are no warning: the section keeps its place rather than leading the pane.
   assert.notEqual(pane.groups[0]?.title, "Warnings");

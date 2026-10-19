@@ -8,12 +8,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { Node } from "../plugins/fleet/components/host.ts";
-import { recordingPrimitives } from "../plugins/fleet/components/mount.ts";
-import { paneConfigFrom, paneOptions } from "../plugins/fleet/components/options.ts";
-import { recolor, THEME, themeFrom, worktreeToken } from "../plugins/fleet/components/palette.ts";
-import { surfaceTree } from "../plugins/fleet/components/surface.ts";
-import { barVector, restyle, tileVector } from "../plugins/fleet/components/vector.ts";
+import type { Node } from "../plugins/llm-fleet/components/host.ts";
+import { recordingPrimitives } from "../plugins/llm-fleet/components/mount.ts";
+import { paneConfigFrom, paneOptions } from "../plugins/llm-fleet/components/options.ts";
+import { recolor, THEME, themeFrom, worktreeToken } from "../plugins/llm-fleet/components/palette.ts";
+import { surfaceTree } from "../plugins/llm-fleet/components/surface.ts";
+import { barVector, restyle, tileVector } from "../plugins/llm-fleet/components/vector.ts";
 import { renderVectors } from "./review.ts";
 
 const NOW = 1790000000;

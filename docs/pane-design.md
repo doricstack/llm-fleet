@@ -24,7 +24,7 @@ and the token and lets the surface draw them, so the same tree is a rounded card
 in a terminal and a rounded card on the desktop.
 
 ```text
-Fleet                         3 working  1 waiting  1 failed
+llm-fleet                     3 working  1 waiting  1 failed
 
 +----------------------------------------------------------+
 | v  Trials                                        1 running |
@@ -93,7 +93,7 @@ it come the figures on chips, a figure at zero left out, then the worst thing
 that needs a person in its own color with the rest counted, and Dismiss at the
 right when there is something to dismiss. Errors sort ahead of waits. This
 session's own job is left out. A dismissal holds across sessions until the item
-changes, and `/fleet unhide` brings everything back.
+changes, and `/llm-fleet unhide` brings everything back.
 
 ```text
 [ Close fleet ]  2 working  2 waiting  1 failed  Trial failed on repo feat/a: 3 failed . 2 more waiting   [ Dismiss ]
@@ -176,7 +176,7 @@ first failing check is named where the verdict would be.
 Under the controls the pane draws "Since you left": the events newer than the
 person's last look, newest first, five lines at most and the rest counted. The
 last look is the newest event a digest drew, and it moves only when the pane
-closes, by its key, its control, `/fleet`, or Escape, which the band finds on its
+closes, by its key, its control, `/llm-fleet`, or Escape, which the band finds on its
 next paint. A digest left open is not yet read, so it stays. Each session keeps
 its own look in the host's state, written only at the version it read, so two
 loads of one session never move it back; a close the band finds while it draws

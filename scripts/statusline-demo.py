@@ -24,7 +24,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 # The plugin's modules import one another from the plugin root, which is the
 # folder an install copies, so that root is what goes on the import path.
-PLUGIN = ROOT / "plugins" / "fleet"
+PLUGIN = ROOT / "plugins" / "llm-fleet"
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 

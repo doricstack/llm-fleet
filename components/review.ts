@@ -6,19 +6,19 @@
  * argued with before anything mounts it. It reads a snapshot on standard input
  * and writes the pane to standard output.
  *
- *   python3 plugins/fleet/readers/snapshot.py | node plugins/fleet/components/review.ts
+ *   python3 plugins/llm-fleet/readers/snapshot.py | node plugins/llm-fleet/components/review.ts
  *
  * It is a review tool, not a renderer: it makes no decision the layout has not
  * already made, and where it has to choose it chooses the plainest thing that
  * keeps a reading legible.
  */
 
-import type { Node, Vector } from "../plugins/fleet/components/host.ts";
-import { fit, renderPane } from "../plugins/fleet/components/layout.ts";
-import { paneConfigFrom, paneOptions } from "../plugins/fleet/components/options.ts";
-import { recolor, THEME } from "../plugins/fleet/components/palette.ts";
-import { paneFrom } from "../plugins/fleet/components/pane.ts";
-import { snapshotFrom, type ReaderDocuments } from "../plugins/fleet/components/snapshot.ts";
+import type { Node, Vector } from "../plugins/llm-fleet/components/host.ts";
+import { fit, renderPane } from "../plugins/llm-fleet/components/layout.ts";
+import { paneConfigFrom, paneOptions } from "../plugins/llm-fleet/components/options.ts";
+import { recolor, THEME } from "../plugins/llm-fleet/components/palette.ts";
+import { paneFrom } from "../plugins/llm-fleet/components/pane.ts";
+import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
 
 export const DEFAULT_WIDTH = 100;
 export { paneOptions };

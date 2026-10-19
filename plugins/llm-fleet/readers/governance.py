@@ -11,7 +11,7 @@ configuration names.
 A machine whose configuration names no switch is `unconfigured`, and the pane
 draws nothing: the switch belongs to tooling that person may not run.
 
-Run with: python3 plugins/fleet/readers/governance.py --config <path>
+Run with: python3 plugins/llm-fleet/readers/governance.py --config <path>
 """
 
 from __future__ import annotations

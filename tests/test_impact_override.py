@@ -348,7 +348,7 @@ class SelectionTests(unittest.TestCase):
         shutil.copy2(SELECTOR, self.root / ".cits" / "test-impact.sh")
         os.chmod(self.root / ".cits" / "test-impact.sh", 0o755)
         for made in ("components", "config", "scripts", "docs", "tests",
-                     "plugins/fleet/components"):
+                     "plugins/llm-fleet/components"):
             (self.root / made).mkdir(parents=True, exist_ok=True)
         (self.root / "components" / "one.test.ts").write_text("// suite\n", encoding="utf-8")
         (self.root / "config" / "loader.test.ts").write_text("// suite\n", encoding="utf-8")
@@ -356,7 +356,7 @@ class SelectionTests(unittest.TestCase):
         (self.root / "tests" / "test_thing.py").write_text("", encoding="utf-8")
         (self.root / "docs" / "notes.md").write_text("notes\n", encoding="utf-8")
         (self.root / "Makefile").write_text("test:\n\t@true\n", encoding="utf-8")
-        (self.root / "plugins" / "fleet" / "components" / "widget.ts").write_text(
+        (self.root / "plugins" / "llm-fleet" / "components" / "widget.ts").write_text(
             "export const widget = 1;\n", encoding="utf-8")
         self.git("init", "-q")
         self.git("config", "user.email", "impact@example.invalid")
@@ -383,7 +383,7 @@ class SelectionTests(unittest.TestCase):
         return [line[4:] for line in output.splitlines() if line.startswith("  $ ")]
 
     def test_a_changed_source_plans_the_whole_typescript_layer(self) -> None:
-        result = self.plan_for("plugins/fleet/components/widget.ts")
+        result = self.plan_for("plugins/llm-fleet/components/widget.ts")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.count(PLAN_HEADER), 1, result.stdout)
         planned = " ".join(self.planned_commands(result.stdout))
@@ -403,15 +403,15 @@ class SelectionTests(unittest.TestCase):
         # The plugin's own suite loads the host's test kit, which plain node
         # cannot. Leaving it out in silence is how a run comes to report success
         # over a change nothing exercised; naming it is the whole difference.
-        result = self.plan_for("plugins/fleet/components/widget.ts")
-        self.assertIn("plugins/fleet runs through the host's test kit", result.stdout)
+        result = self.plan_for("plugins/llm-fleet/components/widget.ts")
+        self.assertIn("plugins/llm-fleet runs through the host's test kit", result.stdout)
 
     def test_an_unstaged_change_is_selected_at_the_commit_tier(self) -> None:
         # The commit tier is what `make test-impacted` runs, and the work in a
         # tree is usually unstaged when a person runs it. A selection that read
         # only the index would answer "nothing affected" over an edit sitting
         # right there, which is worse than not offering the command.
-        target = self.root / "plugins" / "fleet" / "components" / "widget.ts"
+        target = self.root / "plugins" / "llm-fleet" / "components" / "widget.ts"
         target.write_text(target.read_text(encoding="utf-8") + "// uncommitted\n",
                           encoding="utf-8")
         result = run_selector("--tier", "commit", "--repo", str(self.root), "--dry-run",
@@ -452,12 +452,12 @@ class SelectionTests(unittest.TestCase):
         # The schema lives in the plugin folder, which an install copies, and
         # both loaders read it: a contract change there that planned neither
         # loader's suite would land unchecked.
-        schema = self.root / "plugins" / "fleet" / "config" / "schema.json"
+        schema = self.root / "plugins" / "llm-fleet" / "config" / "schema.json"
         schema.parent.mkdir(parents=True)
         schema.write_text("{}\n", encoding="utf-8")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "schema")
-        result = self.plan_for("plugins/fleet/config/schema.json")
+        result = self.plan_for("plugins/llm-fleet/config/schema.json")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         planned = " ".join(self.planned_commands(result.stdout))
         self.assertIn("make test-report", planned)
@@ -517,7 +517,7 @@ class SelectionTests(unittest.TestCase):
         # The folder reaches each suite whole, a space and a semicolon in it
         # included: it is one folder, and nothing after the semicolon runs.
         log = self.install_recorders()
-        self.stage_change("plugins/fleet/components/widget.ts")
+        self.stage_change("plugins/llm-fleet/components/widget.ts")
         folder = self.root / "rep orts; touch pwned #"
         result = run_selector("--tier", "commit", "--repo", str(self.root), cwd=self.root,
                               env=clean_environment(CITS_JUNIT_DIR=str(folder),
@@ -586,7 +586,7 @@ class SelectionTests(unittest.TestCase):
         # A person running the selection by hand asked for no report, and a
         # file written where nobody looks is litter.
         log = self.install_recorders()
-        self.stage_change("plugins/fleet/components/widget.ts")
+        self.stage_change("plugins/llm-fleet/components/widget.ts")
         result = run_selector("--tier", "commit", "--repo", str(self.root), cwd=self.root,
                               env=clean_environment(STUB_LOG=str(log)))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -610,7 +610,7 @@ class SelectionTests(unittest.TestCase):
         answering.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + " \"$@\"\n",
                              encoding="utf-8")
         answering.chmod(0o755)
-        self.stage_change("plugins/fleet/components/widget.ts")
+        self.stage_change("plugins/llm-fleet/components/widget.ts")
         path = str(tools) + os.pathsep + os.environ.get("PATH", "")
         result = run_selector("--tier", "commit", "--repo", str(self.root), cwd=self.root,
                               env=clean_environment(STUB_LOG=str(log), PATH=path))
@@ -633,7 +633,7 @@ class SelectionTests(unittest.TestCase):
         answering.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + " \"$@\"\n",
                              encoding="utf-8")
         answering.chmod(0o755)
-        self.stage_change("plugins/fleet/components/widget.ts")
+        self.stage_change("plugins/llm-fleet/components/widget.ts")
         path = str(tools) + os.pathsep + os.environ.get("PATH", "")
         result = run_selector("--tier", "commit", "--repo", str(self.root), cwd=self.root,
                               env=clean_environment(STUB_LOG=str(log), PATH=path))
@@ -652,7 +652,7 @@ class SelectionTests(unittest.TestCase):
             stub = tools / name
             stub.write_text("#!/bin/sh\nexit 49\n", encoding="utf-8")
             stub.chmod(0o755)
-        self.stage_change("plugins/fleet/components/widget.ts")
+        self.stage_change("plugins/llm-fleet/components/widget.ts")
         # The stubs come first, so both names resolve to one that answers 49;
         # the rest of the path stays, because git still has to be found.
         path = str(tools) + os.pathsep + os.environ.get("PATH", "")
@@ -672,7 +672,7 @@ class SelectionTests(unittest.TestCase):
     def test_every_planned_suite_exists(self) -> None:
         # A plan naming a file that is not there fails at run time, after the
         # gate has already been reported as ready to pass.
-        result = self.plan_for("plugins/fleet/components/widget.ts")
+        result = self.plan_for("plugins/llm-fleet/components/widget.ts")
         commands = self.planned_commands(result.stdout)
         suites = [part.split("--suite ", 1)[1] for part in commands if "--suite " in part]
         self.assertTrue(suites, result.stdout)
@@ -685,7 +685,7 @@ class SelectionTests(unittest.TestCase):
         # there, and the runner reports that as an unavailable runtime rather
         # than as a missing suite, which reads as a machine problem.
         (self.root / "components" / "one.test.ts").unlink()
-        result = self.plan_for("plugins/fleet/components/widget.ts")
+        result = self.plan_for("plugins/llm-fleet/components/widget.ts")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         planned = " ".join(self.planned_commands(result.stdout))
         self.assertNotIn("--suite components/one.test.ts", planned)

@@ -21,7 +21,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "host-update.py"
-MANIFEST = ROOT / "plugins" / "fleet" / ".claude-plugin" / "plugin.json"
+MANIFEST = ROOT / "plugins" / "llm-fleet" / ".claude-plugin" / "plugin.json"
 
 # The stub stands in for the host's own `claude plugin update`. It writes what
 # it was asked for beside the argv it was called with, then does what the case

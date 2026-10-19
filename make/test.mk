@@ -104,15 +104,15 @@ test-components-drift: script-host-drift ## Refuse when the engine drops a decla
 test-typescript: script-typescript-suite ## Run the TypeScript loader behavior suite
 
 test-engine: ## Run the plugin entry against a stub of the declared engine subset
-	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/fleet.test.ts
+	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/llm-fleet.test.ts
 
 test-pane: ## Draw the pane through the host's own test kit; unavailable without HOST_CLI
 	@set -euo pipefail; test -n "$(HOST_CLI)" || { echo 'Unavailable: set HOST_CLI to the host command that runs a plugin suite.' >&2; exit 2; }
-	$(HOST_CLI) plugin test plugins/fleet
+	$(HOST_CLI) plugin test plugins/llm-fleet
 
 plugin-validate: ## Validate the plugin manifest, hooks, and types contract through the host; unavailable without HOST_CLI
 	@set -euo pipefail; test -n "$(HOST_CLI)" || { echo 'Unavailable: set HOST_CLI to the host command that validates a plugin.' >&2; exit 2; }
-	$(HOST_CLI) plugin validate plugins/fleet
+	$(HOST_CLI) plugin validate plugins/llm-fleet
 
 install-check: ## Validate the repository as the marketplace the install line names, through the host; unavailable without HOST_CLI
 	@set -euo pipefail; test -n "$(HOST_CLI)" || { echo 'Unavailable: set HOST_CLI to the host command that validates a marketplace.' >&2; exit 2; }

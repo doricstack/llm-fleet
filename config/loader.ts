@@ -1,8 +1,8 @@
 /**
  * Load, validate, and resolve the versioned llm-fleet configuration.
  *
- * `plugins/fleet/config/schema.json` is the single source of truth read by this
- * module and by `plugins/fleet/config/loader.py`. The Python loader and the schema
+ * `plugins/llm-fleet/config/schema.json` is the single source of truth read by this
+ * module and by `plugins/llm-fleet/config/loader.py`. The Python loader and the schema
  * live in the plugin folder because an install copies that folder alone; this
  * module stays here because the host cannot evaluate `node:fs`. Neither loader
  * carries per-key policy, and neither reads a legacy environment override: the
@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 export const SCHEMA_NAME = "schema.json";
 // The schema sits in the plugin folder, beside the Python loader that an
 // install carries; this module reads it from there.
-export const SCHEMA_DIRECTORY = join("..", "plugins", "fleet", "config");
+export const SCHEMA_DIRECTORY = join("..", "plugins", "llm-fleet", "config");
 export const ROOT_PATH = "";
 
 export const CODE_VERSION = "E_CONFIG_VERSION";

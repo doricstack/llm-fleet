@@ -15,10 +15,10 @@ import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_GOVERNANCE, BAND_ITEM, BA
          BAND_TOGGLE,
          bandConfigFrom, bandCounts, bandItems,
          answeredSources, bandTree, fleetLabel, governanceLabel, keptHidden,
-         isOwnJob, speakLabel } from "../plugins/fleet/components/band.ts";
-import { renderedText } from "../plugins/fleet/components/layout.ts";
-import { snapshotFrom, type ReaderDocuments } from "../plugins/fleet/components/snapshot.ts";
-import type { Node } from "../plugins/fleet/components/host.ts";
+         isOwnJob, speakLabel } from "../plugins/llm-fleet/components/band.ts";
+import { renderedText } from "../plugins/llm-fleet/components/layout.ts";
+import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
+import type { Node } from "../plugins/llm-fleet/components/host.ts";
 
 const AT = 1_790_000_000;
 

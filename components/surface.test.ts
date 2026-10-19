@@ -7,19 +7,19 @@
  * failed or the configuration was refused. A pane that drew an empty fleet in any
  * of those cases would report a quiet machine and hide a broken reader.
  *
- * Run with: node --test plugins/fleet/components/surface.test.ts
+ * Run with: node --test plugins/llm-fleet/components/surface.test.ts
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { elementTypes, renderedText } from "../plugins/fleet/components/layout.ts";
-import { DEFAULT_KEYS } from "../plugins/fleet/components/pane.ts";
-import { GEOMETRY } from "../plugins/fleet/components/options.ts";
-import { recordingPrimitives } from "../plugins/fleet/components/mount.ts";
+import { elementTypes, renderedText } from "../plugins/llm-fleet/components/layout.ts";
+import { DEFAULT_KEYS } from "../plugins/llm-fleet/components/pane.ts";
+import { GEOMETRY } from "../plugins/llm-fleet/components/options.ts";
+import { recordingPrimitives } from "../plugins/llm-fleet/components/mount.ts";
 import { isReading, isRefusal, surfaceTree,
-         type SurfaceInput } from "../plugins/fleet/components/surface.ts";
-import { FOOTER_TEXT } from "../plugins/fleet/components/version.ts";
+         type SurfaceInput } from "../plugins/llm-fleet/components/surface.ts";
+import { FOOTER_TEXT } from "../plugins/llm-fleet/components/version.ts";
 
 const WIDTH = 100;
 const NOW = 1790000000;

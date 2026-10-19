@@ -171,7 +171,7 @@ class VersionTokenTests(HarnessCase):
     """
 
     def manifest(self, version):
-        folder = self.repo / "plugins" / "fleet" / ".claude-plugin"
+        folder = self.repo / "plugins" / "llm-fleet" / ".claude-plugin"
         folder.mkdir(parents=True, exist_ok=True)
         document = {"name": "x"} if version is None else {"name": "x", "version": version}
         (folder / "plugin.json").write_text(json.dumps(document), encoding="utf-8")

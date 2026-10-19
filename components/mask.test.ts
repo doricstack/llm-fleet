@@ -8,13 +8,13 @@
  * The values here are invented. A real one written into a test would be a real
  * one published by this repository.
  *
- * Run with: node --test plugins/fleet/components/mask.test.ts
+ * Run with: node --test plugins/llm-fleet/components/mask.test.ts
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { hides, MASK, mask } from "../plugins/fleet/components/mask.ts";
+import { hides, MASK, mask } from "../plugins/llm-fleet/components/mask.ts";
 
 function didMask(value: string): boolean {
   return mask(value).rules.length > 0;

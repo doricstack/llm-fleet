@@ -9,20 +9,20 @@
  * They do not prove how a surface paints. That belongs to an engine-mounted run,
  * which needs the engine and reports itself unavailable without it.
  *
- * Run with: node --test plugins/fleet/components/layout.test.ts
+ * Run with: node --test plugins/llm-fleet/components/layout.test.ts
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { Group, Pane, Row } from "../plugins/fleet/components/layout.ts";
-import type { Tree } from "../plugins/fleet/components/host.ts";
+import type { Group, Pane, Row } from "../plugins/llm-fleet/components/layout.ts";
+import type { Tree } from "../plugins/llm-fleet/components/host.ts";
 import {
   ageText, barCells, countLabel, elementTypes, fit, fitSlots, groupMessage, groupTone,
   renderGroup, renderPane, renderRow, renderedText,
-} from "../plugins/fleet/components/layout.ts";
-import { ACCENT } from "../plugins/fleet/components/cards.ts";
-import { mount, recordingPrimitives } from "../plugins/fleet/components/mount.ts";
+} from "../plugins/llm-fleet/components/layout.ts";
+import { ACCENT } from "../plugins/llm-fleet/components/cards.ts";
+import { mount, recordingPrimitives } from "../plugins/llm-fleet/components/mount.ts";
 
 const WIDE = 120;
 const NARROW_AT = 60;

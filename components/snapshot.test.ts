@@ -6,16 +6,16 @@
  * or naming a state this layer does not know must become a source that failed.
  * A silently empty group would read as nothing running.
  *
- * Run with: node --test plugins/fleet/components/snapshot.test.ts
+ * Run with: node --test plugins/llm-fleet/components/snapshot.test.ts
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { snapshotFrom } from "../plugins/fleet/components/snapshot.ts";
-import { DEFAULT_KEYS, paneFrom, type PaneOptions } from "../plugins/fleet/components/pane.ts";
-import { GEOMETRY } from "../plugins/fleet/components/options.ts";
-import { renderedText, renderPane } from "../plugins/fleet/components/layout.ts";
+import { snapshotFrom } from "../plugins/llm-fleet/components/snapshot.ts";
+import { DEFAULT_KEYS, paneFrom, type PaneOptions } from "../plugins/llm-fleet/components/pane.ts";
+import { GEOMETRY } from "../plugins/llm-fleet/components/options.ts";
+import { renderedText, renderPane } from "../plugins/llm-fleet/components/layout.ts";
 
 const NOW = 1_700_000_000;
 

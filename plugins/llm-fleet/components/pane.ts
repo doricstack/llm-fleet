@@ -2244,7 +2244,7 @@ function warningGroup(errors: { source: string; reason: string }[], roster: Rost
     notes.push(interactive);
   }
   if (hidden > 0) {
-    notes.push([{ text: hidden + " hidden from the band; /fleet unhide shows them again.",
+    notes.push([{ text: hidden + " hidden from the band; /llm-fleet unhide shows them again.",
                   dim: true }]);
   }
   if (notes.length) {

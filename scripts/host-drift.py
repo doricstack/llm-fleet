@@ -2,7 +2,7 @@
 """Check the declared primitive subset against the engine's own declaration.
 
 This repository declares the Box, Text and Button props the shared layout writes, in
-`plugins/fleet/components/host.ts`, rather than copying the engine's generated declaration into
+`plugins/llm-fleet/components/host.ts`, rather than copying the engine's generated declaration into
 the published tree. That keeps the published surface small and readable, and it
 leaves one risk: the engine could rename or drop a prop, and a layout that still
 compiles here would stop rendering there.
@@ -31,13 +31,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PRIMITIVES = ROOT / "plugins" / "fleet" / "components" / "host.ts"
+PRIMITIVES = ROOT / "plugins" / "llm-fleet" / "components" / "host.ts"
 # Where the engine writes its own declaration for a plugin it has loaded. The
 # file is the engine's, is written inside the plugin folder, and is ignored by
 # git, which is what keeps it out of reach of the branch that declares the
 # subset.
 ENGINE_DECLARATIONS = (
-    "plugins/fleet/.claude-plugin/types/claude-code/index.d.ts",
+    "plugins/llm-fleet/.claude-plugin/types/claude-code/index.d.ts",
 )
 # Properties are read from the whole block, nested object types included: a name
 # the engine carries that this repository does not use is fine, and the check

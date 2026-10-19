@@ -8,10 +8,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { Group, Pane, Row } from "../plugins/fleet/components/layout.ts";
-import { renderGroup, renderRow, renderedText } from "../plugins/fleet/components/layout.ts";
+import type { Group, Pane, Row } from "../plugins/llm-fleet/components/layout.ts";
+import { renderGroup, renderRow, renderedText } from "../plugins/llm-fleet/components/layout.ts";
 import { animate, BLINK_MS, BLINK_PERIOD_MS, motionMemory, SLIDE_CELLS,
-         SLIDE_MS } from "../plugins/fleet/components/motion.ts";
+         SLIDE_MS } from "../plugins/llm-fleet/components/motion.ts";
 
 const T = 1_000_000;
 

@@ -7,7 +7,7 @@
  * reconstruction, a negative saving is not drawn as a saving, and a failed read
  * is never rendered as an empty session.
  *
- * Run with: node --test plugins/fleet/components/statusline.test.ts
+ * Run with: node --test plugins/llm-fleet/components/statusline.test.ts
  */
 
 import assert from "node:assert/strict";
@@ -24,7 +24,7 @@ import {
   renderedLines,
   tokenText,
   type StatuslineInput,
-} from "../plugins/fleet/components/statusline.ts";
+} from "../plugins/llm-fleet/components/statusline.ts";
 
 const NOW = 1790000000;
 
@@ -252,7 +252,7 @@ test("the clock is the host's local time and pads both fields", () => {
     // Named by this file's own place, so moving the suite cannot leave it
     // pointing at a path that no longer exists. No TypeScript flag: this mirrors
     // how the suite itself runs a .ts file.
-    const module = new URL("../plugins/fleet/components/statusline.ts", import.meta.url).href;
+    const module = new URL("../plugins/llm-fleet/components/statusline.ts", import.meta.url).href;
     const result = spawnSync(process.execPath, ["-e",
       `import(${JSON.stringify(module)}).then((m) => process.stdout.write(m.clockText(1790000000)));`],
       { env: { ...process.env, TZ: zone }, encoding: "utf8" });

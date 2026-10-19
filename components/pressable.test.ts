@@ -12,8 +12,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { box, pressable, text } from "../plugins/fleet/components/layout.ts";
-import type { Node } from "../plugins/fleet/components/host.ts";
+import { box, pressable, text } from "../plugins/llm-fleet/components/layout.ts";
+import type { Node } from "../plugins/llm-fleet/components/host.ts";
 
 function typesOf(children: (Node | string)[]): string[] {
   return children.map((child) =>

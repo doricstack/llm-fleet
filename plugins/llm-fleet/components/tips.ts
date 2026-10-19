@@ -13,7 +13,7 @@
  */
 
 /** What `/keys` says when it is handed words it does not take. */
-export const KEYS_USAGE = "Use /keys to open the fleet pane on its keys, or /keys tips off|on.";
+export const KEYS_USAGE = "Use /keys to open the llm-fleet pane on its keys, or /keys tips off|on.";
 
 /** What `/keys` was asked: open the pane on Keys, switch the tips, or words it does not take. */
 export type KeysRequest = "open" | { tips: boolean } | null;

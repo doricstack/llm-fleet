@@ -1,6 +1,6 @@
 """Configuration contract, resolution, group states, rules, and parity.
 
-The contract tests read `plugins/fleet/config/schema.json` and check it against
+The contract tests read `plugins/llm-fleet/config/schema.json` and check it against
 the loaders, the documentation, and the fixture corpus, so a field or a state cannot be added
 without the surrounding obligations. The behavior tests exercise the semantics
 the schema declares. The parity tests run the same fixture corpus through the

@@ -8,10 +8,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { allErrors, paneFrom, TOGGLE_PREFIX, unreadableSources } from "../plugins/fleet/components/pane.ts";
-import { paneConfigFrom, paneOptions, SECTIONS } from "../plugins/fleet/components/options.ts";
-import { renderedText, renderPane } from "../plugins/fleet/components/layout.ts";
-import { snapshotFrom, type ReaderDocuments } from "../plugins/fleet/components/snapshot.ts";
+import { allErrors, paneFrom, TOGGLE_PREFIX, unreadableSources } from "../plugins/llm-fleet/components/pane.ts";
+import { paneConfigFrom, paneOptions, SECTIONS } from "../plugins/llm-fleet/components/options.ts";
+import { renderedText, renderPane } from "../plugins/llm-fleet/components/layout.ts";
+import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
 
 const AT = 1_790_000_000;
 

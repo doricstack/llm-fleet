@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { pendingSources, STREAM_ORDER, stepStream } from "../plugins/fleet/components/stream.ts";
+import { pendingSources, STREAM_ORDER, stepStream } from "../plugins/llm-fleet/components/stream.ts";
 
 type Documents = Record<string, unknown>;
 

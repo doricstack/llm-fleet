@@ -25,7 +25,7 @@ from readers import host
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "plugins" / "fleet" / "readers" / "host.py"
+SCRIPT = ROOT / "plugins" / "llm-fleet" / "readers" / "host.py"
 
 
 def payload(**overrides):

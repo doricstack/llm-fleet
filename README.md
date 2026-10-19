@@ -1,6 +1,6 @@
 # llm-fleet
 
-![llm-fleet brand header](plugins/fleet/assets/readme-header.svg)
+![llm-fleet brand header](plugins/llm-fleet/assets/readme-header.svg)
 
 `llm-fleet` is a Claude Code plugin that puts every session and background job on your machine in one live pane.
 
@@ -25,7 +25,7 @@ Your prompt
      |
      | the band, one line above the prompt
      v
-   /fleet
+   /llm-fleet
      |
      | one pane: sessions, background jobs, worktrees, pull requests
      v
@@ -69,11 +69,11 @@ A source you have not configured is drawn as unconfigured, never as an empty lis
 
 | Command | What it does |
 | --- | --- |
-| `/fleet` | opens the pane, and running it again closes it |
-| `/fleet close` | closes the pane without opening it |
-| `/fleet setup` | writes a starter configuration holding the homes it finds |
-| `/fleet doctor` | names what the pane is missing and the setting that fixes each |
-| `/fleet unhide` | brings back the band items you dismissed |
+| `/llm-fleet` | opens the pane, and running it again closes it |
+| `/llm-fleet close` | closes the pane without opening it |
+| `/llm-fleet setup` | writes a starter configuration holding the homes it finds |
+| `/llm-fleet doctor` | names what the pane is missing and the setting that fixes each |
+| `/llm-fleet unhide` | brings back the band items you dismissed |
 | `/worktrees` | opens the pane on worktrees, with a fresh probe |
 | `/keys` | opens the pane on its keys section |
 | `/speak` | picks this session's voice, once you have set a speech command |
@@ -117,14 +117,14 @@ Answer `y` to add the marketplace, then pick a scope. The one-step install needs
 ## First run
 
 ```
-/fleet setup
-/fleet doctor
-/fleet
+/llm-fleet setup
+/llm-fleet doctor
+/llm-fleet
 ```
 
-`/fleet setup` writes a starter configuration holding the Claude Code homes it finds on this machine and nothing else, and never overwrites a file that is already there. `/fleet doctor` says what the pane is missing and the setting that fixes each thing. `/fleet` opens the pane, and running it again closes it.
+`/llm-fleet setup` writes a starter configuration holding the Claude Code homes it finds on this machine and nothing else, and never overwrites a file that is already there. `/llm-fleet doctor` says what the pane is missing and the setting that fixes each thing. `/llm-fleet` opens the pane, and running it again closes it.
 
-[The plugin's README](plugins/fleet/README.md) covers every command, the three plugin options and what the pane reads.
+[The plugin's README](plugins/llm-fleet/README.md) covers every command, the three plugin options and what the pane reads.
 
 ## Supported hosts
 
@@ -132,11 +132,11 @@ The plugin is proved on the versions listed in [the host table](docs/supported-h
 
 ## Configure
 
-Everything the plugin reads comes from one configuration file. [The configuration reference](docs/configuration.md) is the contract, and `plugins/fleet/config/schema.json` holds it. A Python loader and a TypeScript loader read that same schema, and a shared fixture corpus fails the build when they disagree on a default, a refusal or a source state. With no file in the default place the declared defaults apply, while a file you name that is missing is refused rather than replaced by defaults.
+Everything the plugin reads comes from one configuration file. [The configuration reference](docs/configuration.md) is the contract, and `plugins/llm-fleet/config/schema.json` holds it. A Python loader and a TypeScript loader read that same schema, and a shared fixture corpus fails the build when they disagree on a default, a refusal or a source state. With no file in the default place the declared defaults apply, while a file you name that is missing is refused rather than replaced by defaults.
 
 ## Repository layout
 
-- `plugins/fleet/` is the plugin as it installs: the manifest, the hooks entry, the components the host draws, the Python readers and the schema.
+- `plugins/llm-fleet/` is the plugin as it installs: the manifest, the hooks entry, the components the host draws, the Python readers and the schema.
 - `.claude-plugin/marketplace.json` makes this repository the marketplace the install line names.
 - `config/` holds the TypeScript loader, its suite and the shared fixtures.
 - `components/` holds the suites and tools that run only from a checkout.
@@ -156,11 +156,11 @@ make test-ci
 
 `make test-ci` is what CI runs on Linux and Windows: the quality checks, every suite, the build, and an export of this tree into a fresh directory that is built and tested again. `make plugin-validate HOST_CLI=claude` and `make test-pane HOST_CLI=claude` run the host's own validation and test kit where Claude Code is installed. `make help` lists every target.
 
-To run your working copy instead of the installed plugin, start a session with `claude --plugin-dir plugins/fleet`.
+To run your working copy instead of the installed plugin, start a session with `claude --plugin-dir plugins/llm-fleet`.
 
 ## Versions
 
-The version in `plugins/fleet/.claude-plugin/plugin.json` is the plugin's version, written there once. Neither marketplace entry sets one, because the host reads the manifest and a second number only earns a warning. The pane's footer constant is generated from the manifest by `make version`, and `make quality` refuses a copy that has gone stale. A change people would notice raises it, and a release is tagged `v` followed by that number.
+The version in `plugins/llm-fleet/.claude-plugin/plugin.json` is the plugin's version, written there once. Neither marketplace entry sets one, because the host reads the manifest and a second number only earns a warning. The pane's footer constant is generated from the manifest by `make version`, and `make quality` refuses a copy that has gone stale. A change people would notice raises it, and a release is tagged `v` followed by that number.
 
 Claude Code installs a version and keeps it rather than following this repository, so after a release run `/plugin update llm-fleet` and restart the session.
 

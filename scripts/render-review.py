@@ -27,7 +27,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-READER = ROOT / "plugins" / "fleet" / "readers" / "snapshot.py"
+READER = ROOT / "plugins" / "llm-fleet" / "readers" / "snapshot.py"
 RENDERER = ROOT / "components" / "review.ts"
 DEFAULT_OUT = Path.home() / "Desktop" / "fleet-review"
 # Below this the pane has no room for a title and a right-hand slot on one row.

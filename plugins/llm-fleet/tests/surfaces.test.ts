@@ -9,12 +9,12 @@
  * commands' words and the store they keep a preference in. A name or a shape
  * the engine does not have fails here rather than in a session.
  *
- * Run with: claude plugin test plugins/fleet
+ * Run with: claude plugin test plugins/llm-fleet
  */
 
 import { expect, mock, test } from "claude-code/testing";
 
-import { FOLDS_KEY, FRESH_WORKTREES, READING_KEY, TAB_HELPER, TIPS_KEY } from "../hooks/fleet.ts";
+import { FOLDS_KEY, FRESH_WORKTREES, READING_KEY, TAB_HELPER, TIPS_KEY } from "../hooks/llm-fleet.ts";
 
 const AT = 1790000000;
 

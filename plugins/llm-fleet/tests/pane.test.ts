@@ -20,12 +20,12 @@
  * value is what puts rows, counts and their theme keys in front of the surface's
  * own table: a pane whose rows the terminal will not draw fails here.
  *
- * Run with: claude plugin test plugins/fleet
+ * Run with: claude plugin test plugins/llm-fleet
  */
 
 import { expect, mock, test } from "claude-code/testing";
 
-import { HIDDEN_KEY, READING_KEY, REPLIED_KEY } from "../hooks/fleet.ts";
+import { HIDDEN_KEY, READING_KEY, REPLIED_KEY } from "../hooks/llm-fleet.ts";
 
 const PANE_PROPS = {
   title: "llm-fleet",
@@ -445,11 +445,11 @@ test("the band yields to a survey", async ($, on) => {
  * A command's words, as the engine hands them over.
  *
  * The engine names what followed the command `args`. A plugin that read it
- * under any other name hears every `/fleet unhide` as a bare `/fleet`, and a
+ * under any other name hears every `/llm-fleet unhide` as a bare `/llm-fleet`, and a
  * stub written from the same wrong name agrees with it, so this runs the
  * command through the engine's own call.
  */
-test("/fleet unhide brings back what was dismissed, through the engine's command", async ($, on) => {
+test("/llm-fleet unhide brings back what was dismissed, through the engine's command", async ($, on) => {
   mock.clock(on, { now: AT * 1000 });
   mock.store(on, { [READING_KEY]: { at: AT, documents: READING }, [HIDDEN_KEY]: ["job:x:blocked"] });
   on("session.id", () => ({ value: "another-session" }) as never);
@@ -461,7 +461,7 @@ test("/fleet unhide brings back what was dismissed, through the engine's command
   });
   // The dismissal is read at startup, which is where a session reads it.
   await $.session.start({ surface: "terminal" } as never).catch(() => undefined);
-  const ran = await $.command.run({ command: "fleet", args: "unhide" } as never);
+  const ran = await $.command.run({ command: "llm-fleet", args: "unhide" } as never);
   expect(JSON.stringify(ran)).toContain("shown again");
   expect(opened).toEqual([]);
 });
@@ -1026,7 +1026,7 @@ test("finished jobs, subagent tasks, interactive counts and a retried branch are
     // The roster's interactive count, by the name the provider is shown under.
     expect(words).toContain("Interactive sessions:");
     expect(words).toContain("One 2");
-    expect(words).toContain("1 hidden from the band; /fleet unhide shows them again.");
+    expect(words).toContain("1 hidden from the band; /llm-fleet unhide shows them again.");
     // The branch tried again after a failure is one row, marked.
     expect(words).toContain("running, last try failed");
     expect(words).toContain("Esc or x closes this pane");

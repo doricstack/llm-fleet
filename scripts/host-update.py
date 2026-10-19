@@ -3,7 +3,7 @@
 
 The host installs a plugin by recording a version, and it does not notice a
 version the tree raised behind it: a home that installed 0.3.1 keeps loading
-0.3.1, or nothing at all, while `plugins/fleet/.claude-plugin/plugin.json` says
+0.3.1, or nothing at all, while `plugins/llm-fleet/.claude-plugin/plugin.json` says
 0.4.0. The host's own repair is `claude plugin update <plugin>@<marketplace>`
 and a restart, and nothing runs it after a bump, so a release silently leaves
 the machine on the previous build.
@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "plugins" / "fleet" / ".claude-plugin" / "plugin.json"
+MANIFEST = ROOT / "plugins" / "llm-fleet" / ".claude-plugin" / "plugin.json"
 INSTALLED = Path("plugins") / "installed_plugins.json"
 # How long the host's own update may take before it is treated as not answering.
 UPDATE_TIMEOUT_SECONDS = 120
