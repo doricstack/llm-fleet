@@ -107,6 +107,8 @@ type Stub = {
   speak: (args?: string) => Promise<unknown>;
   /** Ends the session through the entry's own hook. */
   end: () => Promise<unknown>;
+  /** Closes the pane as Escape does, through the host's own event. */
+  hostClosed: () => Promise<unknown>;
   /** Runs `/worktrees` or `/keys` with these words. */
   command: (name: "worktrees" | "keys", args?: string) => Promise<unknown>;
   /** Draws the hint line under the prompt, and answers the props the engine is handed on. */
@@ -261,6 +263,8 @@ function stub(options: { exitCode?: number; stdout?: string; placed?: boolean;
   let speakHandler: ((engine: Engine, event: CommandEvent) => unknown) | null = null;
   let bandHandler: ((engine: Engine, event: unknown, next: Next) => unknown) | null = null;
   let endHandler: ((engine: Engine, event: unknown, next: Next) => unknown) | null = null;
+  let closeHandler: ((engine: Engine, event: { id: string; origin: { kind: string } },
+                     next: Next) => unknown) | null = null;
   const commandHandlers: Record<string, (engine: Engine, event: CommandEvent) => unknown> = {};
   let hintHandler: ((engine: Engine, event: PromptHintEvent, next: Next) => unknown) | null = null;
   let banded: unknown = null;
@@ -288,6 +292,8 @@ function stub(options: { exitCode?: number; stdout?: string; placed?: boolean;
       startHandler = handler as typeof startHandler;
     } else if (event === "session.end") {
       endHandler = handler as typeof endHandler;
+    } else if (event === "ui.close") {
+      closeHandler = handler as typeof closeHandler;
     } else if (event === "prompt.submit") {
       promptHandler = handler as typeof promptHandler;
     } else if (event === "command.run"
@@ -671,6 +677,11 @@ function stub(options: { exitCode?: number; stdout?: string; placed?: boolean;
                                                                   args: args ?? "" }),
     end: async () => (endHandler as NonNullable<typeof endHandler>)(
       engine, {}, async (event: unknown) => ({ continued: true, event })),
+    // Escape: the host closes the pane and tells the plugin, as it does for a
+    // close nobody asked the command for.
+    hostClosed: async () => (closeHandler as NonNullable<typeof closeHandler>)(
+      engine, { id: PANE, origin: { kind: "person" } },
+      async (event: unknown) => event),
     command: async (name, args) => {
       const handler = commandHandlers[name];
       assert.notEqual(handler, undefined, "the entry registered no /" + name + " handler");
@@ -792,26 +803,88 @@ test("the command opens the pane, and closes it when it is already open", async 
   // The marker is the difference between this plugin and the one it replaces,
   // so it is asserted rather than left to a person to notice.
   assert.equal(opened.text, `llm-fleet pane opened (${MARK}).`);
-
   const closing = stub({ panes: [{ id: PANE }] });
+  await closing.run();
   const closed = await closing.run() as { text: string };
   assert.deepEqual(closing.calls.closed, [PANE]);
   assert.equal(closed.text, `llm-fleet pane closed (${MARK}).`);
 });
 
-test("a pane the host will not place names the surface, and blames width only on a terminal", () => {
-  // A desktop surface has no dock to place the pane in, so a width is not the
-  // reason and saying so sends a person looking for a wider window.
-  assert.equal(notPlaced("terminal"),
-               `llm-fleet pane opens once the terminal is wider (${MARK}).`);
-  assert.equal(notPlaced(undefined),
-               `llm-fleet pane opens once the terminal is wider (${MARK}).`);
-  assert.equal(notPlaced("terminal", "Keys"),
-               `llm-fleet pane opens on Keys once the terminal is wider (${MARK}).`);
-  assert.equal(notPlaced("desktop"),
-               `llm-fleet pane cannot open on the desktop surface; run /llm-fleet in the terminal (${MARK}).`);
-  assert.equal(notPlaced("desktop", "Keys"),
-               `llm-fleet cannot draw its Keys section on the desktop surface; run /llm-fleet in the terminal (${MARK}).`);
+test("a pane the person closed is opened by the next command, not closed again", async () => {
+  // Escape closes the pane without a word to the command. The host says it
+  // shut, and that is what the next /llm-fleet acts on.
+  const memory: Record<string, unknown> = { [SEEN]: { at: 1789995000 } };
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, session });
+  await driven.start();
+  await driven.quiesce();
+  await driven.run();
+  await driven.hostClosed();
+  await settles();
+  // What the pane showed is recorded as seen, as it is for a close the band
+  // notices; Escape is not a reason to show the same digest again.
+  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
+  assert.deepEqual(memory[SEEN], { at: 1789999900 });
+  const again = await driven.run() as { text: string };
+  assert.deepEqual(driven.calls.opened, [PANE, PANE]);
+  assert.deepEqual(driven.calls.closed, []);
+  assert.equal(again.text, `llm-fleet pane opened (${MARK}).`);
+});
+
+test("the pane is opened before the engine is asked anything, on every surface", async () => {
+  // A dock that has not measured itself refuses an open that arrives after a
+  // wait, and the desktop app docks the pane. The open must be the first call
+  // after the ask, so a terminal, the desktop app and VS Code all place it.
+  const order = async (driven: ReturnType<typeof stub>): Promise<string[]> => {
+    const asked: string[] = [];
+    driven.engine.clock.now = (async () => { asked.push("clock"); return 1790000000 * 1000; }) as never;
+    driven.engine.ui.panes = (async () => { asked.push("panes"); return []; }) as never;
+    driven.engine.ui.open = (async (request: { id: string }) => {
+      asked.push("open:" + request.id);
+      return { isPlaced: true };
+    }) as never;
+    return asked;
+  };
+
+  const opening = stub();
+  const asked = await order(opening);
+  await opening.run();
+  assert.deepEqual(asked, ["open:" + PANE]);
+  assert.equal(asked.includes("clock"), false);
+
+  const sectioned = stub();
+  const sectionAsked = await order(sectioned);
+  await sectioned.command("worktrees");
+  // The section's fold is read after the open; what matters is that the open
+  // comes first, before the clock the fold is computed from.
+  assert.equal(sectionAsked[0], "open:" + PANE);
+  assert.equal(sectionAsked.includes("panes"), false);
+});
+
+test("a pane the host would not place is asked for again rather than closed", async () => {
+  // A failed placement is not an open pane. A second run must try again; the
+  // old code marked it open and the next ask closed a pane nobody had seen.
+  const driven = stub({ placed: false });
+  const first = await driven.run() as { text: string };
+  assert.equal(first.text, notPlaced());
+  const second = await driven.run() as { text: string };
+  assert.deepEqual(driven.calls.opened, [PANE, PANE]);
+  assert.deepEqual(driven.calls.closed, []);
+  assert.equal(second.text, notPlaced());
+
+  const sectioned = stub({ placed: false });
+  await sectioned.command("worktrees");
+  await sectioned.command("worktrees");
+  assert.deepEqual(sectioned.calls.opened, [PANE, PANE]);
+  assert.deepEqual(sectioned.calls.closed, []);
+});
+
+test("a pane the host will not place blames width, whatever surface is drawing", () => {
+  // Every surface that docks a pane places it by width, the desktop app
+  // included, so the reason is always room rather than the surface's name.
+  assert.equal(notPlaced(), `llm-fleet pane opens once this window is wider (${MARK}).`);
+  assert.equal(notPlaced("Keys"),
+               `llm-fleet opens its Keys section once this window is wider (${MARK}).`);
 });
 
 test("the pane is opened under a title that names this plugin", async () => {

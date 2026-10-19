@@ -2986,23 +2986,17 @@ function sectionOfKey(key: string): string | null {
 /**
  * What a pane that the host would not place says.
  *
- * On a terminal the reason is a width: the pane opens once there is room. On a
- * surface that draws no dock at all, a width is not the reason, and saying so
- * would send a person looking for a wider window that cannot help.
+ * Every surface that docks a pane places it by width, the desktop app included,
+ * so the reason is always room: a wider window, whatever draws it.
  */
-export function notPlaced(surface: string | undefined, on?: string): string {
-  if (surface === undefined || surface === "terminal") {
-    return `llm-fleet pane opens${on === undefined ? "" : " on " + on} once the terminal is wider (${MARK}).`;
-  }
+export function notPlaced(on?: string): string {
   return on === undefined
-    ? `llm-fleet pane cannot open on the ${surface} surface; run /llm-fleet in the terminal (${MARK}).`
-    : `llm-fleet cannot draw its ${on} section on the ${surface} surface; run /llm-fleet in the terminal (${MARK}).`;
+    ? `llm-fleet pane opens once this window is wider (${MARK}).`
+    : `llm-fleet opens its ${on} section once this window is wider (${MARK}).`;
 }
 
-async function openOn($: Engine, state: State, section: string,
-                     surface?: string): Promise<{ text: string }> {
+async function openOn($: Engine, state: State, section: string): Promise<{ text: string }> {
   const title = ONE_SECTION_TITLES[section] ?? section;
-  const now = (await $.clock.now()) / 1000;
   const held = state.held !== null && "documents" in state.held ? state.held : null;
   const pane = paneConfigFrom(held?.documents);
   const names = sectionNames(pane);
@@ -3016,10 +3010,15 @@ async function openOn($: Engine, state: State, section: string,
     return { text: `The llm-fleet pane hides its ${title} section: set pane.sections.${section}.visible `
       + `to true to show it (${MARK}).` };
   }
-  const isOpen = await $.ui.panes()
-    .then((panes) => panes.some((drawn) => drawn.id === PANE), () => state.open);
+  // The open is the first call on every path: an open asked for after a wait
+  // reads as one nobody asked for, and a dock that has not measured itself
+  // refuses those on every surface, the desktop app included. Opening a pane
+  // that is already open draws nothing, so the close below costs one no-op.
+  const wasOpen = state.open;
+  const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
+  const now = (await $.clock.now()) / 1000;
   const drawn = foldDrawn(state.pressed, startFolded(0, now, pane), names);
-  if (isOpen && drawn[section] === false) {
+  if (wasOpen && drawn[section] === false) {
     state.open = false;
     markSeen($, state);
     // A probe asked for by the run that opened it is not wanted once it is shut.
@@ -3031,11 +3030,12 @@ async function openOn($: Engine, state: State, section: string,
   state.pressed = { ...state.pressed,
                     ...Object.fromEntries(names.map((name) => [name, name !== section])) };
   keepFold($, state, names);
-  state.open = true;
-  const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
+  // A pane the host would not place is not open: the next ask opens it again
+  // rather than closing what was never drawn.
+  state.open = wasOpen || opened.isPlaced;
   $.ui.invalidate("ui.render");
-  return { text: opened.isPlaced ? `llm-fleet pane opened on ${title} (${MARK}).`
-    : notPlaced(surface, title) };
+  return { text: wasOpen || opened.isPlaced
+    ? `llm-fleet pane opened on ${title} (${MARK}).` : notPlaced(title) };
 }
 
 /**
@@ -3241,8 +3241,23 @@ export const register: Register = (on, options) => {
     return next(event);
   });
 
-  on("command.run", { command: "worktrees" }, async ($, event) => {
-    const answer = await openOn($, state, "worktrees", event.surface);
+  // Escape closes the pane without a word to the plugin, so the host says it
+  // shut. Without this the next /llm-fleet reads the last paint's open state
+  // and closes a pane that is already gone, instead of opening it.
+  on("ui.close", async ($, event, next) => {
+    if (event.id === PANE) {
+      state.open = false;
+      // What the pane drew was read before it shut, exactly as for a close the
+      // band noticed; without this an Escape would leave the digest unseen.
+      // Not from a paint: this hook writes outside one, so the look is written
+      // now rather than left for the next paint that may never come.
+      markSeen($, state);
+    }
+    return next(event);
+  });
+
+  on("command.run", { command: "worktrees" }, async ($) => {
+    const answer = await openOn($, state, "worktrees");
     // Opened, the worktrees are probed on the next look, within one look's
     // interval: a person who asks for them is asking how they stand, not how
     // they stood at the last cached probe. The pane opens on the reading it
@@ -3260,7 +3275,7 @@ export const register: Register = (on, options) => {
       return { text: KEYS_USAGE };
     }
     if (asked === "open") {
-      return openOn($, state, "keys", event.surface);
+      return openOn($, state, "keys");
     }
     state.tipsWord = asked.tips;
     state.tipsSet = true;
@@ -3336,19 +3351,34 @@ export const register: Register = (on, options) => {
     // The pane is open and closed by the same word, so it follows the band's
     // switch; `close` only closes. The band is asked to draw again either way,
     // so its switch says which way the command went.
-    const isOpen = (await $.ui.panes()).some((pane) => pane.id === PANE);
-    state.open = asked === "close" ? false : !isOpen;
-    if (!state.open) {
+    // Nothing is awaited before the open below: an open asked for after a wait
+    // reads as one nobody asked for, and a dock that has not measured itself
+    // refuses those on every surface, the desktop app included. The path that
+    // closes still asks the host, because closing is placed nowhere.
+    if (asked === "close") {
+      state.open = false;
+      markSeen($, state);
+      await $.ui.close({ id: PANE });
+      $.ui.invalidate("ui.render");
+      return { text: `llm-fleet pane closed (${MARK}).` };
+    }
+    // What the last paint saw is the switch: a run that follows a close finds
+    // it shut, and a pane the host would not place is never marked open. Asking
+    // the host here would put a wait in front of the open below whenever it
+    // answered empty.
+    if (state.open) {
+      state.open = false;
       markSeen($, state);
       await $.ui.close({ id: PANE });
       $.ui.invalidate("ui.render");
       return { text: `llm-fleet pane closed (${MARK}).` };
     }
     const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
+    state.open = opened.isPlaced;
     $.ui.invalidate("ui.render");
-    // A surface too narrow to draw the pane opens once the terminal is wider.
+    // Every surface that docks a pane places it by width: a wider window opens it.
     return { text: opened.isPlaced ? `llm-fleet pane opened (${MARK}).`
-                          : notPlaced(event.surface) };
+                          : notPlaced() };
   });
 
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {
@@ -3678,7 +3708,7 @@ export const register: Register = (on, options) => {
         const section = key === undefined ? null : sectionOfKey(key);
         if (section !== null) {
           state.focus = null;
-          return openOn($, state, section, e.surface).catch(() => undefined);
+          return openOn($, state, section).catch(() => undefined);
         }
         state.focus = focus ?? null;
         state.open = true;

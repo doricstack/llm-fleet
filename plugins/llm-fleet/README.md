@@ -71,6 +71,18 @@ To follow an external system's off switch, set `sources.progress.paused_when_exi
 
 The plugin reads the session roster through the `claude` command, transcripts and task lists under the homes you configure, and, when you switch it on, pull requests through the `gh` command. The outside commands the readers start (`claude`, `gh`, `git`, `ps`, `lsof`, the speech command and your own sections' commands) run with your Anthropic variables and the common provider API key variables removed from their environment, and the configuration can add to that list but never shorten it.
 
+The pane draws in the terminal, the Claude desktop app and the VS Code extension, on the same render site each app provides.
+
+## What it sends, and what it runs
+
+The plugin makes no network request of its own. Every fact in the pane is read on this machine and printed to it, and the only messages it sends are `$.session.send` notes to the other Claude sessions on the same machine, which carry a job identifier and a short line such as a speech reply. The one reader that reaches out is the pull-request one, through the `gh` command and your own GitHub login; leave that source off and no pull-request query is made. A custom section runs whatever command you give it, so a command that reaches the network does so because you configured it. It reads the conversation only through the transcripts and events the host hands it, and it never changes one.
+
+Every hook it registers either answers its own command or drawing and returns, or passes the event on unchanged with `next(event)`. It registers no permission event and never decides whether a tool call may run; that stays with you and your settings.
+
+It runs two kinds of program. The first are its own Python entries, started through the interpreter you set in the plugin's options: `readers/read.py` for the reading, and the doctor and setup commands. The second are the commands your configuration or the pane's fixed set name, listed above. Both kinds run as your user, with no credentials of their own: the plugin's options hold no key, and the outside commands the readers start get the provider variables stripped, as above.
+
+The paint recolors the element tree it was given by walking that tree's props and rewriting the color values in it (`components/palette.ts`). It reads nothing else and draws nothing new.
+
 ## License
 
 MIT.

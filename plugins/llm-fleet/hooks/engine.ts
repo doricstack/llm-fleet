@@ -235,6 +235,9 @@ export type On = {
    handler: (engine: Engine, event: PromptEvent, next: Next) => Promise<unknown> | unknown): void;
   (event: "session.end",
    handler: (engine: Engine, event: unknown, next: Next) => Promise<unknown> | unknown): void;
+  (event: "ui.close",
+   handler: (engine: Engine, event: { id: string; origin: { kind: string } },
+             next: Next) => Promise<unknown> | unknown): void;
 };
 
 export type Register = (on: On, options?: { notify?: boolean }) => void;
