@@ -64,7 +64,7 @@ import type { PaneConfig } from "../components/options.ts";
 import type { FleetDigestSeen, FleetFold } from "../types/index.d.ts";
 import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.ts";
 import { recolor, THEME } from "../components/palette.ts";
-import { CLOSE, DETAILS_PREFIX, FOCUS_CLEAR, FOCUS_PREFIX,
+import { CLOSE, DETAILS_PREFIX, FOCUS_CLEAR, FOCUS_PREFIX, HIDE_PREFIX,
          REPLY_PENDING_SECONDS, replyKey, replyText, SHOW_ALL_PREFIX, TOGGLE_ALL,
          TOGGLE_PREFIX, unreadableKey,
          type Focus, type PaneActions, type PaneOptions, type RepliesPaused }
@@ -191,6 +191,15 @@ const FOLDED = { plugin: "llm-fleet", key: "folded" } as const;
  * reload of the plugin is not a reason to draw the section short again.
  */
 const SHOWN_ALL = { plugin: "llm-fleet", key: "shownAll" } as const;
+/**
+ * The session state holding the sections a person put away.
+ *
+ * Beside the folds, because it is the same kind of thing: a choice about the
+ * pane that lasts for this session and crosses a hot reload. It stays out of
+ * the resolved configuration for the same reason the folds do, so a reading
+ * that lands with a new order cannot walk over a press.
+ */
+const HIDDEN = { plugin: "llm-fleet", key: "hidden" } as const;
 /**
  * Where the replies sent from a pane are kept, by job and the hash of the
  * question answered, in the store every session reads: a job answered from one
@@ -382,6 +391,16 @@ type State = {
   restored: boolean;
   /** Which sections a person pressed to draw in full, by name. */
   shownAll: Fold;
+  /**
+   * The sections a person put away, by name.
+   *
+   * Kept apart from the folds: a fold changes how much of a section is read,
+   * while a section put away is not read here at all. Both are presses, so both
+   * live in this session's state and outrank the configuration.
+   */
+  putAway: Fold;
+  /** Whether the sections this session opened with put away have been asked for. */
+  putAwayRestored: boolean;
   /**
    * The state a press on a headline figure narrowed the pane to.
    *
@@ -1458,6 +1477,31 @@ function restoreShownAll($: Engine, state: State): void {
     const merged = { ...held.value, ...state.shownAll };
     const same = JSON.stringify(merged) === JSON.stringify(state.shownAll);
     state.shownAll = merged;
+    if (!same) {
+      $.ui.invalidate("ui.render");
+    }
+  }).catch(() => undefined);
+}
+
+/**
+ * Ask the host which sections a person put away, once per session.
+ *
+ * What the session drew while this read was out is newer than what the host
+ * holds, so the two are merged with the press winning, and the pane is redrawn
+ * only when that changed what it draws.
+ */
+function restorePutAway($: Engine, state: State): void {
+  if (state.putAwayRestored) {
+    return;
+  }
+  state.putAwayRestored = true;
+  $.state.get(HIDDEN).then((held) => {
+    if (!isFold(held.value)) {
+      return;
+    }
+    const merged = { ...held.value, ...state.putAway };
+    const same = JSON.stringify(merged) === JSON.stringify(state.putAway);
+    state.putAway = merged;
     if (!same) {
       $.ui.invalidate("ui.render");
     }
@@ -2795,6 +2839,30 @@ function armTips($: Engine, state: State): void {
 const ONE_SECTION_TITLES: Record<string, string> = { worktrees: "Worktrees", keys: "Keys" };
 
 /**
+ * The section a band item's row is drawn in, from the key the item carries.
+ *
+ * The key's head is the source that raised it, which is the same word the pane
+ * groups its rows under: a job is a background session, a pull request is the
+ * pull requests section, and a run and a trial each have their own. A key this
+ * does not know opens the pane as it always has, at the top.
+ */
+function sectionOfKey(key: string): string | null {
+  if (key.startsWith("job:")) {
+    return "sessions";
+  }
+  if (key.startsWith("pr:")) {
+    return "prs";
+  }
+  if (key.startsWith("run:")) {
+    return "running";
+  }
+  if (key.startsWith("trial:")) {
+    return "trials";
+  }
+  return null;
+}
+
+/**
  * Open the pane on one section, or close it when it is already open on that one.
  *
  * Every other section is folded, so the one asked for is in view without
@@ -2910,6 +2978,7 @@ export const register: Register = (on, options) => {
   launch = launchFrom(options);
   const state: State = { held: null, looking: false, readingWhole: false, counting: false, hydrated: false, pressed: {},
                          restored: false, shownAll: {}, shownAllRestored: false,
+                         putAway: {}, putAwayRestored: false,
                          focus: null, details: {},
                          hidden: [], replied: [], replying: new Set(), cleared: [],
                          paused: null,
@@ -3226,6 +3295,7 @@ export const register: Register = (on, options) => {
     // waited on the host would be a pane drawn empty while it waited.
     restoreFold($, state);
     restoreShownAll($, state);
+    restorePutAway($, state);
     // The digest's last look, asked for once per opening and drawn once it lands.
     restoreSeen($, state);
     const drawnFolds = foldDrawn(state.pressed, configured, names);
@@ -3310,6 +3380,21 @@ export const register: Register = (on, options) => {
                              }
                              return;
                            }
+                           // The picker's press: a section put away draws no
+                           // card, and its name in the picker stays, so the
+                           // same press brings it back. Only a section this
+                           // pane lists is acted on, so a key from a reading
+                           // that has since gone is not a press on nothing.
+                           if (element.startsWith(HIDE_PREFIX)) {
+                             const name = element.slice(HIDE_PREFIX.length);
+                             if (names.includes(name)) {
+                               state.putAway = { ...state.putAway,
+                                                 [name]: state.putAway[name] !== true };
+                               $.state.set(HIDDEN, state.putAway).catch(() => undefined);
+                               $.ui.invalidate("ui.render");
+                             }
+                             return;
+                           }
                            const press = folded(state.pressed, configured, element, names);
                            // What the host holds is the presses, so a press is
                            // written whenever it recorded anything at all, even
@@ -3330,6 +3415,7 @@ export const register: Register = (on, options) => {
                          options: withTipsWord(state, {
                            ...paneOptions(width, now, pane), folded: drawnFolds,
                            shownAll: state.shownAll,
+                           putAway: state.putAway,
                            focus: state.focus,
                            details: state.details,
                            countsAt: state.shownCountsAt,
@@ -3431,10 +3517,21 @@ export const register: Register = (on, options) => {
           .then(() => $.ui.invalidate("ui.render"))
           .catch(() => undefined);
       },
-      onOpen: (focus?: Focus) => {
+      onOpen: (focus?: Focus, key?: string) => {
         // The band is read while the pane is shut, so a figure here is the
         // moment a person wants its rows: open the pane already narrowed to
         // them, and let the clear control inside widen it.
+        //
+        // The item the band leads with names a row instead, and the pane draws
+        // no scroll container: opening it at the top would put that row below
+        // the fold. So the section the row lives in is opened alone, through
+        // the same path the commands that open one section use, and every
+        // other section is folded out of the way.
+        const section = key === undefined ? null : sectionOfKey(key);
+        if (section !== null) {
+          state.focus = null;
+          return openOn($, state, section).catch(() => undefined);
+        }
         state.focus = focus ?? null;
         state.open = true;
         $.ui.invalidate("ui.render");

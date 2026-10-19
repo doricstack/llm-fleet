@@ -55,11 +55,21 @@ command -v git >/dev/null 2>&1 || { echo "test-impact: git is not installed" >&2
 # The interpreter is resolved the way the make targets resolve theirs, so a host
 # where only `python` answers runs the same suite instead of failing to start
 # it. A name found on the path is not a path from this machine, which is what
-# the selection is not allowed to carry.
-if command -v python3 >/dev/null 2>&1; then
-  python="python3"
-else
-  python="python"
+# the selection is not allowed to carry, and a name is not an interpreter
+# either: Windows keeps a `python3` stub that answers every call with a message
+# about the Microsoft Store and exits 49, so each candidate is asked to run
+# something before it is believed.
+python=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 \
+     && "$candidate" -c "import sys" >/dev/null 2>&1; then
+    python="$candidate"
+    break
+  fi
+done
+if [ -z "$python" ]; then
+  echo "test-impact: no Python interpreter answers on this machine" >&2
+  exit 2
 fi
 
 plan_header() { echo "--- plan ---"; }

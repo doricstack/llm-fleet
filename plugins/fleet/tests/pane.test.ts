@@ -215,6 +215,58 @@ test("pressing Collapse all folds every section, through the host", async ($, on
   }
 });
 
+test("a press puts a section away and the picker brings it back, through the host", async ($, on) => {
+  const clock = mock.clock(on, { now: AT * 1000 });
+  mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
+  for (const surface of SURFACES) {
+    const pane = await $.ui.mount({
+      plugin: "llm-fleet", surface, component: "Pane", requestId: "fleet",
+      props: PANE_PROPS as never,
+    });
+    expect(JSON.stringify(await pane.drawn())).toContain("Review adapter behavior");
+    // A real press on the picker's own control, run by the host the way a
+    // person's press is: the name stays and goes dim at once, and the section
+    // it names slides out with its rows.
+    await pane.press({ key: "fleet.hide.sessions" });
+    const pressed = await pane.drawn();
+    expect(JSON.stringify(pressed)).toContain("Background sessions");
+    const item = buttonWith(pressed, "fleet.hide.sessions");
+    expect(item).not.toBeNull();
+    expect(item?.props?.dimColor).toBe(true);
+    await clock.advance(400);
+    const drawn = await pane.drawn();
+    const putAway = JSON.stringify(drawn);
+    expect(putAway).not.toContain("Review adapter behavior");
+    expect(putAway).toContain("Background sessions");
+    expect(buttonWith(drawn, "fleet.hide.sessions")?.props?.dimColor).toBe(true);
+    // The same press brings it back, and the picker says so.
+    await pane.press({ key: "fleet.hide.sessions" });
+    const back = await pane.drawn();
+    expect(JSON.stringify(back)).toContain("Review adapter behavior");
+    expect(buttonWith(back, "fleet.hide.sessions")?.props?.dimColor).not.toBe(true);
+  }
+});
+
+/** The button a press is addressed to, wherever the surface drew it. */
+function buttonWith(node: unknown, key: string):
+    { props?: { key?: string; dimColor?: unknown }; children?: unknown[] } | null {
+  if (node === null || typeof node !== "object") {
+    return null;
+  }
+  const record = node as { type?: string; props?: { key?: string; dimColor?: unknown };
+                           children?: unknown[] };
+  if (record.type === "Button" && record.props?.key === key) {
+    return record;
+  }
+  for (const child of record.children ?? []) {
+    const found = buttonWith(child, key);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
+}
+
 test("a row the surface has room for keeps its title and its right slot on one line", async ($, on) => {
   mock.clock(on, { now: AT * 1000 });
   mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
@@ -262,6 +314,35 @@ const BAND_PROPS = {
  * went each time. The engine's pane calls are answered here, beneath the
  * plugin, which is where a session answers them.
  */
+/**
+ * The item the band leads with is a way into its row.
+ *
+ * The pane draws no scroll container, so opening it at the top puts a row that
+ * needs you below the fold. The press names the row instead, and the pane opens
+ * on the section that row lives in with the rest folded out of the way.
+ */
+test("the band's leading item opens the pane, not the whole fleet", async ($, on) => {
+  mock.clock(on, { now: AT * 1000 });
+  // A reading with a job that waits on the person, which is what puts an item
+  // in front of the band in the first place.
+  mock.store(on, { [READING_KEY]: { at: AT, documents: RICH } });
+  const open: string[] = [];
+  on("session.id", () => ({ value: "another-session" }) as never);
+  on("ui.panes", () => ({ value: open.map((id) => ({ id })) }) as never);
+  on("ui.open", (_engine, e) => {
+    open.push((e as { id: string }).id);
+    return { value: { isPlaced: true } } as never;
+  });
+  const band = await $.ui.mount({ plugin: "llm-fleet", surface: "terminal",
+                                  component: "AbovePrompt", props: BAND_PROPS as never });
+  const drawn = JSON.stringify(await band.drawn());
+  const key = /"key":"(fleet\.band\.item\.[^"]+)"/.exec(drawn)?.[1];
+  expect(typeof key).toBe("string");
+  expect(open).toEqual([]);
+  await band.press({ key: key as string });
+  expect(open).toEqual(["fleet"]);
+});
+
 test("the band's switch opens and closes the pane with a press, mid-turn", async ($, on) => {
   mock.clock(on, { now: AT * 1000 });
   mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });

@@ -293,16 +293,17 @@ test("a figure is the press that opens the pane narrowed to what it counted", ()
 test("what the band leads with opens the pane", () => {
   const items = [{ key: "trial:r:feat/a:TRYING", level: "error" as const,
                    text: "Trial failed on repo feat/a: 2 failed" }];
-  const opened: (string | undefined)[] = [];
+  const opened: { focus?: string; key?: string }[] = [];
   const tree = bandTree({ items, counts: { working: 0, waiting: 0, failed: 1 }, open: false,
                           width: 140, onToggle: () => undefined, onDismiss: () => undefined,
-                          onOpen: (focus) => { opened.push(focus); } });
+                          onOpen: (focus, key) => { opened.push({ focus, key }); } });
   const lead = nodesIn(tree).find((node) =>
     (node.props as { key?: string }).key === BAND_ITEM + items[0].key);
   assert.notEqual(lead, undefined);
   (lead?.props as { onPress?: () => unknown }).onPress?.();
-  // No state was named: the press opens the whole fleet, where the item lives.
-  assert.deepEqual(opened, [undefined]);
+  // No state was named, and the row's key is: the pane opens where that row
+  // lives, which is what the band can say without drawing anything itself.
+  assert.deepEqual(opened, [{ focus: undefined, key: items[0].key }]);
 });
 
 test("the band states figures above zero, says when nothing runs, and names a read in flight", () => {

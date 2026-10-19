@@ -12,8 +12,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { DEFAULT_KEYS, SHOW_ALL_PREFIX, allErrors, paneFrom, prUrl, replyKey, replyText,
-         unreadableSources,
+import { DEFAULT_KEYS, HIDE_PREFIX, SHOW_ALL_PREFIX, allErrors, paneFrom, prUrl, replyKey,
+         replyText, unreadableSources,
          worktreeNextStep, worktreeOwnerNote, type PaneOptions }
   from "../plugins/fleet/components/pane.ts";
 import { GEOMETRY } from "../plugins/fleet/components/options.ts";
@@ -152,6 +152,70 @@ test("every section the pane builds carries its own fold control and hotkey", ()
   // The three the pane draws a control for are the three it binds, and the
   // fourth is the digits the sections themselves carry.
   assert.equal(bindings.slice(0, 3).every((key) => all.includes(key)), true);
+});
+
+test("the picker lists every section the configuration made visible", () => {
+  // The picker is how a section is put away and brought back, so a visible
+  // section missing from it is one a person can hide and never recover.
+  const built = paneFrom(snapshot(), options());
+  assert.deepEqual(built.picker?.map((item) => item.name), options().sectionOrder);
+  assert.deepEqual(built.picker?.map((item) => item.title),
+                   ["Running", "Background sessions", "This session", "Trials",
+                    "Pull requests", "Worktrees", "Skills", "Warnings", "Keys"]);
+  // Each one carries the press that puts it away, addressed by its own name.
+  for (const item of built.picker ?? []) {
+    assert.equal(item.press.key, HIDE_PREFIX + item.name);
+    assert.equal(item.hidden, false);
+  }
+  // A section the configuration hid is not drawn and is not offered: the picker
+  // says what a person may put away, not what a file switched off for them.
+  const sections = { ...options().sections, prs: { visible: false, collapsed: false } };
+  const hiddenByConfig = paneFrom(snapshot(), options({ sections }));
+  assert.equal(hiddenByConfig.picker?.some((item) => item.name === "prs"), false);
+  assert.equal(hiddenByConfig.groups.some((entry) => entry.title === "Pull requests"), false);
+});
+
+test("a section a person put away keeps its name, and draws no card", () => {
+  const built = paneFrom(snapshot(), options({ putAway: { sessions: true } }));
+  // The card and every row under it are gone...
+  assert.equal(built.groups.some((entry) => entry.title === "Background sessions"), false);
+  // ...and the picker still names it, so the same press brings it back.
+  const putAway = built.picker?.find((item) => item.name === "sessions");
+  assert.equal(putAway?.title, "Background sessions");
+  assert.equal(putAway?.hidden, true);
+  // A section nobody put away is drawn, and its item says so.
+  assert.equal(built.picker?.find((item) => item.name === "running")?.hidden, false);
+  assert.equal(built.groups.some((entry) => entry.title === "Running"), true);
+});
+
+test("the picker draws a section a person put away dim, and the same press brings it back", () => {
+  const built = paneFrom(snapshot(), options({ putAway: { sessions: true } }));
+  const buttons: { key?: string; dimColor?: unknown; label?: string;
+                   children?: { type?: string; children?: unknown[] }[] }[] = [];
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== "object") {
+      return;
+    }
+    const record = node as { type?: string; props?: typeof buttons[number];
+                             children?: unknown[] };
+    if (record.type === "Button" && typeof record.props?.key === "string"
+        && record.props.key.startsWith(HIDE_PREFIX)) {
+      buttons.push({ ...record.props, children: record.children as typeof buttons[number]["children"] });
+    }
+    for (const child of record.children ?? []) {
+      walk(child);
+    }
+  };
+  walk(renderPane(built));
+  assert.deepEqual(buttons.map((button) => button.key).sort(),
+                   options().sectionOrder.map((name) => HIDE_PREFIX + name).sort());
+  const putAway = buttons.find((button) => button.key === HIDE_PREFIX + "sessions");
+  assert.equal(putAway?.dimColor, true);
+  assert.equal(putAway?.label, "Background sessions");
+  // A button holds strings and texts only: a box in one is refused by the host.
+  assert.equal(putAway?.children?.every((child) => child.type === "Text"), true);
+  const open = buttons.find((button) => button.key === HIDE_PREFIX + "running");
+  assert.equal(open?.dimColor, undefined);
 });
 
 function options(overrides: Partial<PaneOptions> = {}): PaneOptions {

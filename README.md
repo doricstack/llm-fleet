@@ -48,7 +48,7 @@ Your prompt
 
 ## What the pane shows
 
-![The llm-fleet pane, drawn from a sample machine](plugins/fleet/assets/pane-example.svg)
+![The llm-fleet pane, drawn from a sample machine](https://github.com/doricstack/llm-fleet/releases/download/v0.4.3/pane-demo.gif)
 
 The figures at the top are the controls: press one and the pane narrows to those rows.
 
@@ -125,6 +125,10 @@ Answer `y` to add the marketplace, then pick a scope. The one-step install needs
 `/fleet setup` writes a starter configuration holding the Claude Code homes it finds on this machine and nothing else, and never overwrites a file that is already there. `/fleet doctor` says what the pane is missing and the setting that fixes each thing. `/fleet` opens the pane, and running it again closes it.
 
 [The plugin's README](plugins/fleet/README.md) covers every command, the three plugin options and what the pane reads.
+
+## Supported hosts
+
+The plugin is proved on the versions listed in [the host table](docs/supported-hosts.md), one row per machine it was actually loaded on. A surface that is not listed there has not been tried.
 
 ## Configure
 

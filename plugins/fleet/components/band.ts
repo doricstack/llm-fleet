@@ -305,7 +305,14 @@ export type BandInput = {
    * a count and wants the rows behind it; without this the figure is a number
    * they have to go and find.
    */
-  onOpen?: (focus?: "working" | "waiting" | "failed") => unknown;
+  /**
+   * The press that opens the pane, as this session's state to start it in.
+   *
+   * A figure names a state, and the pane opens narrowed to it. The item a band
+   * leads with names a row instead, so it hands its key over and the pane opens
+   * on the section that row lives in, the rest folded out of the way.
+   */
+  onOpen?: (focus?: "working" | "waiting" | "failed", key?: string) => unknown;
 };
 
 /** The cells a button adds around its label: "[ " before it and " ]" after. */
@@ -400,7 +407,7 @@ export function bandTree(input: BandInput): Node {
                    input.onOpen === undefined ? words
                      : [{ type: "Button",
                           props: { key: BAND_ITEM + first.key, label: lead,
-                                   onPress: () => input.onOpen?.() },
+                                   onPress: () => input.onOpen?.(undefined, first.key) },
                           children: pressable(words) }]));
   }
   const left = box({ flexDirection: "row", gap: 2, flexShrink: 1 }, parts);

@@ -7,7 +7,8 @@
  * invented, and the same entity is never counted twice under two headings.
  */
 
-import type { Control, Digest, Group, Pane, Row, RowLine, GroupState, Slot, Spark } from "./layout.ts";
+import type { Control, Digest, Group, Pane, PickerItem, Row, RowLine, GroupState, Slot,
+              Spark } from "./layout.ts";
 import { ageText, countLabel, durationText, fit } from "./layout.ts";
 import { mask, MASK } from "./mask.ts";
 import { THEME, worktreeToken, type Theme } from "./palette.ts";
@@ -172,6 +173,15 @@ export type PaneOptions = {
    */
   shownAll?: Record<string, boolean>;
   /**
+   * The sections a person put away, by section name.
+   *
+   * A section put away is not drawn among the cards, but it keeps its name in
+   * the picker, so the press that put it away brings it back. It lives beside
+   * the folds because it is a preference about the pane, not a filter on the
+   * rows a person is reading now.
+   */
+  putAway?: Record<string, boolean>;
+  /**
    * What a press on one of the pane's controls does.
    *
    * The layout is pure and cannot press anything itself, so the pane hands each
@@ -333,6 +343,8 @@ export const TOGGLE_PREFIX = "fleet.section.";
  * carries a control, and pressing it raises that ceiling for the session.
  */
 export const SHOW_ALL_PREFIX = "fleet.showall.";
+/** The address a press carries back for the picker's control over one section. */
+export const HIDE_PREFIX = "fleet.hide.";
 /** The address a press carries back for the control that folds every section. */
 export const TOGGLE_ALL = "fleet.all";
 /** The address a press carries back for the control that closes the pane. */
@@ -2328,10 +2340,29 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
                                  options)];
     }
   }
+  // The picker lists every section the configuration made visible, in the order
+  // it asked for, whether or not a person has put it away: a section missing
+  // from the picker is one that was hidden with no press left to bring it back.
+  // A section the configuration itself hid is not listed, because no press made
+  // it go and no press should pretend to return it.
+  const hidden = options.putAway ?? {};
+  const picker: PickerItem[] = options.sectionOrder
+    .filter((name) => built[name] !== undefined && options.sections[name]?.visible !== false)
+    .map((name): PickerItem => {
+      const title = titleOf(name, options);
+      return { name, title, hidden: hidden[name] === true,
+               press: { key: HIDE_PREFIX + name, label: title,
+                        onPress: pressTo(options, HIDE_PREFIX + name) } };
+    });
   const groups: Group[] = [];
   for (const name of options.sectionOrder) {
     const choice = options.sections[name];
     if (choice && choice.visible === false) {
+      continue;
+    }
+    // A section a person put away draws no card while it is away; its name in
+    // the picker is what the press acts on until it comes back.
+    if (hidden[name] === true) {
       continue;
     }
     const found = built[name];
@@ -2463,6 +2494,7 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     }),
     footer: { text: FOOTER_TEXT, dim: true },
     digest: digestFrom(snapshot, options),
+    ...(picker.length ? { picker } : {}),
     groups,
     width: options.width,
     narrowAt: options.narrowAt,

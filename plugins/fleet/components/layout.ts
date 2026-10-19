@@ -37,6 +37,23 @@ export type Control = {
   dim?: boolean;
 };
 
+/**
+ * One section in the pane's picker: the name it is known by, whether a person
+ * put it away, and the press that puts it away or brings it back.
+ *
+ * A section a person put away is not drawn among the cards, but its name stays
+ * here, dim, because the picker is the only way back: dropping it would make
+ * the press that hid it one a person cannot undo.
+ */
+export type PickerItem = {
+  /** The section's identifier in the resolved order, such as `sessions`. */
+  name: string;
+  /** What the section is called, which is what the picker draws. */
+  title: string;
+  hidden: boolean;
+  press: Control;
+};
+
 export type Slot = {
   text: string;
   color?: Color;
@@ -364,6 +381,15 @@ export type Pane = {
   warning?: Slot;
   /** The controls that act on every section at once, drawn under the counts. */
   controls?: Control[];
+  /**
+   * The sections the configuration made visible, each with the press that puts
+   * it away or brings it back.
+   *
+   * Drawn under the controls, one line or several as the width holds them. A
+   * section a person put away keeps its name here, drawn dim, and the same
+   * press restores it.
+   */
+  picker?: PickerItem[];
   /** What closes the pane, said beside the controls in the words a person types. */
   hint?: string;
   /**
@@ -1393,6 +1419,39 @@ function summaryLine(slots: Slot[]): Node {
   }));
 }
 
+/**
+ * The picker's lines: one control per section the configuration made visible.
+ *
+ * The names wrap rather than leaving the width: a picker that dropped the
+ * sections past the pane's edge would be one a person could not use to bring
+ * back the section that was cut.
+ */
+function pickerRows(picker: PickerItem[], width: number): Node[] {
+  const rows: Node[] = [];
+  const gap = 2;
+  const room = Math.max(1, width);
+  let row: Node[] = [];
+  let used = 0;
+  for (const item of picker) {
+    // A title wider than the pane is cut: a control wider than the pane would
+    // push every control after it off the line.
+    const title = fit(item.title, room);
+    if (row.length > 0 && used + gap + title.length > room) {
+      rows.push(box({ flexDirection: "row", gap }, row));
+      row = [];
+      used = 0;
+    }
+    row.push(control(item.press,
+                     { plain: true, ...(item.hidden ? { dimColor: true } : {}) },
+                     [text(item.hidden ? { dimColor: true } : {}, title)]));
+    used += (row.length > 1 ? gap : 0) + title.length;
+  }
+  if (row.length > 0) {
+    rows.push(box({ flexDirection: "row", gap }, row));
+  }
+  return rows;
+}
+
 /** The whole pane, in reading order. */
 export function renderPane(pane: Pane): Tree {
   // The title is a chip in the host's own accent, the mark the pane is known by
@@ -1440,6 +1499,13 @@ export function renderPane(pane: Pane): Tree {
         { dimColor: true, ...(item.hotkey ? { plain: true as const } : {}) })),
       ...(hint ? [text({ dimColor: true, italic: true }, hint)] : []),
     ]));
+  }
+  // The picker: the sections a person may put away, and the ones already put
+  // away, named dim so the same press brings them back. It sits under the
+  // controls and above everything that narrows or filters, so it is always the
+  // way back to a section, whatever else the pane is doing.
+  if (pane.picker?.length) {
+    parts.push(...pickerRows(pane.picker, pane.width));
   }
   // A narrowed pane says so, with the press that widens it again: the figures
   // above still count the whole machine, and a person who forgot the press

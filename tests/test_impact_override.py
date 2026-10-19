@@ -594,6 +594,50 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(len(suites), 2)
         self.assertEqual({entry["folder"] for entry in suites}, {""})
 
+    @unittest.skipUnless(working_shell(), "the selection needs a POSIX shell to run make")
+    def test_a_stub_interpreter_is_passed_over_for_one_that_answers(self) -> None:
+        # Windows keeps a `python3` on the path that answers every call with a
+        # message about the Microsoft Store and exits 49. A name that resolves
+        # is not an interpreter, and a selection that believes it fails every
+        # TypeScript suite with 49 as though the suite were broken.
+        log = self.install_recorders()
+        tools = self.root / "tools"
+        tools.mkdir()
+        stub = tools / "python3"
+        stub.write_text("#!/bin/sh\nexit 49\n", encoding="utf-8")
+        stub.chmod(0o755)
+        answering = tools / "python"
+        answering.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + " \"$@\"\n",
+                             encoding="utf-8")
+        answering.chmod(0o755)
+        self.stage_change("plugins/fleet/components/widget.ts")
+        path = str(tools) + os.pathsep + os.environ.get("PATH", "")
+        result = run_selector("--tier", "commit", "--repo", str(self.root), cwd=self.root,
+                              env=clean_environment(STUB_LOG=str(log), PATH=path))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        suites = [entry for entry in self.ran(log) if "--suite" in entry["argv"]]
+        self.assertEqual(len(suites), 2, self.ran(log))
+
+    @unittest.skipUnless(working_shell(), "the selection needs a POSIX shell to run make")
+    def test_no_interpreter_that_answers_is_named_rather_than_run(self) -> None:
+        # Nothing to fall back to: the selection says so once, by name, rather
+        # than starting suites that cannot run and reporting them as failures.
+        self.install_recorders()
+        tools = self.root / "tools"
+        tools.mkdir()
+        for name in ("python3", "python"):
+            stub = tools / name
+            stub.write_text("#!/bin/sh\nexit 49\n", encoding="utf-8")
+            stub.chmod(0o755)
+        self.stage_change("plugins/fleet/components/widget.ts")
+        # The stubs come first, so both names resolve to one that answers 49;
+        # the rest of the path stays, because git still has to be found.
+        path = str(tools) + os.pathsep + os.environ.get("PATH", "")
+        result = run_selector("--tier", "commit", "--repo", str(self.root), cwd=self.root,
+                              env=clean_environment(PATH=path))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no Python interpreter answers", result.stderr)
+
     def test_a_changed_python_file_plans_no_typescript_suite(self) -> None:
         # The two layers are selected by what changed, not by what exists: a
         # plan that ran the TypeScript layer for a Python edit would spend the

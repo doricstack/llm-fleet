@@ -66,6 +66,8 @@ declare module "claude-code" {
       folded: FleetFold;
       /** The sections a person pressed to draw in full; read by `restoreShownAll` on the first paint and written on its press. */
       shownAll: FleetFold;
+      /** The sections a person put away; read by `restorePutAway` on the first paint and written on each picker press. */
+      hidden: FleetFold;
       /** This session's own digest look: read on each opening, written at the version read when the pane closes. */
       digestSeen: FleetDigestSeen;
     };
