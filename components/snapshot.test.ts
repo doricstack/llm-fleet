@@ -446,6 +446,37 @@ test("a process under load reaches the pane only with the figures that read", ()
   assert.equal(snapshotFrom({}, NOW).load.state, "empty");
 });
 
+test("a pacer document keeps what was sent and names what was not", () => {
+  const read = snapshotFrom({ pacer: {
+    state: "ready", enabled: true, switchSource: "file", reason: null, version: 1,
+    slotCount: 4, workersPerRun: 6,
+    slots: [{ slot: 0, busy: true, pid: 9, repo: "r", startedAt: NOW - 5 },
+            { slot: "one", busy: true }, { slot: 2, busy: "yes" }, "junk"],
+    waiting: [{ pid: 1, repo: "w", since: NOW - 9 }, { pid: 2, repo: "no time" }],
+    recent: [{ at: NOW - 60, repo: "x", waitSeconds: 1, runSeconds: 2, exit: 0, slot: 0,
+               mode: "on", reason: null },
+             { at: NOW - 60, repo: "no exit", mode: "on" },
+             { at: NOW - 60, repo: "fractional", exit: 1.5 }],
+    errors: [] } }, NOW);
+  assert.equal(read.pacer?.state, "ready");
+  assert.deepEqual(read.pacer?.slots, [{ slot: 0, busy: true, pid: 9, repo: "r",
+                                         startedAt: NOW - 5 }]);
+  assert.deepEqual(read.pacer?.waiting, [{ pid: 1, repo: "w", since: NOW - 9 }]);
+  assert.deepEqual(read.pacer?.recent?.map((run) => run.repo), ["x"]);
+  // Lists the reader did not send stay null: nobody counted is not nobody.
+  const first = snapshotFrom({ pacer: { state: "ready", enabled: false, slotCount: 2,
+                                        slots: [], errors: [] } }, NOW);
+  assert.equal(first.pacer?.waiting, null);
+  assert.equal(first.pacer?.recent, null);
+  assert.equal(first.pacer?.enabled, false);
+  // A failed read carries no switch, and a reading from before pacer is disabled.
+  const failed = snapshotFrom({ pacer: { state: "failed", enabled: true, errors: [
+    { source: "pacer", reason: "exit 3" }] } }, NOW);
+  assert.equal(failed.pacer?.state, "failed");
+  assert.deepEqual(failed.pacer?.errors, [{ source: "pacer", reason: "exit 3" }]);
+  assert.equal(snapshotFrom({}, NOW).pacer?.state, "disabled");
+});
+
 test("a governance document is kept as read, and a failed one carries no scope", () => {
   const read = snapshotFrom({ governance: { state: "ready", governor: false, controller: true,
                                             source: "config", path: "/switch.json",

@@ -13,17 +13,26 @@
 #              that: eight suites named and four run, with a success reported
 #              over a change nothing had exercised.
 #
-#              The selection is by the repository's own test lanes rather than
-#              by a framework's import graph. A change to the Python side runs
-#              the Python suite; a change to the TypeScript side runs the
-#              TypeScript layer. The layers are small enough that running one
-#              whole is cheaper than being wrong about which part of it a change
-#              reaches, and being wrong is what this file is for.
+#              The selection is by file. scripts/test-select.py reads the
+#              repository's own sources and names the test files and suites
+#              each changed file reaches, through imports, through paths a test
+#              writes out, and through folders a test walks. A whole layer runs
+#              only when the selector says which file forced it: the test
+#              harness, or a file no test reaches. This replaced a selection by
+#              language lane, under which one changed test file and a README ran
+#              the whole Python suite, more than a thousand tests.
 #
-# Usage: .cits/test-impact.sh --tier commit|push|ci [--base REF] [--repo PATH] [--dry-run]
+#              The commit and push tiers run that selection; the ci tier runs
+#              everything. CI runs the push tier on a pull request and the ci
+#              tier on main and on a release tag, so the whole suite still runs
+#              on every change that lands.
+#
+# Usage: .cits/test-impact.sh --tier commit|push|ci [--base REF] [--repo PATH] [--require-change] [--dry-run]
 #        --dry-run prints the commands without running them.
+#        --require-change refuses a change set that comes out empty, for a
+#        caller, such as a pull request check, that always has something to test.
 # Exit:  0 = the selected suites passed or nothing was affected; non-zero = a
-#        selected suite failed.
+#        selected suite failed, or the selection could not be made.
 
 set -euo pipefail
 
@@ -31,12 +40,14 @@ tier=""
 base=""
 repo="$PWD"
 dry_run=0
+require_change=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --tier) tier="$2"; shift 2 ;;
     --base) base="$2"; shift 2 ;;
     --repo) repo="$2"; shift 2 ;;
+    --require-change) require_change=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     -h|--help)
       sed -n 's/^# Usage:/Usage:/p' "$0"
@@ -97,9 +108,10 @@ reports_note() {
 }
 
 # --- what the run is ----------------------------------------------------------
-# The blanket tier is the one tier that may run everything: it is what CI runs,
-# and an affected-only selection there would leave the rest of the repository
-# unverified on the only run that is allowed to check all of it.
+# The blanket tier is the one tier that may run everything: it is what CI runs
+# on main and on a release tag, and an affected-only selection there would leave
+# the rest of the repository unverified on the only run that is allowed to check
+# all of it.
 if [ "$tier" = "ci" ]; then
   echo "=== test-impact (tier=ci) ==="
   echo "  - the whole suite, including the isolated export round trip"
@@ -115,14 +127,30 @@ fi
 # --- what changed -------------------------------------------------------------
 # The staged set for a commit, everything since the merge base for a push. The
 # merge base is what makes a push measure its own work rather than everything
-# main has gained since the branch started.
+# main has gained since the branch started. A deletion counts, and a rename is
+# read as its two paths: a test that still names the old path is the test the
+# change breaks.
+diff_names() { git diff --name-only --relative --no-renames --diff-filter=ACDMR "$@" 2>/dev/null || true; }
 if [ "$tier" = "commit" ]; then
   [ -n "$base" ] || base="HEAD"
-  changed="$(git diff --cached --name-only --relative --diff-filter=ACMR "$base" 2>/dev/null || true)"
 else
   [ -n "$base" ] || base="origin/main"
-  merge_base="$(git merge-base HEAD "$base" 2>/dev/null || echo "$base")"
-  changed="$(git diff --name-only --relative --diff-filter=ACMR "$merge_base" 2>/dev/null || true)"
+fi
+# A base that names no commit would make every diff below come out empty and
+# read as "nothing affected": a renamed branch or a failed fetch would pass a
+# check that ran nothing.
+if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+  echo "test-impact: the base $base names no commit here; fetch it or name another" >&2
+  exit 2
+fi
+if [ "$tier" = "commit" ]; then
+  changed="$(diff_names --cached "$base")"
+else
+  merge_base="$(git merge-base HEAD "$base" 2>/dev/null)" || {
+    echo "test-impact: HEAD and $base share no history to measure from" >&2
+    exit 2
+  }
+  changed="$(diff_names "$merge_base")"
 fi
 # Uncommitted work counts as changed at both tiers. The commit tier is what
 # `make test-impacted` runs and a person's edits are usually unstaged when they
@@ -130,7 +158,7 @@ fi
 # about to be pushed. A selection that read only the index or only the commits
 # would answer "nothing affected" over an edit sitting right there.
 changed="${changed}
-$(git diff --name-only --relative --diff-filter=ACMR HEAD 2>/dev/null || true)"
+$(diff_names HEAD)"
 # A file written but not added yet is invisible to every diff above, and the
 # first thing a person runs the selection against is often the test they just
 # wrote. Untracked files are read with the ignored ones left out, so a build
@@ -138,57 +166,133 @@ $(git diff --name-only --relative --diff-filter=ACMR HEAD 2>/dev/null || true)"
 changed="${changed}
 $(git ls-files --others --exclude-standard 2>/dev/null || true)"
 changed="$(printf '%s\n' "$changed" | sed '/^$/d' | sort -u)"
+if [ "$require_change" -eq 1 ] && [ -z "$changed" ]; then
+  echo "test-impact: no change against $base, and this caller requires one" >&2
+  exit 2
+fi
 
 echo "=== test-impact (tier=$tier, base=$base) ==="
 
-# An empty change set needs no branch of its own: it matches no rule below, so
-# it yields no command, and the one place that decides what an empty selection
-# looks like is the one that draws the plan.
+# An empty change set needs no branch of its own: it yields no command, and the
+# one place that decides what an empty selection looks like is the one that
+# draws the plan.
 has() { printf '%s\n' "$changed" | grep -qE "$1"; }
+
+# --- the selection ------------------------------------------------------------
+# The selector reads the files of the repository being measured, so a clone
+# selects with its own copy; it is started with the interpreter resolved above.
+selection=""
+if [ -n "$changed" ]; then
+  if [ ! -f scripts/test-select.py ]; then
+    echo "test-impact: scripts/test-select.py is not in $repo" >&2
+    exit 2
+  fi
+  select_rc=0
+  # A carriage return is dropped on the way in: on Windows a line can carry
+  # one, and a name that keeps it is a file that reads as absent.
+  selection="$(printf '%s\n' "$changed" | "$python" scripts/test-select.py --root . \
+               | tr -d '\r')" || select_rc=$?
+  if [ "$select_rc" -ne 0 ]; then
+    echo "test-impact: the selection failed (exit $select_rc)" >&2
+    exit 2
+  fi
+fi
+picked() { printf '%s\n' "$selection" | sed -n "s/^$1 //p"; }
 
 # --- the commands -------------------------------------------------------------
 commands=""
 add() { commands="${commands}$1
 "; }
 
-# The Python side, as one command: `make test-report` is the suite this
-# repository already publishes for it, and running it whole keeps one definition
-# of what the Python tests are. A caller that wants a report names where, and
-# the gate that reads one passes its destination in CITS_JUNIT_DIR. unittest
-# writes no report of its own, which is why the repository carries one. The
-# schema both loaders read lives in the plugin folder, under plugins/llm-fleet/config,
-# so a change there plans this side and the TypeScript side alike.
-if has '\.py$|^tests/|^config/|^plugins/llm-fleet/config/|^public-export/|^Makefile$|^make/|^\.cits/'; then
+# The Python side. A file that changes how every test runs, or that no test
+# reaches, runs the suite whole through `make test-report`, the suite this
+# repository publishes; otherwise the selected files run as one report through
+# the same script, so a gate reading CITS_JUNIT_DIR counts exactly what ran.
+# Each name is checked against the shape of a test file before it is placed in
+# a command, because the plan is evaluated by a shell.
+python_all="$(picked python-all)"
+python_files="$(picked python-test)"
+if [ -n "$python_all" ]; then
+  while IFS= read -r forced; do
+    [ -n "$forced" ] && echo "  - the whole Python suite: $forced changes how every test runs or reaches no test"
+  done <<EOF
+$python_all
+EOF
   add "make test-report"
+elif [ -n "$python_files" ]; then
+  file_args=""
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    printf '%s\n' "$file" | grep -qE '^tests/test_[A-Za-z0-9_]+\.py$' \
+      || { echo "test-impact: refusing the test name $file" >&2; exit 2; }
+    [ -f "$file" ] || continue
+    file_args="$file_args --file $file"
+  done <<EOF
+$python_files
+EOF
+  # The environment the make targets give the suite, so no run leaves caches.
+  [ -n "$file_args" ] && add "PYTHONDONTWRITEBYTECODE=1 $python scripts/test-report.py --directory tests$file_args"
 fi
 
 # The TypeScript layer, suite by suite through the repository's own runner. A
-# changed .ts runs the layer whole, because a suite that names the changed
-# module and is not selected is the failure this file exists to fix.
-if has '\.tsx?$|^components/|^config/|^plugins/llm-fleet/config/'; then
+# changed module no suite imports runs the layer whole, because a suite that
+# reaches it by a road the selector cannot read is the failure this file exists
+# to fix.
+typescript_all="$(picked ts-all)"
+if [ -n "$typescript_all" ]; then
+  while IFS= read -r forced; do
+    [ -n "$forced" ] && echo "  - every TypeScript suite: $forced is imported by no suite"
+  done <<EOF
+$typescript_all
+EOF
   # Tracked and not-yet-added alike: a suite written for this change is often
   # not staged yet, and a suite nobody lists is a suite nobody runs.
   suites="$({ git ls-files -- 'components/*.test.ts' 'config/*.test.ts'
               git ls-files --others --exclude-standard -- 'components/*.test.ts' \
                                                             'config/*.test.ts'
             } | sort -u)"
-  while IFS= read -r suite; do
-    [ -n "$suite" ] || continue
-    # `git ls-files` reads the index, and a file removed with `rm` is still
-    # listed there. Naming it would hand the runner a path that is not present.
-    [ -f "$suite" ] || continue
-    add "$python scripts/typescript-suite.py --suite $suite"
-  done <<EOF
+else
+  suites="$(picked ts-suite)"
+fi
+while IFS= read -r suite; do
+  [ -n "$suite" ] || continue
+  printf '%s\n' "$suite" | grep -qE '^(components|config)/[A-Za-z0-9_.-]+\.test\.ts$' \
+    || { echo "test-impact: refusing the suite name $suite" >&2; exit 2; }
+  # `git ls-files` reads the index, and a file removed with `rm` is still
+  # listed there. Naming it would hand the runner a path that is not present.
+  [ -f "$suite" ] || continue
+  add "$python scripts/typescript-suite.py --suite $suite"
+done <<EOF
 $suites
 EOF
+
+# The isolated export round trip: export the tree, then run the exported copy's
+# own checks in it. It runs whole, so it is planned only for a change to what
+# decides the export: the policy files, the exporter, its make fragment and its
+# suite. A new file the allowlist misses is caught by the full run on main.
+if has '^public-export/|^scripts/public-export\.py$|^make/export\.mk$|^tests/test_public_export\.py$'; then
+  echo "  - the export round trip: the change touches what decides the export"
+  add "make test-export-roundtrip"
 fi
 
-# Named rather than left out: this suite runs under the host's own test kit,
+# The format check reads every source file and instruction table, takes under a
+# second, and is the one check a documentation change can fail, so any change
+# plans it.
+if [ -n "$changed" ]; then
+  add "make doc-format"
+fi
+
+# Named rather than left out: these suites run under the host's own test kit,
 # which plain node cannot load, and a selection that drops what it cannot run
 # without saying so is the failure this file exists to fix.
 if has '^plugins/llm-fleet/'; then
   echo "  - plugins/llm-fleet runs through the host's test kit; CI covers it (make test-pane)"
 fi
+while IFS= read -r note; do
+  [ -n "$note" ] && echo "  - documentation no test reads: $note"
+done <<EOF
+$(picked docs)
+EOF
 
 # The header is printed only over a plan. An empty selection is stated as one,
 # and a header standing over no commands reads as a plan that came out empty,

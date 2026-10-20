@@ -26,6 +26,7 @@ public-export/assets.txt
 .cits/test-impact.sh
 scripts/public-export.py
 scripts/test-report.py
+scripts/test-select.py
 scripts/check-doc-format.py
 scripts/statusline-demo.py
 scripts/typescript-suite.py
@@ -115,10 +116,14 @@ plugins/llm-fleet/readers/doctor.py
 plugins/llm-fleet/readers/setup.py
 plugins/llm-fleet/readers/snapshot.py
 plugins/llm-fleet/readers/alerts.py
+plugins/llm-fleet/readers/rates.py
+plugins/llm-fleet/readers/pacer.py
+plugins/llm-fleet/readers/rate_cards.py
 plugins/llm-fleet/readers/custom.py
 plugins/llm-fleet/readers/events.py
 tests/test_impact_override.py
 tests/test_test_report.py
+tests/test_test_select.py
 tests/test_typescript_report.py
 tests/test_public_export.py
 tests/test_publication.py
@@ -144,6 +149,10 @@ tests/test_reader_snapshot.py
 tests/test_reader_host.py
 tests/test_reader_transcript.py
 tests/test_reader_agents.py
+tests/test_reader_rates.py
+tests/test_reader_pacer.py
+tests/test_rate_cards.py
+tests/fixtures/rate-cards/*
 tests/test_mutation_check.py
 scripts/mutation-check.py
 mutation/mutants.json

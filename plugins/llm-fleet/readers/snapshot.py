@@ -34,10 +34,12 @@ from readers.events import read_events
 from readers.load import read_load
 from readers.prs import read_prs
 from readers.progress import read_progress
+from readers.rates import start_refresh
 from readers.roster import keep_job_states, load_job_states, read_providers
 from readers.session import read_session
 from readers.skills import read_skills
 from readers.governance import read_governance
+from readers.pacer import read_pacer
 from readers.trials import read_trials
 from readers.worktrees import read_worktrees
 
@@ -52,6 +54,7 @@ READERS: dict[str, Callable[..., dict[str, Any]]] = {
     "session": read_session,
     "custom": read_custom,
     "governance": read_governance,
+    "pacer": read_pacer,
 }
 
 
@@ -60,7 +63,7 @@ def failed(document: str, reason: str) -> dict[str, Any]:
     state_keys = {"roster": "jobs", "trials": "running", "progress": "runs", "prs": "prs",
                   "skills": "items", "worktrees": "worktrees", "load": "processes",
                   "session": "parameters", "custom": "sections", "events": "events",
-                  "governance": "scopes"}
+                  "governance": "scopes", "pacer": "slots"}
     body: dict[str, Any] = {"state": "failed", state_keys[document]: [],
                             "errors": [{"source": document, "reason": reason}]}
     if document == "roster":
@@ -312,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="probe every worktree now rather than answer from the cache")
     parser.add_argument("--settings", action="store_true",
                         help="print the configuration's parts alone and run no reader")
+    parser.add_argument("--refresh-rates", action="store_true",
+                        help="start a refresh of the rate cards beside this read when one is due")
     parser.add_argument("--session", default="", help="this session's identifier")
     parser.add_argument("--model", default="", help="the model this session runs")
     args = parser.parse_args(argv)
@@ -338,6 +343,14 @@ def main(argv: list[str] | None = None) -> int:
                              session_id=args.session, model=args.model)
     json.dump(snapshot, sys.stdout, indent=2 if args.pretty else None, sort_keys=False)
     sys.stdout.write("\n")
+    sys.stdout.flush()
+    if args.refresh_rates and not args.settings:
+        # Started after the reading is printed and never waited for: the next
+        # read prices from what it keeps.
+        try:
+            start_refresh(config, args.config, args.now if args.now is not None else time.time())
+        except Exception:  # a refresh that cannot start leaves the kept rates
+            pass
     return 0
 
 

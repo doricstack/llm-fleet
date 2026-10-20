@@ -21,12 +21,12 @@ import { test } from "node:test";
 import { elementTypes, renderedText } from "../plugins/llm-fleet/components/layout.ts";
 import { recordingPrimitives } from "../plugins/llm-fleet/components/mount.ts";
 import { SECTIONS } from "../plugins/llm-fleet/components/options.ts";
-import { AFTER_PAINT_MS, AHEAD_SECONDS, CLAIM_KEY, END_WRITES_MS, COUNTS_KEY, FOLDS_KEY, FRAME_MS, FRESH_WORKTREES, HIDDEN_KEY, LIVE_MS, LOOK_MS,
+import { AFTER_PAINT_MS, AHEAD_SECONDS, CLAIM_KEY, END_WRITES_MS, COUNTS_KEY, FOLDS_KEY, FRAME_MS, FRESH_RATES, FRESH_WORKTREES, HIDDEN_KEY, LIVE_MS, LOOK_MS,
          MARK, PANE, PROGRESS_CLAIM_KEY, READER, READING_KEY, REPLIED_LIMIT, SPEECH_ON_KEY, SPEECH_POLL_MS,
          SETTINGS_MS, SETTINGS_ONLY, STALE_SECONDS, TAB_HELPER, TIPS_KEY, alertConfigFrom, repliedLimitFrom,
-         CLOCK_MS, STREAM_MS, needsSessionRead, notPlaced,
+         CLOCK_MS, STREAM_MS, needsSessionRead, notPlaced, sectionOfKey, PACER_ARM_MS,
          register } from "../plugins/llm-fleet/hooks/llm-fleet.ts";
-import { BAND_DISMISS, BAND_GOVERNANCE, BAND_SPEAK, BAND_TOGGLE }
+import { BAND_DISMISS, BAND_GOVERNANCE, BAND_PACER, BAND_SPEAK, BAND_TOGGLE }
   from "../plugins/llm-fleet/components/band.ts";
 import type { CommandEvent, Engine, Next, On, PromptHintEvent, RenderEvent, StartupEvent }
   from "../plugins/llm-fleet/hooks/engine.ts";
@@ -34,7 +34,7 @@ import type { CommandEvent, Engine, Next, On, PromptHintEvent, RenderEvent, Star
 // Every whole read names the session and the model it is drawn for: a routed
 // session's spend lives in a file the status line keeps for that session, and
 // the read is what prices it.
-const READ_ARGV = ["--pretty", "--session", "stub-session", "--model", "stub-model"];
+const READ_ARGV = ["--pretty", "--refresh-rates", "--session", "stub-session", "--model", "stub-model"];
 
 type Calls = {
   commands: string[];
@@ -132,7 +132,7 @@ type Stub = {
 const TITLES: Record<string, string> = {
   prs: "Pull requests", sessions: "Background sessions", trials: "Trials", running: "Running",
   session: "This session", worktrees: "Worktrees", skills: "Skills", warnings: "Warnings",
-  keys: "Keys", load: "Load", governance: "Governance",
+  keys: "Keys", load: "Load", governance: "Governance", pacer: "Pacer",
 };
 /**
  * The sections a reading with nothing wrong in it draws, in pane order: the
@@ -160,6 +160,8 @@ const OUTPUT = {
   skills: { state: "empty" }, worktrees: { state: "empty" },
   governance: { state: "ready", governor: true, controller: true, source: "config",
                 path: "/tmp/switch.json", updated_at: null, by: null, errors: [] },
+  pacer: { state: "ready", enabled: true, switchSource: "missing", slotCount: 2,
+           slots: [{ slot: 0, busy: false }, { slot: 1, busy: false }], errors: [] },
 };
 
 /**
@@ -2920,7 +2922,9 @@ test("a press on the band's governance switch runs the switch and draws where it
       governance = { ...governance, governor: true, controller: true };
       return { exitCode: 0, stdout: JSON.stringify(governance) };
     }
-    return { exitCode: 0, stdout: JSON.stringify({ ...OUTPUT, governance }) };
+    // A machine without pacer, where the governance switch keeps the gear.
+    return { exitCode: 0, stdout: JSON.stringify({ ...OUTPUT, governance,
+                                                    pacer: { state: "disabled", errors: [] } }) };
   } });
   await driven.start();
   await drain();
@@ -2929,6 +2933,231 @@ test("a press on the band's governance switch runs the switch and draws where it
   await drain();
   assert.deepEqual(ran[0], ["--set", "both", "--on"]);
   assert.equal(governanceWord(await driven.band()), "⚙ Gov on");
+});
+
+test("pacer takes the band's gear; a press switches it and draws pacer's own answer", async () => {
+  let pacer: Record<string, unknown> = {
+    state: "ready", enabled: true, switchSource: "missing", slotCount: 2,
+    slots: [{ slot: 0, busy: false }, { slot: 1, busy: false }], errors: [] };
+  const ran: string[][] = [];
+  let whole = 0;
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("pacer.py")) {
+      ran.push(argv.slice(2));
+      pacer = { ...pacer, enabled: argv.includes("on"), switchSource: "file" };
+      return { exitCode: 0, stdout: JSON.stringify(pacer) };
+    }
+    whole += 1;
+    return { exitCode: 0, stdout: JSON.stringify({ ...OUTPUT, pacer }) };
+  } });
+  await driven.start();
+  await drain();
+  const band = await driven.band();
+  assert.equal((buttonAddressing(band, BAND_PACER) as { label?: unknown } | null)?.label,
+               "⚙ Pacer on");
+  assert.equal(buttonAddressing(band, BAND_GOVERNANCE), null);
+  const before = whole;
+  // Switching off lets every heavy run start at once, so the band's first
+  // press only arms it, says so, and asks on the gear itself.
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  assert.deepEqual(ran, []);
+  assert.ok(driven.calls.toasts.some((text) => String(text).includes("press Pacer again")),
+            driven.calls.toasts.join());
+  assert.equal((buttonAddressing(await driven.band(), BAND_PACER) as { label?: unknown })
+    ?.label, "⚙ Pacer off?");
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  assert.deepEqual(ran[0], ["--set", "off"]);
+  // Pacer's own answer is drawn at once, without waiting for the next whole read.
+  assert.equal((buttonAddressing(await driven.band(), BAND_PACER) as { label?: unknown })
+    ?.label, "⚙ Pacer off");
+  assert.equal(whole, before);
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  assert.deepEqual(ran[1], ["--set", "on"]);
+});
+
+test("the pane's pacer row switches pacer off only on a second press", async () => {
+  const ran: string[][] = [];
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("pacer.py")) {
+      ran.push(argv.slice(2));
+      return { exitCode: 0, stdout: JSON.stringify({ state: "ready", enabled: false,
+        switchSource: "file", slotCount: 2, slots: [], errors: [] }) };
+    }
+    return undefined;
+  } });
+  await driven.start();
+  await driven.settle();
+  await driven.render();
+  await driven.press("pacer.switch");
+  await drain();
+  // The first press arms the switch-off and runs nothing.
+  assert.deepEqual(ran, []);
+  const armed = renderedText(await driven.render() as never).join("\n");
+  assert.equal(armed.includes("press again to switch off"), true);
+  await driven.press("pacer.switch");
+  await drain();
+  assert.deepEqual(ran, [["--set", "off"]]);
+});
+
+test("a first press to switch pacer off lapses, and a lapsed one only arms again", async () => {
+  const ran: string[][] = [];
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("pacer.py")) {
+      ran.push(argv.slice(2));
+      return { exitCode: 0, stdout: JSON.stringify({ state: "ready", enabled: false,
+        switchSource: "file", slotCount: 2, slots: [], errors: [] }) };
+    }
+    return undefined;
+  } });
+  await driven.start();
+  await drain();
+  await driven.band();
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  driven.advance(PACER_ARM_MS / 1000 + 1);
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  // The press after the first one lapsed is a new first press, not a confirmation.
+  assert.deepEqual(ran, []);
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  assert.deepEqual(ran, [["--set", "off"]]);
+});
+
+test("pacer held off by the environment refuses the band's press and says why", async () => {
+  const ran: string[][] = [];
+  const reading = { ...OUTPUT, pacer: { state: "ready", enabled: false, switchSource: "env",
+    reason: "PACER=off in the environment", slotCount: 2, slots: [], errors: [] } };
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("pacer.py")) {
+      ran.push(argv.slice(2));
+      return { exitCode: 0, stdout: JSON.stringify(reading.pacer) };
+    }
+    return { exitCode: 0, stdout: JSON.stringify(reading) };
+  } });
+  await driven.start();
+  await drain();
+  await driven.band();
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  // Pacer's switch cannot outvote the environment, so nothing is run.
+  assert.deepEqual(ran, []);
+  assert.ok(driven.calls.toasts.some((text) => String(text).includes(
+    "PACER=off in the environment")), driven.calls.toasts.join());
+  assert.ok(driven.calls.toasts.every((text) => !String(text).includes("press Pacer again")));
+});
+
+test("a pacer switch that never answers says pacer may have moved and reads it again", async () => {
+  let whole = 0;
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("pacer.py")) {
+      throw Object.assign(new Error("the operation was aborted"), { name: "AbortError" });
+    }
+    whole += 1;
+    return { exitCode: 0, stdout: JSON.stringify(OUTPUT) };
+  } });
+  await driven.start();
+  await drain();
+  await driven.band();
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  const looked = driven.calls.gets.filter((key) => key === READING_KEY).length;
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  assert.ok(driven.calls.toasts.some((text) => String(text).includes(
+    "pacer did not answer in time; reading it again")), driven.calls.toasts.join());
+  // The switch may have moved before it was stopped, so the reading is looked at again.
+  assert.ok(driven.calls.gets.filter((key) => key === READING_KEY).length > looked,
+            "the stopped switch did not look at the reading again");
+  assert.ok(whole >= 1);
+});
+
+test("another press while the switch-off is armed puts the arming down", async () => {
+  const ran: string[][] = [];
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("pacer.py")) {
+      ran.push(argv.slice(2));
+      return { exitCode: 0, stdout: JSON.stringify({ state: "ready", enabled: false,
+        switchSource: "file", slotCount: 2, slots: [], errors: [] }) };
+    }
+    return undefined;
+  } });
+  await driven.start();
+  await driven.settle();
+  await driven.render();
+  await driven.press("pacer.switch");
+  await drain();
+  // Any other control the pane drew, pressed between the two.
+  await driven.render();
+  await driven.press("fleet.section.sessions");
+  await driven.press("fleet.section.sessions");
+  await drain();
+  await driven.render();
+  await driven.press("pacer.switch");
+  await drain();
+  assert.deepEqual(ran, []);
+});
+
+test("a press from a row drawn before pacer moved runs nothing", async () => {
+  let enabled = false;
+  const ran: string[][] = [];
+  let whole = 0;
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("pacer.py")) {
+      ran.push(argv.slice(2));
+      return { exitCode: 0, stdout: "{}" };
+    }
+    whole += 1;
+    return { exitCode: 0, stdout: JSON.stringify({ ...OUTPUT, pacer: {
+      state: "ready", enabled, switchSource: "file", slotCount: 2, slots: [], errors: [] } }) };
+  } });
+  await driven.start();
+  await driven.settle();
+  // Drawn while pacer was off: the row offers to switch it on.
+  const drawn = renderedText(await driven.render() as never).join("\n");
+  assert.equal(drawn.includes("press to switch on"), true);
+  // Another session switches it on, and this one reads that before the press.
+  enabled = true;
+  const before = whole;
+  driven.advance(STALE_SECONDS + 1);
+  await driven.band();
+  await drain();
+  assert.ok(whole > before, "no new reading landed before the press");
+  await driven.press("pacer.switch");
+  await drain();
+  assert.deepEqual(ran, []);
+});
+
+test("a refused pacer switch says why and reads the machine again", async () => {
+  let whole = 0;
+  const driven = stub({ answer: (argv) => {
+    if (argv[1]?.endsWith("pacer.py")) {
+      return { exitCode: 1, stdout: JSON.stringify({ state: "failed", errors: [
+        { source: "pacer", reason: "cannot write the switch file" }] }) };
+    }
+    whole += 1;
+    return { exitCode: 0, stdout: JSON.stringify(OUTPUT) };
+  } });
+  await driven.start();
+  await drain();
+  assert.equal((buttonAddressing(await driven.band(), BAND_PACER) as { label?: unknown })
+    ?.label, "⚙ Pacer on");
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  const looked = driven.calls.gets.filter((key) => key === READING_KEY).length;
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  assert.ok(driven.calls.toasts.some((text) => String(text).includes(
+    "cannot write the switch file")), driven.calls.toasts.join());
+  // The word on the gear is not moved by a press that did not move pacer.
+  assert.equal((buttonAddressing(await driven.band(), BAND_PACER) as { label?: unknown })
+    ?.label, "⚙ Pacer on");
+  assert.ok(driven.calls.gets.filter((key) => key === READING_KEY).length > looked,
+            "the refused switch did not look at the reading again");
+  assert.ok(whole >= 1);
 });
 
 test("a press on Speak in one session switches speech in every session", async () => {
@@ -4113,6 +4342,39 @@ test("the machine is read within the configured time, and a worktree probe withi
     && argv[1] === "/plugin/llm-fleet/" + READER && !argv.includes(FRESH_WORKTREES));
   assert.notEqual(plain, -1);
   assert.equal(driven.calls.runTimeouts[plain], 4_000);
+});
+
+test("every whole read asks for the rate cards to be refreshed, and the settings read does not", async () => {
+  // The read starts the refresh only when a card is due and never waits on it,
+  // so asking on each whole read costs nothing when the cards are fresh.
+  const driven = stub({ settings: async () => ({ exitCode: 0,
+                                                  stdout: JSON.stringify({ alerts: { helperMs: 4_000 } }) }) });
+  await driven.start();
+  await drain();
+  driven.advance(STALE_SECONDS + 1);
+  driven.tick(LOOK_MS);
+  await drain();
+  const reads = driven.calls.argv.filter((argv) => argv[1] === "/plugin/llm-fleet/" + READER);
+  const whole = reads.filter((argv) => !argv.includes(SETTINGS_ONLY) && !argv.includes("--only"));
+  assert.ok(whole.length >= 1);
+  assert.ok(whole.every((argv) => argv.includes(FRESH_RATES)));
+  assert.equal(reads.some((argv) => argv.includes(SETTINGS_ONLY) && argv.includes(FRESH_RATES)),
+               false);
+  assert.equal(FRESH_RATES, "--refresh-rates");
+});
+
+test("a band item opens the section its row is drawn in, and an unknown one opens none", () => {
+  assert.equal(sectionOfKey("pacer:web-app:1792490400"), "pacer");
+  assert.equal(sectionOfKey("job:job-a:blocked:1"), "sessions");
+  assert.equal(sectionOfKey("pr:owner/project#9:abc"), "prs");
+  assert.equal(sectionOfKey("run:k:2"), "running");
+  assert.equal(sectionOfKey("trial:k"), "trials");
+  assert.equal(sectionOfKey("skill:x"), null);
+  assert.equal(sectionOfKey("pacers:x"), null);
+  // Every section a key opens is one the pane carries, so the jump lands.
+  for (const key of ["pacer:a:1", "job:a", "pr:a", "run:a", "trial:a"]) {
+    assert.ok(SECTIONS.includes(sectionOfKey(key) as string), key);
+  }
 });
 
 test("a session with no reading learns its read time from the settings before its first read", async () => {

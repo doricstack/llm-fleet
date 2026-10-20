@@ -156,7 +156,17 @@ class FleetDirectoryRules(unittest.TestCase):
         self.assertEqual(missing, [])
 
     def test_the_readme_says_nothing_leaves_the_machine(self):
-        self.assertIn("Nothing leaves your machine through the plugin.", README.read_text(encoding="utf-8"))
+        self.assertIn("Nothing about you or your sessions leaves your machine through the plugin.",
+                      README.read_text(encoding="utf-8"))
+
+    def test_the_readme_discloses_the_rate_card_fetch_and_its_switch(self):
+        # The one request the plugin makes of its own is named, with what it
+        # sends and the setting that stops it, so nobody learns of it from a
+        # firewall prompt.
+        readme = README.read_text(encoding="utf-8")
+        self.assertIn("one network request of its own", readme)
+        self.assertIn("`sources.rates.enabled: false` turns it off", readme)
+        self.assertIn("`records/rate-cards.json`", readme)
 
     def test_the_listing_links_are_https_pages(self):
         # The submit form warns without a privacy policy, and the listing reads

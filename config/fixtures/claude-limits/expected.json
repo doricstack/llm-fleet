@@ -18,6 +18,9 @@
         "enabled": true,
         "claudeLimits": "/fixture/runner/.local/state/llm-fleet/claude-rate-limits.json",
         "state": "ready"
+      },
+      "rates": {
+        "state": "ready"
       }
     },
     "mods": {

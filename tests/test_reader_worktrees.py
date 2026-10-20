@@ -396,6 +396,36 @@ class CleanupCommandTests(WorktreeCase):
                          ["fleet-clean", "--quiet", "cleanup", "--worktree", str(path),
                           "--branch", "feat/one"])
 
+    def test_the_argument_template_places_the_path_and_branch_where_the_command_wants_them(self):
+        # A closer that takes the worktree alone, as `worktree-close.py <path>`.
+        config = {"commands": {"cleanup": ["python3", "$HOME/bin/worktree-close.py"],
+                               "cleanupArgs": ["{path}"]}}
+        line = worktrees.cleanup_command(config, PurePosixPath("/w/two words"), "feat/x",
+                                         platform="posix")
+        self.assertEqual(shlex.split(line)[1:], ["$HOME/bin/worktree-close.py", "/w/two words"])
+        # A template that names no branch offers the line for a worktree with none.
+        self.assertNotEqual(worktrees.cleanup_command(config, PurePosixPath("/w/x"), "",
+                                                      platform="posix"), "")
+        # Only a whole word is a placeholder: text around one is left as written.
+        config["commands"]["cleanupArgs"] = ["--at={path}", "{branch}", "{path}"]
+        line = worktrees.cleanup_command(config, PurePosixPath("/w/a"), "feat/b", platform="posix")
+        self.assertEqual(shlex.split(line)[2:], ["--at={path}", "feat/b", "/w/a"])
+        # A template that uses the branch still needs one.
+        self.assertEqual(worktrees.cleanup_command(config, PurePosixPath("/w/a"), "",
+                                                   platform="posix"), "")
+
+    def test_a_template_that_never_names_the_worktree_offers_nothing(self):
+        # A line that would act on no worktree in particular is not offered.
+        config = {"commands": {"cleanup": ["closer"], "cleanupArgs": ["--sweep"]}}
+        self.assertEqual(worktrees.cleanup_command(config, PurePosixPath("/w/a"), "feat/b",
+                                                   platform="posix"), "")
+
+    def test_without_a_template_the_line_keeps_its_old_shape(self):
+        config = {"commands": {"cleanup": ["fleet-clean"]}}
+        self.assertEqual(shlex.split(worktrees.cleanup_command(
+            config, PurePosixPath("/w/a"), "feat/b", platform="posix")),
+            ["fleet-clean", "cleanup", "--worktree", "/w/a", "--branch", "feat/b"])
+
     def test_the_offered_line_keeps_each_argument_whole_when_pasted(self):
         config = self.config(**{"commands": {"cleanup": ["python3", "$HOME/bin/clean tool.py"]}})
         line = worktrees.cleanup_command(config, PurePosixPath("/w/two words"), "feat/it's",

@@ -79,6 +79,12 @@ CREATE TABLE milestones (change_id INTEGER, session TEXT, created_at REAL, to_st
 
 # Answers every command the readers start with an empty list.
 EMPTY_STUB = "print('[]')\n"
+# Prints the status pacer prints, and accepts on or off as its switch does.
+PACER_STUB = ("import json\n"
+              "print(json.dumps({'enabled': True, 'source': 'missing', 'reason': None,\n"
+              "                  'config': {'slots': 2, 'workers_per_run': 4},\n"
+              "                  'slots': [{'slot': 0, 'busy': False, 'holder': None},\n"
+              "                            {'slot': 1, 'busy': False, 'holder': None}]}))\n")
 CUSTOM_STUB = ("import json\n"
                "print(json.dumps({'summary': 'one row', 'rows': [{'title': 'row'}]}))\n")
 PAYLOAD = {"session_id": "standalone", "model": {"id": "claude-opus-4-6", "display_name": "Opus"},
@@ -298,7 +304,7 @@ def every_source_ran(test: unittest.TestCase, stdout: str) -> None:
     no_failed_source(test, stdout)
     document = json.loads(stdout)
     for name in ("roster", "trials", "progress", "prs", "skills", "worktrees", "session",
-                 "custom"):
+                 "custom", "pacer"):
         test.assertIn(name, document)
         test.assertNotEqual(document[name]["state"], "disabled",
                             "{0} was off, so its reader never ran".format(name))
@@ -307,6 +313,23 @@ def every_source_ran(test: unittest.TestCase, stdout: str) -> None:
 def json_document_any_state(test: unittest.TestCase, stdout: str) -> None:
     """A JSON answer, whatever state it names: a refusal is an answer here."""
     test.assertIsInstance(json.loads(stdout), dict)
+
+
+def default_rate_cards(plugin: Path) -> list[str]:
+    """Every generation the copy's schema gives a rate card by default."""
+    schema = json.loads((plugin / "config" / "schema.json").read_text(encoding="utf-8"))
+    for field in schema["fields"]:
+        if field["path"] == "sources.rates.cards":
+            return sorted(field["default"])
+    raise AssertionError("the schema declares no rate cards")
+
+
+def a_failed_refresh(test: unittest.TestCase, stdout: str) -> None:
+    """A refresh that reached no page keeps what it tried, and fails each card by name."""
+    document = json.loads(stdout)
+    test.assertEqual(document["state"], "ready")
+    test.assertTrue(document["fetched"])
+    test.assertTrue(document["failed"])
 
 
 def json_document(test: unittest.TestCase, stdout: str) -> None:
@@ -359,6 +382,12 @@ class StandalonePluginTests(unittest.TestCase):
                 "skills": {"enabled": True, "directory": str(self.root / "skills")},
                 "worktrees": {"enabled": True, "roots": [str(self.root / "worktrees")]},
                 "statusline": {"enabled": True, "payload": str(payload)},
+                "pacer": {"enabled": True, "command": self.stub("pacer.py", PACER_STUB)},
+                # Every card the defaults name is pointed at a port nothing
+                # listens on, so a refresh runs its whole path and reaches no
+                # network.
+                "rates": {"cards": {generation: "deepseek https://127.0.0.1:9/"
+                                    for generation in default_rate_cards(self.plugin)}},
             },
             "alerts": {"tabTint": {"enabled": False}},
             "pane": {"custom": {"standalone": {"title": "Standalone",
@@ -426,6 +455,19 @@ class StandalonePluginTests(unittest.TestCase):
                      check=lambda test, out: test.assertEqual(json.loads(out)["state"],
                                                               "unconfigured")),
                 Case([*config, "--set", "governor"], codes=(2,), check=json_document_any_state),
+            ],
+            # The status reads only the state folder; the refresh fetches every
+            # card, each refused by the closed port, and keeps the failures.
+            "rates": [
+                Case([*config, "--now", NOW, "--status"], codes=(0,), check=json_document),
+                Case([*config, "--now", NOW, "--refresh"], codes=(0,), check=a_failed_refresh),
+            ],
+            # The stub prints the status pacer prints; a switch is answered by
+            # reading that status again.
+            "pacer": [
+                Case([*config], codes=(0,), check=json_document),
+                Case([*config, "--set", "off"], codes=(0,),
+                     check=lambda test, out: test.assertEqual(json.loads(out)["slotCount"], 2)),
             ],
             "transcript": [
                 Case([*config, "--path", str(self.transcript), "--model", "claude-opus-4-6"],

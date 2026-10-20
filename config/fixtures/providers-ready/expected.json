@@ -25,6 +25,9 @@
           "primary",
           "secondary"
         ]
+      },
+      "rates": {
+        "state": "ready"
       }
     },
     "mods": {

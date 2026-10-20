@@ -33,6 +33,9 @@
         "database": "<FIXTURE>/changes.db",
         "paused_when_exists": "<FIXTURE>/paused",
         "state": "ready"
+      },
+      "rates": {
+        "state": "ready"
       }
     }
   }

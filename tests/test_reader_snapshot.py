@@ -74,7 +74,7 @@ class SnapshotCase(unittest.TestCase):
     def test_every_document_is_present_when_everything_is_off(self):
         result = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0)
         self.assertEqual(sorted(result), ["alerts", "band", "custom", "events", "generated_at",
-                                          "governance", "load", "pane", "progress", "prs", "roster",
+                                          "governance", "load", "pacer", "pane", "progress", "prs", "roster",
                                           "session", "skills", "trials", "worktrees"])
         # Nothing was read, so the digest holds nothing and says which sources
         # it could not see.
@@ -84,7 +84,7 @@ class SnapshotCase(unittest.TestCase):
         # The job roster is on by default, so with no provider home configured it
         # is unavailable rather than switched off; the rest are off by default.
         self.assertEqual(result["roster"]["state"], "unavailable")
-        for name in ("trials", "progress", "prs", "skills", "worktrees", "load", "custom"):
+        for name in ("trials", "progress", "prs", "skills", "worktrees", "load", "pacer", "custom"):
             self.assertEqual(result[name]["state"], "disabled", name)
             self.assertEqual(result[name]["errors"], [], name)
 
@@ -98,7 +98,7 @@ class SnapshotCase(unittest.TestCase):
         # Pull requests lead, and the rest follow by how much they need a
         # person; the warnings come last and keep out of sight while empty.
         self.assertEqual(pane["order"],
-                         ["load", "prs", "sessions", "trials", "running", "session",
+                         ["load", "prs", "sessions", "trials", "running", "session", "pacer",
                           "worktrees", "skills", "warnings", "governance", "keys"])
         self.assertEqual(pane["sections"]["warnings"]["hideWhenEmpty"], True)
         self.assertEqual(pane["sections"]["prs"]["hideWhenEmpty"], False)

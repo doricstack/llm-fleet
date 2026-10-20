@@ -38,11 +38,12 @@ Your prompt
 ## What it does
 
 - Keeps every session and background job in one live pane, with each row's model, step, context use and cost.
+- Prices each session at the rate the host it ran on charges, model by model: a DeepSeek or Kimi session at that provider's own rate card, read once a day from its public pricing page, and a session that switched models with what each one cost. `sources.rates.enabled: false` keeps it to the starter table and makes no request.
 - Marks a row working, waiting or failed, and keeps the figures at the top as controls that narrow the pane to those rows.
 - Draws a band above the prompt carrying what needs you, with each figure opening the pane on its rows.
 - Reaches you with an alert when a job fails or starts waiting.
 - Folds a section by pressing its heading, and opens the rest of a row by pressing its figures.
-- Lets the machine's load, pull requests, worktrees, trials, progress, skill scans and your own command-driven sections join the pane when you switch them on.
+- Lets the machine's load, pull requests, worktrees, trials, progress, a run-slot pacer, skill scans and your own command-driven sections join the pane when you switch them on.
 - Reads one configuration file, refuses a key it does not know by name, and leaves the machine's own details out of the repository.
 - Starts outside commands with your Anthropic and provider API key variables removed from their environment.
 
@@ -60,6 +61,7 @@ The figures at the top are the controls: press one and the pane narrows to those
 | Pull requests | open pull requests with their checks and pages | no |
 | Worktrees | each worktree with its cleanup line | no |
 | Trials and progress | a run's rows and its finished steps against its total | no |
+| Pacer | a run-slot pacer's switch, each slot and who holds it, who waits, and its last runs, read from the command you name | no |
 | Skill scans | each scan with its report command | no |
 | Your own sections | whatever one of your commands prints as rows | no |
 

@@ -25,7 +25,7 @@ import { FOOTER_TEXT } from "../plugins/llm-fleet/components/version.ts";
 import type {
   Group, Row,
 } from "../plugins/llm-fleet/components/layout.ts";
-import type { Snapshot } from "../plugins/llm-fleet/components/state.ts";
+import type { Pacer, Snapshot } from "../plugins/llm-fleet/components/state.ts";
 
 const NOW = 1_700_000_000;
 
@@ -247,6 +247,147 @@ test("the governance section draws one switch per scope, and names what each pre
     confirmingGovernance: "governor" }));
   assert.equal(group(armed, "Governance").rows[0]?.meta[0]?.text,
                "press again to switch off");
+});
+
+/** A ready pacer reading: four slots, one held for ten minutes. */
+function pacerReading(overrides: Partial<Pacer> = {}): Pacer {
+  return {
+    state: "ready", enabled: true, switchSource: "missing", reason: null, version: null,
+    slotCount: 4, workersPerRun: 6,
+    slots: [{ slot: 0, busy: true, pid: 42, repo: "llm-fleet-private", startedAt: NOW - 600 },
+            { slot: 1, busy: false, pid: null, repo: null, startedAt: null },
+            { slot: 2, busy: false, pid: null, repo: null, startedAt: null },
+            { slot: 3, busy: false, pid: null, repo: null, startedAt: null }],
+    waiting: null, recent: null, errors: [],
+    ...overrides,
+  };
+}
+
+function pacerPane(reading: Pacer, extra: Partial<PaneOptions> = {}) {
+  return paneFrom(snapshot({ pacer: reading }), options({ sectionOrder: ["session", "pacer"],
+    sections: { session: { visible: true, collapsed: false },
+                pacer: { visible: true, collapsed: false } }, ...extra }));
+}
+
+test("the pacer section sits where the order puts it and draws its switch and slots", () => {
+  const built = pacerPane(pacerReading());
+  assert.deepEqual(built.groups.map((entry) => entry.title), ["This session", "Pacer"]);
+  const section = group(built, "Pacer");
+  assert.deepEqual(section.rows.map((row) => row.title),
+                   ["Pacer", "Slot 1", "Slot 2", "Slot 3", "Slot 4"]);
+  assert.deepEqual(section.rows[0]?.slot.map((slot) => slot.text), ["on"]);
+  // A held slot names the repository and how long it has run; a free one says free.
+  assert.deepEqual(section.rows[1]?.slot.map((slot) => slot.text), ["llm-fleet-private"]);
+  assert.deepEqual(section.rows[1]?.meta.map((slot) => slot.text), ["running 10m"]);
+  assert.equal(section.rows[1]?.state, "working");
+  assert.deepEqual(section.rows[2]?.slot.map((slot) => slot.text), ["free"]);
+  assert.equal(section.rows[2]?.state, undefined);
+  assert.deepEqual(section.summary?.map((slot) => slot.text), ["1 of 4 busy"]);
+});
+
+test("a busy slot whose holder pacer could not name is busy, never free", () => {
+  const section = group(pacerPane(pacerReading({ slots: [
+    { slot: 0, busy: true, pid: null, repo: null, startedAt: null }] })), "Pacer");
+  assert.deepEqual(section.rows[1]?.slot.map((slot) => slot.text), ["held"]);
+  assert.deepEqual(section.rows[1]?.meta.map((slot) => slot.text), ["holder not named"]);
+  assert.equal(section.rows[1]?.state, "working");
+});
+
+test("waiters pacer did not report draw nothing, and reported ones are counted", () => {
+  const silent = group(pacerPane(pacerReading()), "Pacer");
+  assert.equal(silent.rows.some((row) => row.title === "Waiting"), false);
+  const none = group(pacerPane(pacerReading({ waiting: [] })), "Pacer");
+  assert.equal(none.rows.some((row) => row.title === "Waiting"), false);
+  assert.deepEqual(none.summary?.map((slot) => slot.text), ["1 of 4 busy", "  none waiting"]);
+  const two = group(pacerPane(pacerReading({ waiting: [
+    { pid: 7, repo: "web-app", since: NOW - 30 },
+    { pid: 8, repo: "shared-tools", since: NOW - 300 }] })), "Pacer");
+  const row = two.rows.find((entry) => entry.title === "Waiting");
+  assert.deepEqual(row?.slot.map((slot) => slot.text), ["2 callers"]);
+  // The longest wait is what a person needs: who has been held, and for how long.
+  assert.deepEqual(row?.meta.map((slot) => slot.text), ["shared-tools waiting 5m"]);
+  assert.equal(row?.state, "waiting");
+  assert.deepEqual(two.summary?.map((slot) => slot.text), ["1 of 4 busy", "  2 waiting"]);
+});
+
+test("recent runs draw newest first, with a refusal and a failure each said plainly", () => {
+  const section = group(pacerPane(pacerReading({ recent: [
+    { at: NOW - 60, repo: "shared-tools", waitSeconds: 12, runSeconds: 300, exit: 0, slot: 2,
+      mode: "on", reason: null },
+    { at: NOW - 120, repo: "web-app", waitSeconds: 0, runSeconds: null, exit: 75, slot: null,
+      mode: "refused", reason: "memory pressure" },
+    { at: NOW - 180, repo: "fleet", waitSeconds: 3, runSeconds: 40, exit: 1, slot: 1,
+      mode: "on", reason: null },
+    { at: NOW - 240, repo: "old", waitSeconds: 0, runSeconds: 5, exit: 0, slot: 0,
+      mode: "on", reason: null }] })), "Pacer");
+  const runs = section.rows.filter((row) => row.key?.startsWith("pacer.run:"));
+  assert.deepEqual(runs.map((row) => row.title), ["shared-tools", "web-app", "fleet"]);
+  assert.deepEqual(runs.map((row) => row.slot.map((slot) => slot.text).join("")),
+                   ["passed", "refused", "exit 1"]);
+  assert.deepEqual(runs.map((row) => row.state), [undefined, "failed", "failed"]);
+  assert.deepEqual(runs[0]?.meta.map((slot) => slot.text), ["waited 12s, ran 5m, 1m ago"]);
+  assert.deepEqual(runs[1]?.meta.map((slot) => slot.text), ["memory pressure, 2m ago"]);
+  assert.equal(runs[0]?.dim, true);
+});
+
+test("a run the person stopped reads as stopped, dim, never as a failure", () => {
+  const section = group(pacerPane(pacerReading({ recent: [
+    { at: NOW - 60, repo: "fleet", waitSeconds: 0, runSeconds: null, exit: 130, slot: null,
+      mode: "interrupted", reason: null }] })), "Pacer");
+  const runs = section.rows.filter((row) => row.key?.startsWith("pacer.run:"));
+  assert.deepEqual(runs.map((row) => row.slot.map((slot) => slot.text).join("")), ["stopped"]);
+  assert.equal(runs[0]?.state, undefined);
+  assert.equal(runs[0]?.dim, true);
+});
+
+test("pacer switched off says so, and its switch row presses to turn it back on", () => {
+  const pressed: boolean[] = [];
+  const actions = { copy: () => undefined, refuse: () => undefined, reply: () => undefined,
+                    pacer: (on: boolean) => { pressed.push(on); } };
+  const off = group(pacerPane(pacerReading({ enabled: false, switchSource: "file" }),
+                              { actions }), "Pacer");
+  assert.deepEqual(off.rows[0]?.slot.map((slot) => slot.text), ["off"]);
+  assert.deepEqual(off.rows[0]?.meta.map((slot) => slot.text), ["press to switch on"]);
+  assert.deepEqual(off.summary?.map((slot) => slot.text), ["off"]);
+  off.rows[0]?.press?.onPress();
+  assert.deepEqual(pressed, [true]);
+  // Turning pacer off lets every heavy run start at once, so it asks again first.
+  const on = group(pacerPane(pacerReading(), { actions }), "Pacer");
+  assert.deepEqual(on.rows[0]?.meta.map((slot) => slot.text), ["press to switch off"]);
+  const armed = group(pacerPane(pacerReading(), { actions, confirmingPacer: true }), "Pacer");
+  assert.deepEqual(armed.rows[0]?.meta.map((slot) => slot.text), ["press again to switch off"]);
+  armed.rows[0]?.press?.onPress();
+  assert.deepEqual(pressed, [true, false]);
+});
+
+test("a switch read from the environment says so, since a press there moves nothing", () => {
+  // The variable's name is pacer's own setting, so the row says what pacer said.
+  const section = group(pacerPane(pacerReading({ enabled: false, switchSource: "env",
+                                                 reason: "PACE_GATE=0 in the environment" })),
+                        "Pacer");
+  assert.deepEqual(section.rows[0]?.meta.map((slot) => slot.text),
+                   ["off for this shell: PACE_GATE=0 in the environment"]);
+  assert.equal(section.rows[0]?.press, undefined);
+  const unsaid = group(pacerPane(pacerReading({ enabled: false, switchSource: "env",
+                                                reason: null })), "Pacer");
+  assert.deepEqual(unsaid.rows[0]?.meta.map((slot) => slot.text),
+                   ["off for this shell, set in the environment"]);
+});
+
+test("a machine without pacer draws no section, and a failed read draws the failure", () => {
+  for (const state of ["disabled", "unconfigured"] as const) {
+    const built = pacerPane(pacerReading({ state, enabled: null, slots: [] }));
+    assert.equal(built.groups.some((entry) => entry.title === "Pacer"), false, state);
+    assert.equal((built.picker ?? []).some((item) => item.name === "pacer"), false, state);
+  }
+  const older = paneFrom(snapshot(), options({ sectionOrder: ["pacer"],
+    sections: { pacer: { visible: true, collapsed: false } } }));
+  assert.equal(older.groups.some((entry) => entry.title === "Pacer"), false);
+  const failed = group(pacerPane(pacerReading({
+    state: "failed", enabled: null, slotCount: null, slots: [],
+    errors: [{ source: "pacer", reason: "exit 3" }] })), "Pacer");
+  assert.equal(failed.state, "failed");
+  assert.deepEqual(failed.rows, []);
 });
 
 test("a machine with no governance switch draws no switch and no section", () => {
@@ -2352,4 +2493,33 @@ test("a load source that could not be read is named rather than drawn as a quiet
   const drawn = paneFrom(built, options({ sectionOrder: ["load", "warnings"] }));
   assert.equal(group(drawn, "Load").state, "failed");
   assert.equal(group(drawn, "Load").rows.length, 0);
+});
+
+test("a switch pacer did not state offers no press, and an armed press waits only while on", () => {
+  const pressed: boolean[] = [];
+  const actions = { copy: () => undefined, refuse: () => undefined, reply: () => undefined,
+                    pacer: (wanted: boolean) => { pressed.push(wanted); } };
+  const unread = group(pacerPane(pacerReading({ enabled: null }), { actions }), "Pacer");
+  assert.deepEqual(unread.rows[0]?.slot.map((slot) => slot.text), ["not read"]);
+  assert.equal(unread.rows[0]?.press, undefined);
+  // A first press armed while pacer was on means nothing once it reads off.
+  const off = group(pacerPane(pacerReading({ enabled: false }),
+                              { actions, confirmingPacer: true }), "Pacer");
+  assert.deepEqual(off.rows[0]?.meta.map((slot) => slot.text), ["press to switch on"]);
+  off.rows[0]?.press?.onPress();
+  assert.deepEqual(pressed, [true]);
+});
+
+test("a held slot says what pacer could not record about it", () => {
+  const section = group(pacerPane(pacerReading({ slots: [
+    { slot: 0, busy: true, pid: 7, repo: "fleet", startedAt: null },
+    { slot: 1, busy: true, pid: null, repo: null, startedAt: null },
+    { slot: 2, busy: false, pid: null, repo: null, startedAt: null },
+    { slot: 3, busy: false, pid: null, repo: null, startedAt: null }] })), "Pacer");
+  const slots = section.rows.filter((row) => row.key?.startsWith("pacer.slot:"));
+  assert.deepEqual(slots.map((row) => row.slot.map((slot) => slot.text).join("")),
+                   ["fleet", "held", "free", "free"]);
+  assert.deepEqual(slots.slice(0, 2).map((row) => row.meta.map((slot) => slot.text).join("")),
+                   ["start not recorded", "holder not named"]);
+  assert.deepEqual(slots.map((row) => row.state), ["working", "working", undefined, undefined]);
 });

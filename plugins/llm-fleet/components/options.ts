@@ -20,8 +20,8 @@ import { THEME, themeFrom, type Theme } from "./palette.ts";
 
 /** The sections the pane carries, in the order a reader meets them. */
 export const SECTIONS = [
-  "load", "prs", "sessions", "trials", "running", "session", "worktrees", "skills", "warnings",
-  "governance", "keys",
+  "load", "prs", "sessions", "trials", "running", "session", "pacer", "worktrees", "skills",
+  "warnings", "governance", "keys",
 ];
 
 /**

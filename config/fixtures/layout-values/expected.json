@@ -16,6 +16,9 @@
       },
       "agents": {
         "state": "unconfigured"
+      },
+      "rates": {
+        "state": "ready"
       }
     },
     "mods": {

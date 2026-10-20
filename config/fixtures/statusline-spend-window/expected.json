@@ -19,6 +19,9 @@
         "sessionCosts": "/fixture/runner/state/statusline",
         "spendSeconds": 7200,
         "state": "ready"
+      },
+      "rates": {
+        "state": "ready"
       }
     },
     "mods": {

@@ -32,6 +32,9 @@
         "providers": [
           "primary"
         ]
+      },
+      "rates": {
+        "state": "ready"
       }
     },
     "mods": {

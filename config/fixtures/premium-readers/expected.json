@@ -16,6 +16,9 @@
       },
       "prs": {
         "checkRunLimit": 0
+      },
+      "rates": {
+        "state": "ready"
       }
     },
     "mods": {

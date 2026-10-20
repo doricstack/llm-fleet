@@ -65,8 +65,8 @@ def custom_row(entry: Any, limit: int) -> dict[str, Any] | None:
     }
 
 
-def _run(argv: list[str], environment: Mapping[str, str], timeout: float,
-         max_bytes: int) -> tuple[Any, str | None]:
+def run_bounded_json(argv: list[str], environment: Mapping[str, str], timeout: float,
+                     max_bytes: int) -> tuple[Any, str | None]:
     """The parsed output of one command, or the reason there is none."""
     try:
         completed = subprocess.run(argv, capture_output=True, env=dict(environment),
@@ -101,7 +101,7 @@ def read_section(key: str, section: Mapping[str, Any],
     if resolved is None:
         document["errors"].append({"source": source, "reason": command[0] + " is not on PATH"})
         return document
-    output, reason = _run(resolved, child, float(section["timeoutSeconds"]), max_bytes)
+    output, reason = run_bounded_json(resolved, child, float(section["timeoutSeconds"]), max_bytes)
     if reason is None and (not isinstance(output, Mapping) or not isinstance(output.get("rows"), list)):
         reason = "output had no rows list"
     if reason is not None:

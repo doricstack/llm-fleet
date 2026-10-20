@@ -347,7 +347,9 @@ class TranscriptCase(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(result.stdout)
         self.assertEqual(document["pricePerMTok"], 2)
-        self.assertEqual(document["savedUsd"], 1.8)
+        # A Sonnet 5.5 cache hit is a twentieth of input, $0.10, as Anthropic's
+        # rate card lists it: a million read saves 2 - 0.1.
+        self.assertEqual(document["savedUsd"], 1.9)
 
     def test_the_command_prices_a_fable_session_at_the_fable_rates(self):
         # The family the retired statusline map never had: priced at the

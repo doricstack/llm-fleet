@@ -117,6 +117,62 @@ test("a cost is drawn in the words its source allows", () => {
   assert.equal(spentText({ state: "ready", costUsd: 2, costSource: "floor" }), "at least $2.00");
 });
 
+test("a card says where its model's rates came from", () => {
+  const live = drawn([job(ready({ rates: { state: "live", checkedAt: NOW - 3_600 } }))]);
+  assert.equal(live.includes("live rates"), true);
+  const kept = drawn([job(ready({ rates: { state: "cached", checkedAt: NOW - 2 * 86_400,
+                                           reason: "the page answered 503" } }))]);
+  assert.equal(kept.includes("rates 2d old"), true);
+  assert.equal(kept.includes("live rates"), false);
+  const table = drawn([job(ready({ rates: { state: "table", checkedAt: null,
+                                            reason: "live rates are switched off" } }))]);
+  assert.equal(table.includes("table rates"), true);
+  // No account at all says nothing about the rates rather than guess one.
+  const none = drawn([job(ready())]);
+  assert.equal(/live rates|table rates|rates \S+ old/.test(none), false);
+});
+
+test("a rate account the reader did not write whole is dropped", () => {
+  const [one] = jobsOf([job(ready({ rates: { state: "live", checkedAt: "yesterday" } }))]);
+  assert.equal(one.agent?.rates, undefined);
+  const [two] = jobsOf([job(ready({ rates: { state: "guessed", checkedAt: null } }))]);
+  assert.equal(two.agent?.rates, undefined);
+  const [three] = jobsOf([job(ready({ rates: { state: "cached", checkedAt: NOW - 60,
+                                               reason: "the page answered 503" } }))]);
+  assert.deepEqual(three.agent?.rates, { state: "cached", checkedAt: NOW - 60,
+                                         reason: "the page answered 503" });
+});
+
+test("a session that ran several models says what each one cost", () => {
+  const text = drawn([job(ready({ costUsd: 4.4, costSource: "estimate", models: [
+    { model: "claude-opus-5-5", turns: 3, costUsd: 4 },
+    { model: "deepseek-flash", turns: 9, costUsd: 0.3 },
+    { model: "vendorx-large", turns: 1, costUsd: null },
+  ] }))]);
+  assert.equal(text.includes(
+    "by model: opus 5.5 ~$4.00 · deepseek-flash ~$0.30 · vendorx-large not priced"),
+  true);
+  // One model: the card's own figure is that model's cost, and no split is drawn.
+  const one = drawn([job(ready({ models: [{ model: "claude-opus-5-5", turns: 3, costUsd: 4 }] }))]);
+  assert.equal(one.includes("by model"), false);
+});
+
+test("a per-model row the reader did not write whole is dropped", () => {
+  const [one] = jobsOf([job(ready({ models: [
+    { model: "deepseek-flash", turns: 2, costUsd: 0.3,
+      rates: { state: "live", checkedAt: NOW - 60 } },
+    { model: "claude-opus-5-5", turns: "many", costUsd: 4 },
+    { model: "vendorx-large", turns: 1, costUsd: -1 },
+    { model: "vendorx-small", turns: 1 },
+    { model: "", turns: 1, costUsd: null },
+  ] }))]);
+  assert.deepEqual(one.agent?.models, [
+    { model: "deepseek-flash", turns: 2, costUsd: 0.3,
+      rates: { state: "live", checkedAt: NOW - 60 } },
+    { model: null, turns: 1, costUsd: null },
+  ]);
+});
+
 test("a model nobody priced draws no cost, never a nought", () => {
   const text = drawn([job(ready({ costUsd: undefined, costSource: undefined,
                                   model: "deepseek-flash", contextWindow: undefined }))]);

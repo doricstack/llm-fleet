@@ -21,7 +21,7 @@ export { money };
 import type {
   AgentFigures, Governance, Job, Load, LoadProcess, Progress, PullRequest, PullRequests, Roster,
   Run, SessionFigures, SkillItem, Skills, Snapshot, SpendSeries, Trial, Trials, Worktree,
-  Worktrees, Change, CustomRow, CustomSection } from "./state.ts";
+  Worktrees, Change, CustomRow, CustomSection, Pacer, PacerRun, PacerSlot } from "./state.ts";
 
 /** The prefix a section a person added is named by in the order. */
 export const CUSTOM_PREFIX = "custom:";
@@ -130,6 +130,11 @@ export type PaneActions = {
    * which scope is armed is `confirmingGovernance`.
    */
   governance?: (scope: GovernanceScope) => void;
+  /**
+   * Switch pacer on or off. Switching it off is called once to arm the press
+   * and again to make it; `confirmingPacer` says it is armed.
+   */
+  pacer?: (wanted: boolean) => void;
 };
 
 /** The two scopes the machine's governance switch carries, which the pane can move. */
@@ -248,6 +253,8 @@ export type PaneOptions = {
    * away, so the row asks again and this is what says it is asking.
    */
   confirmingGovernance?: GovernanceScope | null;
+  /** Whether pacer's switch-off is waiting for the press that confirms it. */
+  confirmingPacer?: boolean;
 };
 
 /** The three states a headline figure narrows the pane to. */
@@ -392,6 +399,7 @@ const DEFAULT_TITLES: Record<string, string> = {
   skills: "Skills",
   load: "Load",
   governance: "Governance",
+  pacer: "Pacer",
   warnings: "Warnings",
   keys: "Keys",
 };
@@ -712,6 +720,51 @@ export function spentText(agent: AgentFigures): string | null {
   return agent.costSource === "estimate" && !figure.startsWith("~") ? "~" + figure : figure;
 }
 
+/**
+ * What a card's cost was priced from: the provider's card read now, one kept
+ * from an earlier read with its age, or the shipped table. Null when the read
+ * carried no account, which says nothing rather than guess.
+ */
+export function ratesText(agent: AgentFigures, now: number): string | null {
+  const account = agent.rates;
+  if (!account) {
+    return null;
+  }
+  if (account.state === "live") {
+    return "live rates";
+  }
+  if (account.state === "cached" && account.checkedAt !== null) {
+    // The age in its largest whole unit: the card says how stale, not to the minute.
+    const age = Math.max(0, now - account.checkedAt);
+    const unit = age >= 86_400 ? Math.floor(age / 86_400) + "d"
+      : age >= 3_600 ? Math.floor(age / 3_600) + "h" : Math.max(1, Math.floor(age / 60)) + "m";
+    return "rates " + unit + " old";
+  }
+  return "table rates";
+}
+
+/**
+ * What each model a session ran cost, when it ran more than one: each at its
+ * own model's rate, dearest first, and a model no rate prices said to be so
+ * rather than drawn as nothing. Null for a session on one model, whose card
+ * figure already is that model's cost.
+ */
+export function modelSplitText(agent: AgentFigures): string | null {
+  const rows = agent.models ?? [];
+  if (rows.length < 2) {
+    return null;
+  }
+  const parts = rows.map((row) => {
+    const name = row.model ? modelName(row.model) : "unnamed model";
+    if (row.costUsd === null) {
+      return name + " not priced";
+    }
+    const figure = money(row.costUsd);
+    return name + " " + (figure.startsWith("~") ? figure : "~" + figure);
+  });
+  return "by model: " + parts.join(" · ");
+}
+
 /** Every token a session's turns moved: what it sent, wrote and read from the cache, and wrote back. */
 export function tokensOf(agent: AgentFigures): number | null {
   const counts = agent.tokens;
@@ -808,6 +861,17 @@ function agentRow(job: Job, agent: AgentFigures, options: PaneOptions): Row {
   if (elapsed !== null) {
     add({ text: durationOf(elapsed * 1000) });
   }
+  // Last, so a narrow card cuts it first: what the cost was priced from.
+  const rates = ratesText(agent, options.now);
+  if (rates !== null) {
+    add({ text: rates, dim: true });
+  }
+  // A session that ran more than one model says what each cost, on a line of
+  // its own under the reply lines, so the card's one figure is not read as one
+  // model's spend.
+  const split = modelSplitText(agent);
+  const lines = split === null ? base.lines
+    : [...(base.lines ?? []), { slots: [{ text: split, dim: true }] }];
   const question = shown(job.needs);
   const phase = steps?.phase ? shown(steps.phase).text : "";
   // The step in hand is the bar's own label when there is a list to count it in;
@@ -825,6 +889,7 @@ function agentRow(job: Job, agent: AgentFigures, options: PaneOptions): Row {
     title: title ? title.text : base.title,
     meta,
     figures,
+    lines,
     slot: title?.masked && !base.slot.some((slot) => slot.text.includes(MASK))
       ? [...base.slot, { text: " \u00b7 " + MASK, dim: true }] : base.slot,
     detail: detail || undefined,
@@ -2383,6 +2448,128 @@ function governanceGroup(document: Governance | undefined,
   return sectionGroup("governance", rows, state, held, options);
 }
 
+/** The key a pacer row is addressed by. */
+export const PACER_PREFIX = "pacer.";
+/** How many of pacer's recent runs the section draws. */
+const PACER_RUNS = 3;
+/** The address of pacer's switch row, which the entry keeps armed across one press. */
+export const PACER_SWITCH = PACER_PREFIX + "switch";
+
+/** Pacer's own switch, as a row a person can press. */
+function pacerSwitchRow(document: Pacer, options: PaneOptions): Row {
+  const on = document.enabled;
+  const key = PACER_SWITCH;
+  const word = on === true ? "on" : on === false ? "off" : "not read";
+  const slot: Slot[] = [{ text: word, ...(on === true ? { color: "success" as const }
+    : on === false ? { color: "warning" as const } : { dim: true }) }];
+  // A switch the environment set holds for one shell only: the file a press
+  // writes is not what decided it, so no press is offered.
+  if (document.switchSource === "env") {
+    const why = document.reason === null ? ", set in the environment"
+      : ": " + shown(document.reason).text;
+    return { key, title: "Pacer", slot,
+             meta: [{ text: (on ? "on" : "off") + " for this shell" + why, dim: true }] };
+  }
+  const armed = options.confirmingPacer === true && on === true;
+  const does = armed ? "press again to switch off"
+    : on === true ? "press to switch off" : "press to switch on";
+  const row: Row = { key, title: "Pacer", slot,
+                     meta: [{ text: does, ...(armed ? { color: "warning" as const }
+                                                    : { dim: true }) }] };
+  const act = options.actions?.pacer;
+  if (act !== undefined && on !== null) {
+    row.press = { key, label: on ? "Turn pacer off" : "Turn pacer on",
+                  onPress: () => act(on ? false : true) };
+  }
+  return row;
+}
+
+/** One slot: the repository holding it and for how long, or free. */
+function pacerSlotRow(slot: PacerSlot, now: number): Row {
+  const key = PACER_PREFIX + "slot:" + slot.slot;
+  const title = "Slot " + (slot.slot + 1);
+  if (!slot.busy) {
+    return { key, title, meta: [], slot: [{ text: "free", dim: true }] };
+  }
+  // The lock says busy; the text inside it says who. A slot held by somebody
+  // pacer could not name is still held.
+  const holder = slot.repo === null ? null : shown(slot.repo).text;
+  const meta: Slot[] = slot.startedAt === null
+    ? [{ text: holder === null ? "holder not named" : "start not recorded", dim: true }]
+    : [{ text: "running " + durationText(now - slot.startedAt), dim: true }];
+  return { key, title, state: "working", meta, slot: [{ text: holder ?? "held" }] };
+}
+
+/** One finished run: passed, refused, stopped by a signal, or the exit it failed with. */
+function pacerRunRow(run: PacerRun, index: number, now: number): Row {
+  const refused = run.mode === "refused";
+  const stopped = run.mode === "interrupted";
+  const passed = (run.exit === 0 && !refused) || stopped;
+  const word = refused ? "refused" : stopped ? "stopped" : passed ? "passed" : "exit " + run.exit;
+  const said: string[] = [];
+  if (run.reason !== null) {
+    said.push(shown(run.reason).text);
+  } else {
+    if (run.waitSeconds !== null) {
+      said.push("waited " + durationText(run.waitSeconds));
+    }
+    if (run.runSeconds !== null) {
+      said.push("ran " + durationText(run.runSeconds));
+    }
+  }
+  said.push(ageText(now - run.at));
+  return {
+    key: PACER_PREFIX + "run:" + index + ":" + run.at,
+    title: run.repo === null ? "a run" : shown(run.repo).text,
+    ...(passed ? { dim: true } : { state: "failed" }),
+    meta: [{ text: said.join(", "), dim: true }],
+    slot: [{ text: word, ...(passed ? { dim: true } : { color: "error" as const }) }],
+  };
+}
+
+/**
+ * The machine's run slots, as pacer reports them, drawn below this session.
+ *
+ * A machine whose configuration names no pacer draws no section: the tooling
+ * is the owner's. A field pacer did not report draws nothing rather than a
+ * nought, because nobody waiting and nobody counted are different answers.
+ */
+function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | undefined {
+  if (document === undefined || document.state === "disabled"
+      || document.state === "unconfigured") {
+    return undefined;
+  }
+  const state = groupState(document.state);
+  if (state !== "ready") {
+    return sectionGroup("pacer", [], state, [], options);
+  }
+  const rows: Row[] = [pacerSwitchRow(document, options)];
+  rows.push(...document.slots.map((slot) => pacerSlotRow(slot, options.now)));
+  const waiting = document.waiting;
+  if (waiting !== null && waiting.length > 0) {
+    const longest = waiting.reduce((first, caller) => caller.since < first.since ? caller : first);
+    rows.push({ key: PACER_PREFIX + "waiting", title: "Waiting", state: "waiting",
+                meta: [{ text: (longest.repo === null ? "" : shown(longest.repo).text + " ")
+                         + "waiting " + durationText(options.now - longest.since), dim: true }],
+                slot: [{ text: waiting.length + (waiting.length === 1 ? " caller" : " callers") }] });
+  }
+  const runs = [...(document.recent ?? [])].sort((first, second) => second.at - first.at)
+    .slice(0, PACER_RUNS);
+  rows.push(...runs.map((run, index) => pacerRunRow(run, index, options.now)));
+  const summary: Slot[] = [];
+  if (document.enabled === false) {
+    summary.push({ text: "off" });
+  } else {
+    const busy = document.slots.filter((slot) => slot.busy).length;
+    summary.push({ text: busy + " of " + (document.slotCount ?? document.slots.length) + " busy" });
+    if (waiting !== null) {
+      summary.push({ text: "  " + (waiting.length === 0 ? "none" : waiting.length) + " waiting",
+                     dim: waiting.length === 0 });
+    }
+  }
+  return sectionGroup("pacer", rows, state, summary, options);
+}
+
 /**
  * What this pane's keys do, and the tips the configuration carries with them.
  *
@@ -2439,6 +2626,10 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   const governed = governanceGroup(snapshot.governance, options);
   if (governed !== undefined) {
     built.governance = [governed];
+  }
+  const paced = pacerGroup(snapshot.pacer, options);
+  if (paced !== undefined) {
+    built.pacer = [paced];
   }
   for (const name of options.sectionOrder) {
     if (name.startsWith(CUSTOM_PREFIX)) {

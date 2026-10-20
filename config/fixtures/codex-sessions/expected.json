@@ -18,6 +18,9 @@
         "enabled": true,
         "codexSessions": "/fixture/runner/.codex/sessions",
         "state": "ready"
+      },
+      "rates": {
+        "state": "ready"
       }
     },
     "mods": {

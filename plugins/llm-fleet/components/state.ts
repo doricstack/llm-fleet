@@ -31,6 +31,24 @@ export type FanEntry = {
  * to read whole, or from a subagent transcript nobody could read, so they are
  * less than the session spent, never more. `reason` names which.
  */
+/** What a model was priced from, and when its card was read, in epoch seconds. */
+export type RateAccount = {
+  state: "live" | "cached" | "table";
+  checkedAt: number | null;
+  reason?: string;
+};
+
+/**
+ * One model a session ran: its turns, and their cost at that model's own rate,
+ * or null when no rate prices it. `model` is null for turns no record named.
+ */
+export type ModelSpend = {
+  model: string | null;
+  turns: number;
+  costUsd: number | null;
+  rates?: RateAccount;
+};
+
 export type AgentFigures = {
   state: ReaderState | "unavailable";
   reason?: string;
@@ -48,6 +66,14 @@ export type AgentFigures = {
    * record that covers part of the session and the estimate.
    */
   costSource?: "host" | "estimate" | "floor";
+  /**
+   * Where the model's rates came from: its provider's card read within the
+   * allowed age, a card kept from an earlier read whose page failed since, or
+   * the shipped table. Absent when the read carried no account.
+   */
+  rates?: RateAccount;
+  /** Each model the session and its subagents ran, dearest first. */
+  models?: ModelSpend[];
   lowerBound?: boolean;
   /** The session's first turn, when the transcript was read from its start. */
   firstActivity?: number | null;
@@ -429,6 +455,52 @@ export type Load = {
  * layer draws is one the reader read: a file that could not be read is failed
  * and carries no scope at all, rather than the tool's own "both on" default.
  */
+/** One of pacer's machine-wide run slots. */
+export type PacerSlot = {
+  slot: number;
+  /** The lock decides this, so a busy slot may name nobody. */
+  busy: boolean;
+  pid: number | null;
+  repo: string | null;
+  /** Epoch seconds the holder took the slot, when it said. */
+  startedAt: number | null;
+};
+
+/** A caller blocked on a slot. */
+export type PacerWaiter = { pid: number | null; repo: string | null; since: number };
+
+/** A run pacer recorded when it ended. */
+export type PacerRun = {
+  at: number;
+  repo: string | null;
+  waitSeconds: number | null;
+  runSeconds: number | null;
+  exit: number;
+  slot: number | null;
+  /** on, off, nested, refused, failopen or interrupted, as pacer wrote it. */
+  mode: string | null;
+  reason: string | null;
+};
+
+/** The machine's run slots, as pacer's own status reports them. */
+export type Pacer = {
+  state: ReaderState;
+  /** Whether pacer is on; absent when nothing was read. */
+  enabled: boolean | null;
+  /** Where the switch's answer came from: missing, file, corrupt or env. */
+  switchSource: string | null;
+  reason: string | null;
+  version: number | null;
+  slotCount: number | null;
+  workersPerRun: number | null;
+  slots: PacerSlot[];
+  /** Null when pacer did not report its waiters, which is not nobody waiting. */
+  waiting: PacerWaiter[] | null;
+  /** Null when pacer did not report its runs. */
+  recent: PacerRun[] | null;
+  errors: ReaderError[];
+};
+
 export type Governance = {
   state: ReaderState;
   /** Whether each scope is on, absent when the document was not a reading. */
@@ -495,6 +567,8 @@ export type Snapshot = {
   custom: Custom;
   /** The machine's governor and controller switch; absent from a reading taken before it was read. */
   governance?: Governance;
+  /** Pacer's run slots; absent from a reading taken before they were read. */
+  pacer?: Pacer;
   /** The digest's events; absent from a reading taken before they were read, or a part of one. */
   events?: Events;
 };

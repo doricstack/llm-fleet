@@ -38,6 +38,8 @@ export const BAND_DISMISS = "fleet.band.dismiss";
 export const BAND_SPEAK = "fleet.band.speak";
 /** The address of the machine's governance switch, when the machine has one. */
 export const BAND_GOVERNANCE = "fleet.band.governance";
+/** The address of pacer's switch, which takes the gear on a machine that runs pacer. */
+export const BAND_PACER = "fleet.band.pacer";
 /** The address of a press on one of the band's figures, before the state it names. */
 export const BAND_FOCUS = "fleet.band.focus.";
 /** The address of a press on the item the band leads with. */
@@ -88,6 +90,17 @@ export function governanceLabel(governor: boolean | null, controller: boolean | 
     : governor === false && controller === false ? "off"
     : governor === null || controller === null ? "not read" : "mixed";
   return icons(surface).governance + " " + (short ? "" : "Gov ") + word;
+}
+
+/**
+ * Pacer's switch word, after the gear: on, off, or not read when pacer did not
+ * say, and "off?" while a first press to switch it off waits for the second.
+ */
+export function pacerLabel(enabled: boolean | null, surface?: string, short = false,
+                           confirming = false): string {
+  const word = enabled === true ? (confirming ? "off?" : "on")
+    : enabled === false ? "off" : "not read";
+  return icons(surface).governance + " " + (short ? "" : "Pacer ") + word;
 }
 
 /** One thing the band can lead with, under a key that names it across readings. */
@@ -160,7 +173,7 @@ export function hiddenLimitFrom(documents: unknown): number | null {
 
 /** The source each kind of band item comes from, by the head of its key. */
 const KEY_SOURCES: Record<string, string> = {
-  job: "roster", trial: "trials", run: "progress", pr: "prs", skill: "skills",
+  job: "roster", trial: "trials", run: "progress", pr: "prs", skill: "skills", pacer: "pacer",
 };
 
 /** The source a band key belongs to, or null for a key no source makes. */
@@ -178,7 +191,13 @@ function keySource(key: string): string | null {
 export function answeredSources(snapshot: Snapshot): Set<string> {
   const answered = new Set<string>();
   for (const name of Object.values(KEY_SOURCES)) {
-    const document = snapshot[name as keyof Snapshot] as { state?: string; errors?: unknown[] };
+    // A reading taken before a source existed carries no document for it, and
+    // such a source has not answered.
+    const document = snapshot[name as keyof Snapshot] as
+      { state?: string; errors?: unknown[] } | undefined;
+    if (document === undefined) {
+      continue;
+    }
     if ((document.state === "ready" || document.state === "empty")
         && (document.errors ?? []).length === 0) {
       answered.add(name);
@@ -261,6 +280,20 @@ export function bandItems(snapshot: Snapshot, dismissed: readonly string[],
                     text: said(run.label || run.display) + ": " + run.failed + " failed" });
     }
   }
+  // A run pacer refused, or one that failed while pacer held its slot. A run
+  // made with pacing off failed on its own terms and is not pacer's to raise,
+  // and one the person stopped did not fail.
+  for (const run of snapshot.pacer?.recent ?? []) {
+    const refused = run.mode === "refused";
+    if (!refused && (run.exit === 0 || run.mode === "off" || run.mode === "interrupted")) {
+      continue;
+    }
+    const where = said(run.repo ?? "a repository");
+    errors.push({ key: "pacer:" + (run.repo ?? "") + ":" + run.at, level: "error",
+                  text: refused
+                    ? "Pacer refused a run in " + where + (run.reason ? ": " + said(run.reason) : "")
+                    : "Run failed in " + where + ": exit " + run.exit });
+  }
   for (const pull of snapshot.prs.prs) {
     if (pull.checks === "fail") {
       errors.push({ key: "pr:" + pull.repo + "#" + (pull.number ?? "") + ":" + pull.head,
@@ -329,6 +362,12 @@ export type BandInput = {
   onSpeak?: () => unknown;
   onGovernance?: () => unknown;
   /**
+   * Pacer's switch, drawn only on a machine that runs pacer, where it takes
+   * the gear in place of the governance switch it replaces.
+   */
+  pacer?: { enabled: boolean | null; confirming?: boolean } | null;
+  onPacer?: () => unknown;
+  /**
    * Open the pane, narrowed to one of the figures, or to the whole fleet.
    *
    * The band is on screen while the pane is shut, which is when a person reads
@@ -379,16 +418,28 @@ export function bandTree(input: BandInput): Node {
     parts.push(button(BAND_SPEAK, word, input.onSpeak, speaking));
     used += PART_GAP + word.length + BUTTON_CHROME;
   }
-  // The governance switch sits beside the voice's, and only while the machine
+  // The machine's switch sits beside the voice's, and only while the machine
   // has one: a person who does not run that tooling never sees the button.
-  const governing = input.governance !== undefined && input.governance !== null
+  // Pacer takes the gear where it runs; the governance switch it replaces is
+  // drawn only on a machine without pacer.
+  const pacing = input.pacer !== undefined && input.pacer !== null
+    && input.onPacer !== undefined;
+  const governing = !pacing && input.governance !== undefined && input.governance !== null
     && input.onGovernance !== undefined;
-  let governanceAt = -1;
-  if (governing) {
-    const word = governanceLabel(input.governance?.governor ?? null,
-                                 input.governance?.controller ?? null, input.surface);
-    governanceAt = parts.length;
-    parts.push(button(BAND_GOVERNANCE, word, input.onGovernance as () => unknown));
+  const gear: { key: string; press: () => unknown; label: (short: boolean) => string } | null =
+    pacing ? { key: BAND_PACER, press: input.onPacer as () => unknown,
+               label: (short) => pacerLabel(input.pacer?.enabled ?? null, input.surface, short,
+                                            input.pacer?.confirming === true) }
+    : governing ? { key: BAND_GOVERNANCE, press: input.onGovernance as () => unknown,
+                    label: (short) => governanceLabel(input.governance?.governor ?? null,
+                                                      input.governance?.controller ?? null,
+                                                      input.surface, short) }
+    : null;
+  let gearAt = -1;
+  if (gear !== null) {
+    const word = gear.label(false);
+    gearAt = parts.length;
+    parts.push(button(gear.key, word, gear.press));
     used += PART_GAP + word.length + BUTTON_CHROME;
   }
   const figures: [number, string, Color, "working" | "waiting" | "failed"][] =
@@ -437,12 +488,10 @@ export function bandTree(input: BandInput): Node {
     parts[1] = button(BAND_SPEAK, short, input.onSpeak, speaking);
     used -= full.length - short.length;
   }
-  if (governanceAt >= 0 && used + dismissWidth > input.width) {
-    const full = governanceLabel(input.governance?.governor ?? null,
-                                 input.governance?.controller ?? null, input.surface);
-    const short = governanceLabel(input.governance?.governor ?? null,
-                                  input.governance?.controller ?? null, input.surface, true);
-    parts[governanceAt] = button(BAND_GOVERNANCE, short, input.onGovernance as () => unknown);
+  if (gear !== null && gearAt >= 0 && used + dismissWidth > input.width) {
+    const full = gear.label(false);
+    const short = gear.label(true);
+    parts[gearAt] = button(gear.key, short, gear.press);
     used -= full.length - short.length;
   }
   const room = input.width - used - PART_GAP - dismissWidth;

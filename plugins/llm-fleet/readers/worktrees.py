@@ -401,6 +401,13 @@ WINDOWS_PLAIN = re.compile(r"[A-Za-z0-9_./\\:~-]+")
 CLEANUP_BY_HAND = "clean this worktree up by hand: its name holds characters the shell would read"
 
 
+# The words a cleanup line fills in, and the arguments it takes when the
+# configuration names none: the change controller's own shape.
+PATH_WORD = "{path}"
+BRANCH_WORD = "{branch}"
+CLEANUP_ARGS = ("cleanup", "--worktree", PATH_WORD, "--branch", BRANCH_WORD)
+
+
 def cleanup_command(config: Mapping[str, Any], path: Path, branch: str,
                     platform: str | None = None) -> str:
     """The cleanup action for a worktree, as configured, or nothing at all.
@@ -412,10 +419,14 @@ def cleanup_command(config: Mapping[str, Any], path: Path, branch: str,
     argument is plain, and nothing is offered otherwise.
     """
     command = config["commands"]["cleanup"]
-    if not command or not branch:
+    template = config["commands"].get("cleanupArgs") or CLEANUP_ARGS
+    # A placeholder is a whole word; a line that never names the worktree acts
+    # on none in particular, and one that names a branch needs one to name.
+    if not command or PATH_WORD not in template or (BRANCH_WORD in template and not branch):
         return ""
-    arguments = [*[str(part) for part in command], "cleanup", "--worktree", str(path),
-                 "--branch", branch]
+    filled = {PATH_WORD: str(path), BRANCH_WORD: branch}
+    arguments = [*[str(part) for part in command],
+                 *[filled.get(word, word) for word in template]]
     if (platform or PLATFORM) == "nt":
         if all(WINDOWS_PLAIN.fullmatch(argument) for argument in arguments):
             return " ".join(arguments)

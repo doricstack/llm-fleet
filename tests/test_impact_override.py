@@ -36,6 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = ROOT / ".cits" / "test-impact.sh"
+FILE_SELECTOR = ROOT / "scripts" / "test-select.py"
 PLAN_HEADER = "--- plan ---"
 NONE_AFFECTED = "nothing affected -> no tests to run"
 
@@ -61,6 +62,8 @@ def recorder_makefile() -> str:
     """
     interpreter = shlex.quote(sys.executable)
     return (f"test-report:\n\t@{interpreter} scripts/record.py test-report\n"
+            f"doc-format:\n\t@{interpreter} scripts/record.py doc-format\n"
+            f"test-export-roundtrip:\n\t@{interpreter} scripts/record.py test-export-roundtrip\n"
             f"test-ci:\n\t@{interpreter} scripts/record.py test-ci\n"
             f"\t@{interpreter} scripts/typescript-suite.py --suite components/one.test.ts\n")
 
@@ -150,6 +153,32 @@ def run_selector(*args: str, cwd: Path | None = None,
     return subprocess.run([working_shell(), str(SELECTOR), *args], cwd=str(cwd or ROOT),
                           capture_output=True, text=True, check=False,
                           env=env or clean_environment())
+
+
+class WorkflowTests(unittest.TestCase):
+    """The pull request job hands the selection a base it can measure from."""
+
+    def setUp(self) -> None:
+        self.text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    def test_the_checkout_holds_the_whole_history(self) -> None:
+        # `cond && 0 || 1` is always 1: 0 is false in a workflow expression, so
+        # the first pull request run checked out one commit and had no base.
+        code = "\n".join(line for line in self.text.splitlines()
+                         if not line.lstrip().startswith("#"))
+        self.assertRegex(code, r"(?m)^\s+fetch-depth: 0$")
+        self.assertNotRegex(code, r"&&\s*0\s*\|\|")
+
+    def test_the_selection_reads_the_base_the_checkout_fetched(self) -> None:
+        code = "\n".join(line for line in self.text.splitlines()
+                         if not line.lstrip().startswith("#"))
+        # The checkout keeps no credential, so a later fetch of a private
+        # repository fails to authenticate; the whole-history checkout holds
+        # every branch already.
+        self.assertIn("persist-credentials: false", code)
+        self.assertNotIn("git fetch", code)
+        self.assertIn('--base "origin/$BASE_REF" --require-change', code)
+        self.assertIn("BASE_REF: ${{ github.base_ref }}", code)
 
 
 class SelectorContractTests(unittest.TestCase):
@@ -347,22 +376,42 @@ class SelectionTests(unittest.TestCase):
         (self.root / ".cits").mkdir()
         shutil.copy2(SELECTOR, self.root / ".cits" / "test-impact.sh")
         os.chmod(self.root / ".cits" / "test-impact.sh", 0o755)
-        for made in ("components", "config", "scripts", "docs", "tests",
-                     "plugins/llm-fleet/components"):
+        for made in ("components", "config", "scripts", "docs", "tests", "public-export",
+                     "plugins/llm-fleet/components", "plugins/llm-fleet/config"):
             (self.root / made).mkdir(parents=True, exist_ok=True)
-        (self.root / "components" / "one.test.ts").write_text("// suite\n", encoding="utf-8")
-        (self.root / "config" / "loader.test.ts").write_text("// suite\n", encoding="utf-8")
-        (self.root / "scripts" / "typescript-suite.py").write_text("", encoding="utf-8")
-        (self.root / "tests" / "test_thing.py").write_text("", encoding="utf-8")
-        (self.root / "docs" / "notes.md").write_text("notes\n", encoding="utf-8")
-        (self.root / "Makefile").write_text("test:\n\t@true\n", encoding="utf-8")
-        (self.root / "plugins" / "llm-fleet" / "components" / "widget.ts").write_text(
-            "export const widget = 1;\n", encoding="utf-8")
+        # The file-level selector the plan reads is the real one, copied in, so
+        # a case reads the selection a clone of this repository would make.
+        shutil.copy2(FILE_SELECTOR, self.root / "scripts" / "test-select.py")
+        self.write("components/one.test.ts", "// suite\n")
+        self.write("config/loader.ts", 'export const SCHEMA_NAME = "schema.json";\n')
+        self.write("config/loader.test.ts", 'import { SCHEMA_NAME } from "./loader.ts";\n')
+        self.write("plugins/llm-fleet/config/schema.json", "{}\n")
+        self.write("scripts/typescript-suite.py", "")
+        self.write("scripts/drift-check.py", "")
+        self.write("scripts/public-export.py", "")
+        self.write("public-export/allowlist.txt", "README.md\n")
+        self.write("tests/sandbox.py", "")
+        self.write("tests/test_thing.py", "")
+        self.write("tests/test_config.py",
+                   "from pathlib import Path\n"
+                   "import sandbox\n"
+                   "ROOT = Path(__file__).resolve().parents[1]\n"
+                   "SCHEMA = ROOT / 'plugins' / 'llm-fleet' / 'config' / 'schema.json'\n")
+        self.write("tests/test_drift_check.py",
+                   "from pathlib import Path\n"
+                   "ROOT = Path(__file__).resolve().parent.parent\n"
+                   "SCRIPT = ROOT / 'scripts' / 'drift-check.py'\n")
+        self.write("docs/notes.md", "notes\n")
+        self.write("Makefile", "test:\n\t@true\n")
+        self.write("plugins/llm-fleet/components/widget.ts", "export const widget = 1;\n")
         self.git("init", "-q")
         self.git("config", "user.email", "impact@example.invalid")
         self.git("config", "user.name", "Impact Test")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "fixture")
+
+    def write(self, relative: str, body: str) -> None:
+        (self.root / relative).write_text(body, encoding="utf-8")
 
     def git(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["git", "-C", str(self.root), *args],
@@ -430,7 +479,7 @@ class SelectionTests(unittest.TestCase):
         result = run_selector("--tier", "commit", "--repo", str(self.root), "--dry-run",
                               cwd=self.root)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("make test-report", " ".join(self.planned_commands(result.stdout)))
+        self.assertIn("--file tests/test_new.py", " ".join(self.planned_commands(result.stdout)))
 
     def test_a_new_typescript_suite_that_is_not_added_yet_is_selected(self) -> None:
         (self.root / "components" / "two.test.ts").write_text("// new\n", encoding="utf-8")
@@ -452,21 +501,124 @@ class SelectionTests(unittest.TestCase):
         # The schema lives in the plugin folder, which an install copies, and
         # both loaders read it: a contract change there that planned neither
         # loader's suite would land unchecked.
-        schema = self.root / "plugins" / "llm-fleet" / "config" / "schema.json"
-        schema.parent.mkdir(parents=True)
-        schema.write_text("{}\n", encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", "schema")
         result = self.plan_for("plugins/llm-fleet/config/schema.json")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         planned = " ".join(self.planned_commands(result.stdout))
-        self.assertIn("make test-report", planned)
+        self.assertIn("--file tests/test_config.py", planned)
         self.assertIn("--suite config/loader.test.ts", planned)
+        self.assertNotIn("make test-report", planned)
 
-    def test_a_changed_python_file_plans_the_python_suite(self) -> None:
+    def test_a_changed_test_file_plans_that_file_alone(self) -> None:
+        # The lane selection this replaced ran the whole Python suite here: more
+        # than a thousand tests for one changed file.
         result = self.plan_for("tests/test_thing.py")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        planned = self.planned_commands(result.stdout)
+        self.assertRegex(planned[0], r"^PYTHONDONTWRITEBYTECODE=1 python3? scripts/test-report\.py "
+                                     r"--directory tests --file tests/test_thing\.py$")
+        self.assertEqual(planned[1:], ["make doc-format"])
+
+    def test_a_changed_script_plans_only_the_test_that_names_it(self) -> None:
+        result = self.plan_for("scripts/drift-check.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        planned = self.planned_commands(result.stdout)
+        self.assertEqual(len(planned), 2, result.stdout)
+        self.assertTrue(planned[0].endswith(
+            "scripts/test-report.py --directory tests --file tests/test_drift_check.py"), planned)
+        self.assertEqual(planned[1], "make doc-format")
+
+    def test_a_changed_suite_helper_plans_the_whole_python_suite_and_says_why(self) -> None:
+        result = self.plan_for("tests/sandbox.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("make test-report", self.planned_commands(result.stdout))
+        self.assertNotIn("--file", result.stdout)
+        self.assertIn("the whole Python suite: tests/sandbox.py", result.stdout)
+
+    def test_a_file_no_test_reaches_plans_the_whole_suite_and_names_it(self) -> None:
+        self.write("scripts/orphan.py", "")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "orphan")
+        result = self.plan_for("scripts/orphan.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("make test-report", self.planned_commands(result.stdout))
+        self.assertIn("the whole Python suite: scripts/orphan.py", result.stdout)
+
+    def test_a_change_to_the_export_policy_plans_the_round_trip(self) -> None:
+        result = self.plan_for("public-export/allowlist.txt")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("make test-export-roundtrip", self.planned_commands(result.stdout))
+
+    def test_a_change_elsewhere_plans_no_round_trip(self) -> None:
+        result = self.plan_for("scripts/drift-check.py")
+        self.assertNotIn("test-export-roundtrip", result.stdout)
+
+    def test_a_deleted_file_a_test_names_plans_that_test(self) -> None:
+        self.git("rm", "-q", "scripts/drift-check.py")
+        result = run_selector("--tier", "commit", "--repo", str(self.root), "--dry-run",
+                              cwd=self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("--file tests/test_drift_check.py",
+                      " ".join(self.planned_commands(result.stdout)))
+
+    def test_a_base_that_does_not_resolve_is_refused_rather_than_read_as_no_change(self) -> None:
+        # A renamed base branch or a failed fetch must not pass a pull request
+        # that ran nothing.
+        result = run_selector("--tier", "push", "--base", "origin/no-such-branch",
+                              "--repo", str(self.root), "--dry-run", cwd=self.root)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("origin/no-such-branch", result.stderr)
+        self.assertNotIn("no tests to run", result.stdout)
+        # The commit tier diffs the index against its base directly, with no
+        # merge base to fail first, so the same refusal has to hold there.
+        self.stage_change("tests/test_thing.py")
+        commit = run_selector("--tier", "commit", "--base", "no-such-ref",
+                              "--repo", str(self.root), "--dry-run", cwd=self.root)
+        self.assertEqual(commit.returncode, 2, commit.stdout + commit.stderr)
+        self.assertIn("the base no-such-ref names no commit", commit.stderr)
+
+    def test_a_required_change_that_finds_none_is_refused(self) -> None:
+        base = self.git("rev-parse", "HEAD").stdout.strip()
+        required = run_selector("--tier", "push", "--base", base, "--require-change",
+                                "--repo", str(self.root), "--dry-run", cwd=self.root)
+        self.assertEqual(required.returncode, 2, required.stdout + required.stderr)
+        self.assertIn("no change", required.stderr)
+        # Without the flag a branch with nothing new is still nothing to run.
+        plain = run_selector("--tier", "push", "--base", base, "--repo", str(self.root),
+                             "--dry-run", cwd=self.root)
+        self.assertEqual(plain.returncode, 0, plain.stdout + plain.stderr)
+
+    def test_the_selected_files_run_writes_no_bytecode(self) -> None:
+        # The make targets run with PYTHONDONTWRITEBYTECODE=1; a file-level run
+        # that did not would leave caches in the tests and the plugin folder.
+        result = self.plan_for("tests/test_thing.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        planned = self.planned_commands(result.stdout)
+        self.assertTrue(any(command.startswith("PYTHONDONTWRITEBYTECODE=1 ")
+                            and command.endswith("--file tests/test_thing.py")
+                            for command in planned), planned)
+
+    def test_a_rename_on_a_branch_is_read_at_the_push_tier_as_both_paths(self) -> None:
+        # Pushed work is measured from the merge base, and a rename counts as
+        # the path it left as well as the one it took: the test still naming
+        # the old path is the one the change breaks.
+        # One test names the old path and another the new one, so each half of
+        # the rename shows in the plan by the test it selects.
+        self.write("tests/test_drift.py",
+                   "from pathlib import Path\n"
+                   "SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'drift.py'\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "a test for the new name")
+        base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-q", "-b", "work")
+        self.git("mv", "scripts/drift-check.py", "scripts/drift.py")
+        self.git("commit", "-q", "-m", "rename")
+        result = run_selector("--tier", "push", "--base", base, "--repo", str(self.root),
+                              "--dry-run", cwd=self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        planned = self.planned_commands(result.stdout)
+        self.assertTrue(planned[0].endswith("--file tests/test_drift.py "
+                                            "--file tests/test_drift_check.py"), planned)
+        self.assertNotIn("make test-report", planned)
 
     def test_a_report_destination_is_passed_to_the_python_run(self) -> None:
         # A gate reads a report, and a report is only written where it is asked
@@ -481,7 +633,7 @@ class SelectionTests(unittest.TestCase):
         planned = " ".join(self.planned_commands(result.stdout))
         # The plan runs the suite plainly; the destination travels in the
         # environment, which the recording cases below read.
-        self.assertIn("make test-report", planned)
+        self.assertIn("--file tests/test_thing.py", planned)
         self.assertNotIn(str(destination), result.stdout)
 
     def install_recorders(self) -> Path:
@@ -495,11 +647,13 @@ class SelectionTests(unittest.TestCase):
         recorder = (
             "import json, os, sys\n"
             "with open(os.environ['STUB_LOG'], 'a', encoding='utf-8') as handle:\n"
-            "    handle.write(json.dumps({'argv': sys.argv[1:],\n"
+            "    handle.write(json.dumps({'program': os.path.basename(sys.argv[0]),\n"
+            "        'argv': sys.argv[1:],\n"
             "        'folder': os.environ.get('FLEET_TS_JUNIT_DIR', ''),\n"
             "        'report': os.environ.get('FLEET_JUNIT_XML', '')}) + '\\n')\n")
         (self.root / "scripts" / "typescript-suite.py").write_text(recorder, encoding="utf-8")
         (self.root / "scripts" / "record.py").write_text(recorder, encoding="utf-8")
+        (self.root / "scripts" / "test-report.py").write_text(recorder, encoding="utf-8")
         (self.root / "Makefile").write_text(recorder_makefile(), encoding="utf-8")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "recorders")
@@ -541,12 +695,26 @@ class SelectionTests(unittest.TestCase):
                               env=clean_environment(CITS_JUNIT_DIR=str(folder),
                                                     STUB_LOG=str(log)))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        reports = [entry for entry in self.ran(log) if entry["argv"][:1] == ["test-report"]]
-        self.assertEqual([entry["argv"] for entry in reports], [["test-report"]])
+        reports = [entry for entry in self.ran(log) if entry["program"] == "test-report.py"]
+        self.assertEqual([entry["argv"] for entry in reports],
+                         [["--directory", "tests", "--file", "tests/test_thing.py"]])
         self.assertEqual([entry["report"] for entry in reports],
                          [str(folder) + "/fleet-python.xml"])
         self.assertFalse((self.root / "pwned").exists())
         self.assertFalse((self.root / "pwned2").exists())
+
+    @unittest.skipUnless(working_shell(), "the selection needs a POSIX shell to run make")
+    def test_the_whole_python_suite_is_handed_the_report_path_too(self) -> None:
+        log = self.install_recorders()
+        self.stage_change("tests/sandbox.py")
+        folder = self.root / "reports"
+        result = run_selector("--tier", "commit", "--repo", str(self.root), cwd=self.root,
+                              env=clean_environment(CITS_JUNIT_DIR=str(folder),
+                                                    STUB_LOG=str(log)))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        reports = [entry for entry in self.ran(log) if entry["argv"][:1] == ["test-report"]]
+        self.assertEqual([entry["report"] for entry in reports],
+                         [str(folder) + "/fleet-python.xml"])
 
     def test_the_whole_run_hands_the_folder_to_its_typescript_suites(self) -> None:
         # The full run starts its TypeScript suites from make targets the
@@ -691,13 +859,15 @@ class SelectionTests(unittest.TestCase):
         self.assertNotIn("--suite components/one.test.ts", planned)
         self.assertIn("--suite config/loader.test.ts", planned)
 
-    def test_a_change_no_suite_covers_plans_nothing(self) -> None:
-        # A note is not code. What is left is a stated empty selection rather
-        # than a suite run to fill the silence.
+    def test_documentation_no_test_reads_plans_only_the_format_check(self) -> None:
+        # A note is not code, and no suite is run to fill the silence; the
+        # format check is the one check a note can fail.
         self.stage_change("docs/notes.md")
         result = run_selector("--tier", "commit", "--repo", str(self.root), "--dry-run",
                               cwd=self.root)
-        self._assert_nothing_planned(result)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.planned_commands(result.stdout), ["make doc-format"])
+        self.assertIn("documentation no test reads: docs/notes.md", result.stdout)
 
     def test_nothing_staged_plans_nothing(self) -> None:
         result = run_selector("--tier", "commit", "--repo", str(self.root), "--dry-run",

@@ -126,6 +126,52 @@ class FiguresTests(AgentCase):
         self.transcript([turn("m1"), cost_state(1.5, unknown=True)])
         self.assertEqual(self.read()["costSource"], "floor")
 
+    def test_a_non_claude_session_priced_from_its_card_does_not_take_the_hosts_figure(self):
+        # The host prices a model it does not know at a table of its own and
+        # says so; for a DeepSeek session that read about eighty-eight times the
+        # bill. A rate for the model's own card is the better figure.
+        self.transcript([turn("m1", model="deepseek-flash", input_tokens=1_000_000,
+                              output=1_000_000), cost_state(6.47, unknown=True)])
+        figures = self.read()
+        self.assertEqual(figures["costSource"], "estimate")
+        self.assertAlmostEqual(figures["costUsd"], 0.3 + 1.2)
+
+    def test_a_claude_model_under_a_cloud_prefix_is_still_claude(self):
+        # A gateway's identifier for a Claude model is Claude: the host's figure
+        # for it is not a guess at another vendor's tokens, so it is not set aside.
+        self.transcript([turn("m1", model="anthropic/claude-opus-5-5",
+                              input_tokens=1_000_000, output=0),
+                         cost_state(50.0, unknown=True)])
+        figures = self.read()
+        self.assertEqual((figures["costUsd"], figures["costSource"]), (50.0, "floor"))
+
+    def test_a_non_claude_session_with_no_rate_keeps_the_hosts_floor(self):
+        self.transcript([turn("m1", model="vendorx-large"), cost_state(2.0, unknown=True)])
+        figures = self.read()
+        self.assertEqual((figures["costUsd"], figures["costSource"]), (2.0, "floor"))
+
+    def test_a_non_claude_session_the_host_priced_whole_keeps_the_hosts_figure(self):
+        # Only a figure the host says it could not price is set aside.
+        self.transcript([turn("m1", model="deepseek-flash"), cost_state(1.5)])
+        figures = self.read()
+        self.assertEqual((figures["costUsd"], figures["costSource"]), (1.5, "host"))
+
+    def test_the_card_names_where_its_rates_came_from(self):
+        self.transcript([turn("m1", model="deepseek-flash")])
+        agents_group = dict(self.config["sources"]["agents"])
+        agents_group["rateCards"] = {"deepseek-flash": {"state": "live", "checkedAt": 1.8e9},
+                                     "opus-5-5": {"state": "table", "checkedAt": None,
+                                                  "reason": "the card has not been read yet"}}
+        config = dict(self.config)
+        config["sources"] = dict(self.config["sources"], agents=agents_group)
+        self.assertEqual(self.read(config)["rates"], {"state": "live", "checkedAt": 1.8e9})
+        self.transcript([turn("m1")])
+        self.assertEqual(self.read(config)["rates"]["state"], "table")
+
+    def test_a_card_with_no_rate_account_says_nothing_about_its_rates(self):
+        self.transcript([turn("m1", model="deepseek-flash")])
+        self.assertNotIn("rates", self.read())
+
     def test_a_host_record_without_its_start_is_a_floor(self):
         self.transcript([turn("m1"), {"type": "cost-state", "totalCostUSD": 1.5,
                                       "hasUnknownModelCost": False}])
@@ -162,7 +208,7 @@ class FiguresTests(AgentCase):
         self.assertEqual(self.read()["state"], "empty")
 
     def test_a_model_outside_the_priced_families_has_no_cost(self):
-        self.transcript([turn("m1", model="deepseek-flash")])
+        self.transcript([turn("m1", model="vendorx-large")])
         figures = self.read()
         self.assertEqual(figures["state"], "ready")
         self.assertNotIn("costUsd", figures)
@@ -311,7 +357,7 @@ class FiguresTests(AgentCase):
         self.assertNotIn("costUsd", figures)
 
     def test_one_unpriced_turn_leaves_the_whole_session_unpriced(self):
-        self.transcript([turn("m1"), turn("m2", model="deepseek-flash")])
+        self.transcript([turn("m1"), turn("m2", model="vendorx-large")])
         self.assertNotIn("costUsd", self.read())
 
     def test_context_is_the_last_main_turn_against_the_family_window(self):
@@ -420,6 +466,63 @@ class SubagentTests(AgentCase):
             + "\n", encoding="utf-8")
         return path
 
+    def test_each_model_a_session_ran_is_priced_and_shown_at_its_own_rate(self):
+        # A session that moved from DeepSeek to Opus and ran a Haiku subagent:
+        # every turn at the rate of the model that ran it, and the card says
+        # how much each model spent, dearest first.
+        self.transcript([turn("m1", model="deepseek-flash", input_tokens=1_000_000, output=0),
+                         turn("m2", model="claude-opus-5-5", input_tokens=1_000_000,
+                              output=0)])
+        self.subagent("a1", [turn("s1", model="claude-haiku-5-5", input_tokens=1_000_000,
+                                  output=0)])
+        figures = self.read()
+        self.assertEqual(figures["model"], "claude-opus-5-5")
+        self.assertAlmostEqual(figures["costUsd"], 0.3 + 4 + 0.1)
+        self.assertEqual(figures["models"], [
+            {"model": "claude-opus-5-5", "turns": 1, "costUsd": 4.0},
+            {"model": "deepseek-flash", "turns": 1, "costUsd": 0.3},
+            {"model": "claude-haiku-5-5", "turns": 1, "costUsd": 0.1}])
+
+    def test_a_model_no_rate_prices_is_unpriced_in_the_split_and_listed_last(self):
+        self.transcript([turn("m1", model="vendorx-large"),
+                         turn("m2", model="claude-opus-5-5", input_tokens=1_000_000,
+                              output=0)])
+        figures = self.read()
+        self.assertNotIn("costUsd", figures)
+        self.assertEqual(figures["models"], [
+            {"model": "claude-opus-5-5", "turns": 1, "costUsd": 4.0},
+            {"model": "vendorx-large", "turns": 1, "costUsd": None}])
+
+    def test_the_host_guess_is_set_aside_when_any_model_was_not_claude(self):
+        # The session ended on Opus, but a DeepSeek turn earlier is what the
+        # host could not price: its figure is still a guess at that turn.
+        self.transcript([turn("m1", model="deepseek-flash", input_tokens=1_000_000, output=0),
+                         turn("m2", model="claude-opus-5-5", input_tokens=1_000_000,
+                              output=0),
+                         cost_state(80.0, unknown=True)])
+        figures = self.read()
+        self.assertEqual(figures["costSource"], "estimate")
+        self.assertAlmostEqual(figures["costUsd"], 4.3)
+
+    def test_a_subagent_on_another_vendor_makes_the_host_figure_a_guess(self):
+        self.transcript([turn("m1", input_tokens=1_000_000, output=0),
+                         cost_state(50.0, unknown=True)])
+        self.subagent("a1", [turn("s1", model="deepseek-flash", input_tokens=1_000_000,
+                                  output=0)])
+        figures = self.read()
+        self.assertEqual(figures["costSource"], "estimate")
+        self.assertAlmostEqual(figures["costUsd"], 4.3)
+
+    def test_each_model_in_the_split_names_where_its_rate_came_from(self):
+        self.transcript([turn("m1", model="deepseek-flash"), turn("m2")])
+        agents_group = dict(self.config["sources"]["agents"])
+        agents_group["rateCards"] = {"deepseek-flash": {"state": "live", "checkedAt": 1.8e9}}
+        config = dict(self.config)
+        config["sources"] = dict(self.config["sources"], agents=agents_group)
+        split = {row["model"]: row for row in self.read(config)["models"]}
+        self.assertEqual(split["deepseek-flash"]["rates"], {"state": "live", "checkedAt": 1.8e9})
+        self.assertNotIn("rates", split["claude-opus-5-5"])
+
     def test_a_subagent_s_turns_are_added_to_the_session_s_figures(self):
         self.transcript([turn("m1", input_tokens=1_000_000, output=0)])
         self.subagent("agent-a1", [turn("s1", input_tokens=1_000_000, output=0)])
@@ -449,7 +552,7 @@ class SubagentTests(AgentCase):
 
     def test_a_subagent_turn_no_rate_prices_leaves_the_session_unpriced(self):
         self.transcript([turn("m1")])
-        self.subagent("agent-a1", [turn("s1", model="deepseek-flash")])
+        self.subagent("agent-a1", [turn("s1", model="vendorx-large")])
         self.assertNotIn("costUsd", self.read())
 
     def test_the_subagent_turns_are_in_the_spend_series_the_cost_is_taken_from(self):
@@ -688,7 +791,7 @@ class SpendSeriesTests(AgentCase):
 
     def test_an_unpriced_turn_in_the_window_leaves_the_series_incomplete(self):
         self.transcript([turn("m1", stamp="2026-10-12T11:00:00Z"),
-                         turn("m2", model="deepseek-flash", stamp="2026-10-12T11:10:00Z")])
+                         turn("m2", model="vendorx-large", stamp="2026-10-12T11:10:00Z")])
         series = self.series()
         self.assertFalse(series["complete"])
         self.assertAlmostEqual(series["total"], 10 * 4 / 1e6 + 5 * 20 / 1e6)
@@ -962,7 +1065,11 @@ class RosterTests(AgentCase):
         rows_file = self.root / "rows.json"
         rows_file.write_text(json.dumps(rows), encoding="utf-8")
         path = self.root / "config.json"
+        # The state folder is named here: from the environment it follows the
+        # platform's own variable (LOCALAPPDATA, XDG_STATE_HOME), not the HOME
+        # set below, and a kept rate card would leak between tests and runs.
         path.write_text(json.dumps({
+            "stateDir": str(self.root / "state"),
             "commands": {"claude": [sys.executable, str(stub), str(rows_file)]},
             "providers": [{"id": "primary", "home": str(self.home)}],
             "sources": {"agents": {"enabled": enabled}},
@@ -995,6 +1102,31 @@ class RosterTests(AgentCase):
         result = roster.read_providers(config, now=1_700_000_100)
         self.assertEqual(len(calls), len(result["jobs"]))
         self.assertLess(len(calls), 12)
+
+    def test_the_roster_prices_each_card_at_the_rates_kept_for_its_model(self):
+        # A refresh kept a DeepSeek rate a third of the shipped one; the card is
+        # drawn at it and says so, and a read reaches no network to get it.
+        self.transcript([turn("m1", model="deepseek-flash", input_tokens=1_000_000,
+                              output=0)])
+        config = self.stub_config([self.row()])
+        records = Path(config["stateDir"]) / "records"
+        records.mkdir(parents=True)
+        (records / "rate-cards.json").write_text(json.dumps({"cards": {"deepseek-flash": {
+            "rates": {"input": 0.1, "cacheRead": 0.002, "output": 0.4},
+            "checkedAt": 1_700_000_000}}}), encoding="utf-8")
+        agent = roster.read_providers(config, now=1_700_000_100)["jobs"][0]["agent"]
+        self.assertAlmostEqual(agent["costUsd"], 0.1)
+        self.assertEqual(agent["rates"], {"state": "live", "checkedAt": 1_700_000_000})
+        # The configuration the caller holds still names the shipped rate.
+        self.assertEqual(config["sources"]["agents"]["inputPricePerMTok"]["deepseek-flash"], 0.3)
+
+    def test_a_roster_read_with_nothing_kept_prices_from_the_table(self):
+        self.transcript([turn("m1", model="deepseek-flash", input_tokens=1_000_000, output=0)])
+        agent = roster.read_providers(self.stub_config([self.row()]),
+                                      now=1_700_000_100)["jobs"][0]["agent"]
+        self.assertAlmostEqual(agent["costUsd"], 0.3)
+        self.assertEqual(agent["rates"]["state"], "table")
+        self.assertEqual(agent["rates"]["reason"], "the card has not been read yet")
 
     def test_a_disabled_source_reads_no_transcript(self):
         self.transcript([turn("m1")])
@@ -1050,7 +1182,11 @@ class RosterSeriesTests(AgentCase):
             # Enabled, but its home is not there: no read reaches it.
             providers.append({"id": "gone", "home": str(self.root / "no-such-home")})
         path = self.root / "config.json"
+        # The state folder is named here: from the environment it follows the
+        # platform's own variable (LOCALAPPDATA, XDG_STATE_HOME), not the HOME
+        # set below, and a kept rate card would leak between tests and runs.
         path.write_text(json.dumps({
+            "stateDir": str(self.root / "state"),
             "commands": {"claude": [sys.executable, str(stub), str(rows_file)]},
             "providers": providers,
             "sources": {"agents": {"enabled": enabled}},

@@ -10,10 +10,10 @@
  */
 
 import type {
-  AgentFigures, FanEntry, Job, JobReply, Lease, Load, LoadProcess, Progress, PullRequest, PullRequests, ReaderState, Roster, Run, SkillItem, Skills,
+  AgentFigures, FanEntry, Job, ModelSpend, RateAccount, JobReply, Lease, Load, LoadProcess, Progress, PullRequest, PullRequests, ReaderState, Roster, Run, SkillItem, Skills,
   SessionFigures, Snapshot, SourceState, Trial, TrialBucket, TrialHistory, Trials, Worktree,
   Worktrees, Change, Custom, CustomRow, CustomSection, CheckRun, DigestEvent, Events, SpendSeries,
-  TimelineSegment, Governance } from "./state.ts";
+  TimelineSegment, Governance, Pacer, PacerRun, PacerSlot, PacerWaiter } from "./state.ts";
 
 export type ReaderDocuments = {
   roster?: unknown;
@@ -27,6 +27,7 @@ export type ReaderDocuments = {
   custom?: unknown;
   events?: unknown;
   governance?: unknown;
+  pacer?: unknown;
 };
 
 const READER_STATES = new Set<ReaderState>([
@@ -153,6 +154,68 @@ function tokenCount(value: unknown): number | undefined {
  * done exceeds its total is no step count, and a cost that is not a finite,
  * non-negative number is no cost. Each absence draws as the words for it.
  */
+/**
+ * A model's rate account as the reader wrote it, or null for one not written whole.
+ *
+ * A card read is dated and a table rate is not; an account claiming either
+ * the other way is dropped rather than drawn as a date nobody read.
+ */
+function rateAccountOf(value: unknown): RateAccount | null {
+  if (!isObject(value)) {
+    return null;
+  }
+  const state = value.state;
+  if (state !== "live" && state !== "cached" && state !== "table") {
+    return null;
+  }
+  const checked = value.checkedAt;
+  const dated = typeof checked === "number" && Number.isFinite(checked) && checked >= 0;
+  if (state === "table" ? checked !== null : !dated) {
+    return null;
+  }
+  const account: RateAccount = { state, checkedAt: dated ? checked : null };
+  if (typeof value.reason === "string" && value.reason) {
+    account.reason = value.reason;
+  }
+  return account;
+}
+
+/**
+ * The per-model split as the reader wrote it, keeping only whole rows.
+ *
+ * A row with no turn count, or a cost that is neither a non-negative number
+ * nor null, is dropped rather than drawn: a null cost is a model no rate
+ * prices, and a missing one would read as free.
+ */
+function modelsOf(value: unknown): ModelSpend[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const rows: ModelSpend[] = [];
+  for (const item of value) {
+    if (!isObject(item)) {
+      continue;
+    }
+    const turns = tokenCount(item.turns);
+    const cost = item.costUsd;
+    const priced = typeof cost === "number" && Number.isFinite(cost) && cost >= 0;
+    if (turns === undefined || (!priced && cost !== null)) {
+      continue;
+    }
+    const row: ModelSpend = {
+      model: typeof item.model === "string" && item.model ? item.model : null,
+      turns,
+      costUsd: priced ? cost : null,
+    };
+    const rates = rateAccountOf(item.rates);
+    if (rates !== null) {
+      row.rates = rates;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 function agentOf(value: unknown): AgentFigures | undefined {
   if (!isObject(value)) {
     return undefined;
@@ -191,6 +254,14 @@ function agentOf(value: unknown): AgentFigures | undefined {
           || value.costSource === "floor")) {
     figures.costUsd = cost;
     figures.costSource = value.costSource;
+  }
+  const rates = rateAccountOf(value.rates);
+  if (rates !== null) {
+    figures.rates = rates;
+  }
+  const models = modelsOf(value.models);
+  if (models !== undefined) {
+    figures.models = models;
   }
   figures.lowerBound = value.lowerBound === true;
   figures.firstActivity = maybeCount(value.firstActivity);
@@ -706,6 +777,71 @@ function governanceFrom(document: unknown): Governance {
   };
 }
 
+/** A number of seconds at or above nought, or null. */
+function seconds(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function pacerSlot(value: unknown): PacerSlot | null {
+  if (!isObject(value) || typeof value.busy !== "boolean" || wholeCount(value.slot) === null) {
+    return null;
+  }
+  return { slot: wholeCount(value.slot) as number, busy: value.busy,
+           pid: wholeCount(value.pid), repo: maybeText(value.repo),
+           startedAt: seconds(value.startedAt) };
+}
+
+function pacerWaiter(value: unknown): PacerWaiter | null {
+  if (!isObject(value) || seconds(value.since) === null) {
+    return null;
+  }
+  return { pid: wholeCount(value.pid), repo: maybeText(value.repo),
+           since: seconds(value.since) as number };
+}
+
+function pacerRun(value: unknown): PacerRun | null {
+  if (!isObject(value) || seconds(value.at) === null || typeof value.exit !== "number"
+      || !Number.isInteger(value.exit)) {
+    return null;
+  }
+  return { at: seconds(value.at) as number, repo: maybeText(value.repo),
+           waitSeconds: seconds(value.waitSeconds), runSeconds: seconds(value.runSeconds),
+           exit: value.exit, slot: wholeCount(value.slot), mode: maybeText(value.mode),
+           reason: maybeText(value.reason) };
+}
+
+/** Kept entries of a list the reader sent, or null when it sent none. */
+function keptOrNull<T>(value: unknown, keep: (entry: unknown) => T | null): T[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value.map(keep).filter((entry): entry is T => entry !== null);
+}
+
+/**
+ * Pacer's run slots, read as untrusted input.
+ *
+ * Waiting callers and recent runs stay null when the reader sent no list: the
+ * first pacer does not record them, and drawing that as an empty list would
+ * say nobody waits when nobody counted.
+ */
+function pacerFrom(document: unknown): Pacer {
+  const source = isObject(document) ? document : {};
+  return {
+    state: stateOf(document, "disabled"),
+    enabled: flag(source.enabled),
+    switchSource: maybeText(source.switchSource),
+    reason: maybeText(source.reason),
+    version: wholeCount(source.version),
+    slotCount: wholeCount(source.slotCount),
+    workersPerRun: wholeCount(source.workersPerRun),
+    slots: list(source.slots).map(pacerSlot).filter((slot): slot is PacerSlot => slot !== null),
+    waiting: keptOrNull(source.waiting, pacerWaiter),
+    recent: keptOrNull(source.recent, pacerRun),
+    errors: errorsOf(document),
+  };
+}
+
 /**
  * This session's figures, read as untrusted input like every other document.
  *
@@ -817,6 +953,7 @@ export function snapshotFrom(documents: ReaderDocuments, generatedAt: number): S
     load: loadFrom(documents.load),
     custom: customFrom(documents.custom),
     governance: governanceFrom(documents.governance),
+    pacer: pacerFrom(documents.pacer),
     ...(documents.events === undefined || documents.events === null ? {}
       : { events: eventsFrom(documents.events) }),
   };

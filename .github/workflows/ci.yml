@@ -1,7 +1,14 @@
 name: CI
 
+# A pull request runs the cheap checks and the tests its change reaches; main
+# and a release tag run everything. Push is limited to those refs because a
+# push to a pull request's branch also raises the pull_request event, and the
+# two runs keyed apart in the concurrency group below both survived: every
+# change was checked twice in full.
 on:
   push:
+    branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -12,6 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The job id and the matrix make the required check names, scaffold
+  # (ubuntu-latest) and scaffold (windows-latest), so both stay as they are.
   scaffold:
     strategy:
       fail-fast: false
@@ -28,6 +37,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          # The impact selection measures a pull request from its merge base
+          # with the target branch, which a shallow clone does not hold. Not
+          # written as `cond && 0 || 1`: 0 is false in an expression, so that
+          # form is always 1.
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -38,7 +52,28 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: command -v make >/dev/null || choco install make --no-progress -y
+      # quality holds doc-format, lint, the publication scan, plugin-boundary
+      # and version-check; build compiles every Python file. They take seconds
+      # and read the whole tree, so they run on every pull request.
+      - name: Check format, boundary, version, and build
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+        run: make quality build
+      # The base branch reaches the script through the environment, never
+      # spliced into the command text.
+      - name: Run the tests the change reaches
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+          BASE_REF: ${{ github.base_ref }}
+        # The whole-history checkout above already holds origin/<base>; a fetch
+        # here could not authenticate, because the checkout keeps no credential.
+        run: bash .cits/test-impact.sh --tier push --base "origin/$BASE_REF" --require-change
       - name: Check format, test, build, and verify the isolated export
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}

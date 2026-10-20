@@ -60,14 +60,14 @@
 
 import type { ReaderDocuments } from "../components/snapshot.ts";
 import type { Engine, Register } from "./engine.ts";
-import type { Governance, Job } from "../components/state.ts";
+import type { Governance, Job, Pacer } from "../components/state.ts";
 import type { PaneConfig } from "../components/options.ts";
 import type { FleetDigestSeen, FleetFold } from "../types/index.d.ts";
 import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.ts";
 import { recolor, THEME } from "../components/palette.ts";
 import { CLOSE, DETAILS_PREFIX, FOCUS_CLEAR, FOCUS_PREFIX, HIDE_PREFIX,
          REPLY_PENDING_SECONDS, replyKey, replyText, SHOW_ALL_PREFIX, TOGGLE_ALL,
-         TOGGLE_PREFIX, unreadableKey,
+         TOGGLE_PREFIX, unreadableKey, PACER_SWITCH,
          type Focus, type PaneActions, type PaneOptions, type RepliesPaused }
   from "../components/pane.ts";
 import { mask } from "../components/mask.ts";
@@ -283,6 +283,11 @@ const SEEN_HELD = { plugin: "llm-fleet", key: "digestSeen" } as const;
 export const TAB_HELPER = ENTRIES.tab;
 /** What the read command takes to probe every worktree now rather than answer from its cache. */
 export const FRESH_WORKTREES = "--refresh-worktrees";
+/**
+ * What a whole read takes to start a refresh of the rate cards beside it when
+ * one is due. The read never waits on it: the next read prices from what it kept.
+ */
+export const FRESH_RATES = "--refresh-rates";
 /** What asks the read command for the configuration's parts alone, with no reader run. */
 export const SETTINGS_ONLY = "--settings";
 /** How long the settings may take: a load of the configuration, with no source read. */
@@ -420,6 +425,10 @@ type State = {
    * what the pane is told while the first press stands.
    */
   confirmingGovernance: "governor" | "controller" | null;
+  /** Whether pacer's switch-off waits for the press that confirms it. */
+  confirmingPacer: boolean;
+  /** When that first press was made, in the clock's milliseconds. */
+  pacerArmedAt: number;
   /** Whether the sections this session was left in full have been asked for. */
   shownAllRestored: boolean;
   /** The band items a person dismissed, by key. */
@@ -1190,7 +1199,7 @@ async function readWhole($: Engine, state: State, fresh = false): Promise<void> 
   // A probe of every worktree takes longer than a read from their cache.
   const asked = state.sessionId;
   const result = await readOnce($, fresh ? state.alerts.worktreeHelperMs : state.alerts.helperMs,
-                               [...(fresh ? [FRESH_WORKTREES] : []),
+                               [...(fresh ? [FRESH_WORKTREES] : []), FRESH_RATES,
                                 "--session", state.sessionId, "--model", state.modelId ?? ""])
     .catch(async (error: unknown): Promise<Held | null> => cancelled(error)
       ? null
@@ -2324,7 +2333,119 @@ function paneActions($: Engine, state: State, surface: string): PaneActions {
     clearAnswered: () => { void clearAnswered($, state).catch(() => undefined); },
     clearUnreadable: (job) => { void clearUnreadable($, state, job).catch(() => undefined); },
     governance: (scope) => { void moveGovernance($, state, scope).catch(() => undefined); },
+    pacer: (wanted) => { void movePacer($, state, wanted).catch(() => undefined); },
   };
+}
+
+/** Pacer as the reading in hand states it, or null when it states nothing. */
+function heldPacer(state: State): Pacer | null {
+  const held = state.held;
+  if (held === null || !("documents" in held)
+      || !isReading(held.documents as ReaderDocuments | null)) {
+    return null;
+  }
+  const pacer = snapshotFrom(held.documents as ReaderDocuments,
+                             "at" in held ? held.at : 0).pacer;
+  return pacer?.state === "ready" ? pacer : null;
+}
+
+/**
+ * How long a first press to switch pacer off stands. A later press arms it
+ * again rather than confirming, so a press left standing while another session
+ * switched pacer off and on cannot be finished by one stray press.
+ */
+export const PACER_ARM_MS = ASK_MS;
+
+/** Whether a first press to switch pacer off still stands at this moment. */
+async function pacerArmed($: Engine, state: State): Promise<boolean> {
+  if (!state.confirmingPacer) {
+    return false;
+  }
+  if ((await $.clock.now()) - state.pacerArmedAt <= PACER_ARM_MS) {
+    return true;
+  }
+  state.confirmingPacer = false;
+  return false;
+}
+
+/**
+ * Move pacer, from the pane's switch row or the band's gear.
+ *
+ * Switching pacer off lets every heavy run on the machine start at once, so it
+ * takes a second press; switching it on does not. The way it goes is read from
+ * the reading in hand, not from the drawn row, which another session may have
+ * moved since this one painted. A switch the environment holds off is not
+ * pacer's to move, so the press says so and runs nothing.
+ */
+async function movePacer($: Engine, state: State, wanted: boolean, fromBand = false) {
+  const pacer = heldPacer(state);
+  if (pacer === null || pacer.enabled === null || pacer.enabled === wanted) {
+    state.confirmingPacer = false;
+    return;
+  }
+  if (pacer.switchSource === "env") {
+    state.confirmingPacer = false;
+    await say($, "fleet: pacer is off for this shell (" + (pacer.reason ?? "set in the environment")
+              + "); its switch cannot turn it on here", state.alerts.copyToastMs)
+      .catch(() => undefined);
+    return;
+  }
+  if (!wanted && !(await pacerArmed($, state))) {
+    state.confirmingPacer = true;
+    state.pacerArmedAt = await $.clock.now();
+    $.ui.invalidate("ui.render");
+    if (fromBand) {
+      await say($, "fleet: press Pacer again to switch it off; every heavy run then starts at once",
+                state.alerts.copyToastMs).catch(() => undefined);
+    }
+    return;
+  }
+  state.confirmingPacer = false;
+  await switchPacer($, state, wanted);
+}
+
+/** Move pacer from the band's gear: on goes off, on a second press, and anything else goes on. */
+async function movePacerFromBand($: Engine, state: State) {
+  const pacer = heldPacer(state);
+  if (pacer === null) {
+    return;
+  }
+  await movePacer($, state, pacer.enabled !== true, true);
+}
+
+/**
+ * Run pacer's switch, say why when it refused, and draw what pacer says now.
+ *
+ * The reader answers a switch with pacer's status read again, so a document
+ * that came back ready is the switch's own proof and is drawn at once.
+ */
+async function switchPacer($: Engine, state: State, wanted: boolean) {
+  let run: Awaited<ReturnType<typeof runEntry>>;
+  try {
+    run = await runEntry($, "pacer", ["--set", wanted ? "on" : "off"], ASK_MS);
+  } catch (error) {
+    // A run stopped by its time limit may have moved the switch before it was
+    // stopped, so the press says it has no answer and reads pacer again.
+    const said = cancelled(error) ? "pacer did not answer in time; reading it again"
+      : interpreterAdvice("pacer", error instanceof Error ? error.message : String(error));
+    await say($, "fleet: " + said, state.alerts.copyToastMs).catch(() => undefined);
+    refresh($, state, "press");
+    $.ui.invalidate("ui.render");
+    return;
+  }
+  const printed = printedDocument(run.stdout);
+  if (run.exitCode === 0 && printed !== null && printed.state === "ready") {
+    await carryDocument($, state, "pacer", printed);
+    return;
+  }
+  const first = printed !== null && Array.isArray(printed.errors)
+    && typeof printed.errors[0] === "object" && printed.errors[0] !== null
+    ? (printed.errors[0] as { reason?: unknown }).reason : undefined;
+  const reason = typeof first === "string" && first ? first
+    : run.stderr.trim().split("\n")[0] || "the switch did not move";
+  await say($, "fleet: " + reason, state.alerts.copyToastMs).catch(() => undefined);
+  refresh($, state, "press");
+  $.ui.invalidate("ui.render");
 }
 
 /**
@@ -2418,7 +2539,7 @@ async function switchGovernance($: Engine, state: State, scope: "governor" | "co
       // that reading fresh and skips the machine, so a press that only asked for
       // a look went on drawing the old word for a whole interval: the button
       // looked dead. Its own answer is drawn here at once.
-      await carryGovernance($, state, printed);
+      await carryDocument($, state, "governance", printed);
       return;
     }
   }
@@ -2431,18 +2552,18 @@ async function switchGovernance($: Engine, state: State, scope: "governor" | "co
 /**
  * Draw the switch's own answer at once, here and for the next session to open.
  *
- * The reading's own age is kept: only the governance part is fresher than it,
+ * The reading's own age is kept: only the switch's part is fresher than it,
  * and resetting the date would put off the next whole read, which is what says
  * whether anything else on the machine moved. Every other session draws the
- * patched reading from the store when it next looks, and reads the file for
+ * patched reading from the store when it next looks, and reads the switch for
  * itself on its next whole read.
  */
-async function carryGovernance($: Engine, state: State,
-                               printed: Record<string, unknown>): Promise<void> {
+async function carryDocument($: Engine, state: State, part: "governance" | "pacer",
+                             printed: Record<string, unknown>): Promise<void> {
   const held = state.held;
   if (held !== null && "documents" in held
       && isReading(held.documents as ReaderDocuments | null)) {
-    const documents = { ...(held.documents as Record<string, unknown>), governance: printed };
+    const documents = { ...(held.documents as Record<string, unknown>), [part]: printed };
     const progressAt = typeof held.progressAt === "number" ? held.progressAt : held.at;
     state.held = { documents, at: held.at, progressAt };
     await $.store.set(READING_KEY, { at: held.at, progressAt, documents }).catch(() => undefined);
@@ -2980,7 +3101,7 @@ function armTips($: Engine, state: State): void {
 
 /** The heading a section is named by in the commands that open the pane on it. */
 const ONE_SECTION_TITLES: Record<string, string> = {
-  worktrees: "Worktrees", keys: "Keys", governance: "Governance",
+  worktrees: "Worktrees", keys: "Keys", governance: "Governance", pacer: "Pacer",
 };
 
 /**
@@ -2991,7 +3112,10 @@ const ONE_SECTION_TITLES: Record<string, string> = {
  * pull requests section, and a run and a trial each have their own. A key this
  * does not know opens the pane as it always has, at the top.
  */
-function sectionOfKey(key: string): string | null {
+export function sectionOfKey(key: string): string | null {
+  if (key.startsWith("pacer:")) {
+    return "pacer";
+  }
   if (key.startsWith("job:")) {
     return "sessions";
   }
@@ -3142,6 +3266,7 @@ export const register: Register = (on, options) => {
                          restored: false, shownAll: {}, shownAllRestored: false,
                          putAway: {}, putAwayRestored: false,
                          focus: null, details: {}, confirmingGovernance: null,
+                         confirmingPacer: false, pacerArmedAt: 0,
                          hidden: [], replied: [], replying: new Set(), cleared: [],
                          paused: null,
                          sessionId: "", sessionIdRead: "", open: false,
@@ -3526,6 +3651,12 @@ export const register: Register = (on, options) => {
                              state.confirmingGovernance = null;
                              $.ui.invalidate("ui.render");
                            }
+                           // Pacer's armed switch-off is put down the same way,
+                           // by any press but its own.
+                           if (state.confirmingPacer && element !== PACER_SWITCH) {
+                             state.confirmingPacer = false;
+                             $.ui.invalidate("ui.render");
+                           }
                            // Nothing about the pane changed unless the press
                            // named a control it drew, so only then is it asked to
                            // draw again.
@@ -3618,6 +3749,7 @@ export const register: Register = (on, options) => {
                            focus: state.focus,
                            details: state.details,
                            confirmingGovernance: state.confirmingGovernance,
+                           confirmingPacer: state.confirmingPacer,
                            countsAt: state.shownCountsAt,
                            actions: paneActions($, state, e.surface),
                            replied: state.replied,
@@ -3689,6 +3821,14 @@ export const register: Register = (on, options) => {
         : null,
       onGovernance: snapshot !== null && snapshot.governance?.state === "ready"
         ? () => moveGovernanceBoth($, state).catch(() => undefined)
+        : undefined,
+      // Pacer takes the gear on a machine that runs it.
+      pacer: snapshot !== null && snapshot.pacer?.state === "ready"
+        ? { enabled: snapshot.pacer.enabled,
+            confirming: state.confirmingPacer && snapshot.pacer.enabled === true }
+        : null,
+      onPacer: snapshot !== null && snapshot.pacer?.state === "ready"
+        ? () => movePacerFromBand($, state).catch(() => undefined)
         : undefined,
       onSpeak: () => {
         // Which way it goes is read from the store at the press, not from the

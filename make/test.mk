@@ -1,4 +1,4 @@
-.PHONY: test test-report test-impacted test-unit test-doc-format test-export test-config test-config-parity test-readers test-components test-components-drift test-typescript test-engine test-pane plugin-validate install-check test-ci mutants
+.PHONY: test test-report test-impacted test-unit test-doc-format test-export test-config test-config-parity test-readers test-components test-components-drift test-typescript test-engine test-pane plugin-validate install-check test-ci test-export-roundtrip mutants
 
 test: test-report ## Run every implemented scaffold test
 
@@ -128,7 +128,15 @@ test-ci: ## Run all CI checks, including an isolated exported-tree round trip
 	@$(MAKE) test-typescript
 	@$(MAKE) test-config-parity
 	@$(MAKE) build
-	@set -euo pipefail; trial=$$(mktemp -d); trap 'rm -rf "$$trial"' EXIT; \
+	@$(EXPORT_ROUNDTRIP)
+
+test-export-roundtrip: ## Export the tree into a scratch folder, run its own checks there, and export it again
+	@$(EXPORT_ROUNDTRIP)
+
+# The round trip, written once and run inline by both targets: test-ci runs it
+# as its own last step, so the chain's calls stay the ones it makes, and the
+# impact plan runs it alone for a change to what decides the export.
+EXPORT_ROUNDTRIP = set -euo pipefail; trial=$$(mktemp -d); trap 'rm -rf "$$trial"' EXIT; \
 	  $(MAKE) export-check PUBLIC_TREE="$$trial/public" > "$$trial/preview.log"; \
 	  $(MAKE) export PUBLIC_TREE="$$trial/public" > "$$trial/export.log"; \
 	  FLEET_TS_JUNIT_DIR= FLEET_JUNIT_XML= $(MAKE) -C "$$trial/public" quality test test-readers test-components test-engine test-typescript test-config-parity build STATE_DIR="$$trial/state" JUNIT_XML=; \

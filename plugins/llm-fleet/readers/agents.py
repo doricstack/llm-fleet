@@ -250,8 +250,13 @@ def estimate(usage: Mapping[str, int], family: str,
     return total / 1_000_000
 
 
+def is_claude(model: str | None) -> bool:
+    """True for a model the host prices from its own table."""
+    return "claude" in str(model or "").lower()
+
+
 def cost_figures(turns: int, priced: bool, cost: float, host_cost: float | None,
-                 covers: bool) -> dict[str, Any]:
+                 covers: bool, host_guessed: bool = False) -> dict[str, Any]:
     """The cost a session's figures draw, and the word for where it came from.
 
     The host records what a session cost when it ends, and that figure counts
@@ -260,10 +265,17 @@ def cost_figures(turns: int, priced: bool, cost: float, host_cost: float | None,
     session. Otherwise the larger of the two is drawn as the floor it is, since
     each figure counts part of the spend. A turn no configured rate prices
     leaves the total unpriced rather than drawn without it.
+
+    `host_guessed` says the host could not price the session's model and the
+    model is not Claude: the host's figure is then its own table applied to
+    another vendor's model, which on a DeepSeek session read about eighty-eight
+    times the bill, so a full estimate at the model's own rates stands instead.
     """
     estimated = round(cost, 4) if turns and priced else None
     if covers:
         return {"costUsd": round(float(host_cost), 4), "costSource": "host"}
+    if host_guessed and estimated is not None:
+        return {"costUsd": estimated, "costSource": "estimate"}
     if host_cost is not None:
         return {"costUsd": round(max(float(host_cost), estimated or 0.0), 4),
                 "costSource": "floor"}
@@ -291,11 +303,14 @@ class Folded:
     provably counts the whole session.
     """
 
-    __slots__ = ("figures", "spend", "stamps", "estimate", "priced", "hostCost", "covers")
+    __slots__ = ("figures", "spend", "stamps", "estimate", "priced", "hostCost", "covers",
+                 "hostUnknown", "models")
 
     def __init__(self, figures: dict[str, Any], spend: list[tuple[float | None, float | None]],
                  stamps: list[float], estimate: float = 0.0, priced: bool = True,
-                 hostCost: float | None = None, covers: bool = False) -> None:
+                 hostCost: float | None = None, covers: bool = False,
+                 hostUnknown: bool = False,
+                 models: dict[str, dict[str, Any]] | None = None) -> None:
         self.figures = figures
         self.spend = spend
         self.stamps = stamps
@@ -303,6 +318,67 @@ class Folded:
         self.priced = priced
         self.hostCost = hostCost
         self.covers = covers
+        self.hostUnknown = hostUnknown
+        self.models = {} if models is None else models
+
+
+def add_model_turn(models: dict[str, dict[str, Any]], model: str | None,
+                   spent: float | None) -> None:
+    """Count one priced turn against the model that ran it.
+
+    A session can change model between turns, and a subagent can run another
+    model than its session, so each turn is kept under its own model's name. A
+    turn no rate prices leaves that model's cost unknown rather than short.
+    """
+    entry = models.setdefault(model or "", {"turns": 0, "costUsd": 0.0})
+    entry["turns"] += 1
+    if spent is None or entry["costUsd"] is None:
+        entry["costUsd"] = None
+    else:
+        entry["costUsd"] += spent
+
+
+def merge_models(into: dict[str, dict[str, Any]], more: Mapping[str, Mapping[str, Any]]) -> None:
+    """Add one transcript's per-model counts to another's."""
+    for name, entry in more.items():
+        target = into.setdefault(name, {"turns": 0, "costUsd": 0.0})
+        target["turns"] += entry["turns"]
+        if target["costUsd"] is None or entry["costUsd"] is None:
+            target["costUsd"] = None
+        else:
+            target["costUsd"] += entry["costUsd"]
+
+
+def host_guessed(host_unknown: bool, models: Mapping[str, Any]) -> bool:
+    """Whether the host's figure is its own table applied to another vendor's model.
+
+    The host flags a session holding a model it has no rate for, and then
+    prices that model's tokens from its own table anyway. Any model the session
+    ran that is not Claude makes the figure a guess, whichever model ran last.
+    """
+    return host_unknown and any(name and not is_claude(name) for name in models)
+
+
+def model_split(models: Mapping[str, Mapping[str, Any]],
+                accounts: Mapping[str, Any] | None,
+                families: list[str]) -> list[dict[str, Any]]:
+    """Each model the session ran, with its turns, its cost, and where its rate came from.
+
+    Dearest first, an unpriced model last. A turn whose record names no model
+    is counted under no name, so the split still adds up to the session.
+    """
+    split: list[dict[str, Any]] = []
+    for name, entry in models.items():
+        row: dict[str, Any] = {"model": name or None, "turns": entry["turns"],
+                               "costUsd": None if entry["costUsd"] is None
+                               else round(entry["costUsd"], 4)}
+        if isinstance(accounts, Mapping) and name:
+            family = family_of(name, families)
+            if family in accounts:
+                row["rates"] = dict(accounts[family])
+        split.append(row)
+    split.sort(key=lambda row: (row["costUsd"] is None, -(row["costUsd"] or 0.0)))
+    return split
 
 
 def settle_unmeasured(spend: list[tuple[float | None, float | None]],
@@ -349,12 +425,14 @@ def fold(data: bytes, prices: Mapping[str, Any], limit: int, whole: bool = True,
     cost = 0.0
     priced = True
     turns = damaged = 0
+    models: dict[str, dict[str, Any]] = {}
     model = effort = title = None
     context: dict[str, int] | None = None
     context_model = None
     first_activity = last_activity = first_usage = None
     host_start = None
     host_partial = False
+    host_unknown = False
     host_cost = None
     host_cost_at = -1
     last_usage_at = -1
@@ -385,6 +463,7 @@ def fold(data: bytes, prices: Mapping[str, Any], limit: int, whole: bool = True,
                 host_start = started / 1000 if isinstance(started, (int, float)) \
                     and not isinstance(started, bool) else None
                 host_partial = record.get("hasUnknownModelCost") is not False
+                host_unknown = record.get("hasUnknownModelCost") is True
             continue
         if kind != "assistant":
             continue
@@ -440,6 +519,7 @@ def fold(data: bytes, prices: Mapping[str, Any], limit: int, whole: bool = True,
                 context = usage
                 context_model = model
             spent = estimate(usage, family_of(model, families), prices)
+            add_model_turn(models, model, spent)
         spend.append((stamp, spent))
         if spent is None:
             priced = False
@@ -467,8 +547,9 @@ def fold(data: bytes, prices: Mapping[str, Any], limit: int, whole: bool = True,
     covers = (host_cost is not None and host_cost_at > last_usage_at and whole
               and not host_partial and host_start is not None
               and (first_usage is None or host_start <= first_usage + 1))
-    figures.update(cost_figures(turns, priced, cost, host_cost, covers))
-    return Folded(figures, spend, stamps, cost, priced, host_cost, covers)
+    guessed = host_guessed(host_unknown, models)
+    figures.update(cost_figures(turns, priced, cost, host_cost, covers, guessed))
+    return Folded(figures, spend, stamps, cost, priced, host_cost, covers, host_unknown, models)
 
 
 def subagent_files(transcript: Path) -> list[Path]:
@@ -521,7 +602,7 @@ def read_subagents(transcript: Path, bound: int, prices: Mapping[str, Any], limi
     totals = {"input": 0, "cacheWrite": 0, "cacheRead": 0, "output": 0}
     result: dict[str, Any] = {"turns": 0, "tokens": totals, "damaged": 0, "cost": 0.0,
                               "priced": True, "spend": [], "unreadable": 0, "cut": 0,
-                              "over": 0}
+                              "over": 0, "models": {}}
     try:
         listed = subagent_files(transcript)
     except OSError:
@@ -547,6 +628,7 @@ def read_subagents(transcript: Path, bound: int, prices: Mapping[str, Any], limi
         for key, value in folded.figures["tokens"].items():
             totals[key] += value
         result["spend"].extend(folded.spend)
+        merge_models(result["models"], folded.models)
     return result
 
 
@@ -758,9 +840,21 @@ def read_agent(home: Path, session_id: Any, job_id: Any,
     # to.
     figures.pop("costUsd", None)
     figures.pop("costSource", None)
+    models = dict(folded.models)
+    merge_models(models, extra["models"])
     figures.update(cost_figures(figures["turns"], priced,
                                 folded.estimate + extra["cost"], folded.hostCost,
-                                folded.covers))
+                                folded.covers, host_guessed(folded.hostUnknown, models)))
+    # Where each model's rates came from, when live rates were laid over the
+    # table for this read: its card read now, a card kept from before, or the
+    # shipped table, with the reason a card was not used.
+    accounts = prices.get("rateCards")
+    families = list(prices["inputPricePerMTok"].keys())
+    figures["models"] = model_split(models, accounts, families)
+    if isinstance(accounts, Mapping) and figures.get("model"):
+        family = family_of(figures["model"], families)
+        if family in accounts:
+            figures["rates"] = dict(accounts[family])
     document.update(figures)
     history = config["history"]
     document["spend_series"] = spend_series(folded, history, clock, truncated, gaps > 0)

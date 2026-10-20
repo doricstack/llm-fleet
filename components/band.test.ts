@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_GOVERNANCE, BAND_ITEM, BAND_SPEAK,
+import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_GOVERNANCE, BAND_ITEM, BAND_PACER, BAND_SPEAK,
          BAND_TOGGLE,
          bandConfigFrom, bandCounts, bandItems,
          answeredSources, bandTree, fleetLabel, governanceLabel, keptHidden,
@@ -154,6 +154,48 @@ test("a failed trial leaves the band once its change has merged or been cleaned"
                    ["trial:open"]);
 });
 
+test("a pacer run that was refused or failed is an error on the band; a pass is not", () => {
+  const run = (repo: string, exit: number, mode: string, at: number, reason: string | null = null) =>
+    ({ at, repo, waitSeconds: 0, runSeconds: 1, exit, slot: 0, mode, reason });
+  const items = bandItems(snapshotFrom(reading({
+    pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [], recent: [
+      run("web-app", 75, "refused", AT - 60, "memory pressure"),
+      run("fleet", 2, "on", AT - 120),
+      run("fine", 0, "on", AT - 30),
+      // A run pacer let through with pacing off failed on its own terms, not pacer's.
+      run("unpaced", 1, "off", AT - 10),
+      // A run the person stopped (a signal pacer passed on) is not a failure.
+      run("stopped", 130, "interrupted", AT - 5)] },
+  }), AT), [], "");
+  const pacer = items.filter((item) => item.key.startsWith("pacer:"));
+  assert.deepEqual(pacer.map((item) => item.text),
+                   ["Pacer refused a run in web-app: memory pressure",
+                    "Run failed in fleet: exit 2"]);
+  assert.deepEqual(pacer.map((item) => item.level), ["error", "error"]);
+  // Each run is its own key, so a dismissed failure stays gone and the next
+  // failure in the same repository is a new item.
+  assert.deepEqual(pacer.map((item) => item.key),
+                   ["pacer:web-app:" + (AT - 60), "pacer:fleet:" + (AT - 120)]);
+  // A reading from before pacer was read has not heard from it, so a pacer
+  // failure dismissed earlier is kept rather than forgotten.
+  const older = snapshotFrom(reading(), AT);
+  delete (older as { pacer?: unknown }).pacer;
+  assert.equal(answeredSources(older).has("pacer"), false);
+  assert.deepEqual(keptHidden(["pacer:web-app:1"], [], [], 10, answeredSources(older)),
+                   ["pacer:web-app:1"]);
+  // A run pacer could not tie to a repository still says where it failed.
+  const unnamed = bandItems(snapshotFrom(reading({
+    pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [], recent: [
+      { at: AT - 1, repo: null, waitSeconds: 0, runSeconds: 1, exit: 3, slot: 0, mode: "on",
+        reason: null }] } }), AT), [], "");
+  assert.deepEqual(unnamed.filter((item) => item.key.startsWith("pacer:")).map((item) => item.text),
+                   ["Run failed in a repository: exit 3"]);
+  // A pacer that has not reported its runs raises nothing.
+  const quiet = bandItems(snapshotFrom(reading({
+    pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [] } }), AT), [], "");
+  assert.equal(quiet.some((item) => item.key.startsWith("pacer:")), false);
+});
+
 test("a job that has waited past the configured span is left to the pane", () => {
   const snapshot = snapshotFrom(reading({
     roster: { state: "ready", providers: {}, interactive: {},
@@ -266,6 +308,44 @@ test("the switch is always drawn, and its word says which way a press goes", () 
     assert.equal(nodesIn(tree).some((node) =>
       (node.props as { key?: string }).key === BAND_DISMISS), false);
   }
+});
+
+test("pacer takes the gear, and its word says whether pacer is on", () => {
+  let pressed = 0;
+  const keyed = (tree: Node, key: string) => nodesIn(tree).find((node) =>
+    (node.props as { key?: string } | undefined)?.key === key);
+  const on = bandTree({ items: [], counts: null, open: false, width: 120,
+                        pacer: { enabled: true }, onPacer: () => { pressed += 1; },
+                        governance: { governor: true, controller: true },
+                        onGovernance: noop, onToggle: noop, onDismiss: noop });
+  const button = keyed(on, BAND_PACER);
+  assert.equal((button?.props as { label?: string }).label, "⚙ Pacer on");
+  // With pacer on the machine the governance gear is not drawn beside it.
+  assert.equal(keyed(on, BAND_GOVERNANCE), undefined);
+  (button?.props as { onPress: () => void }).onPress();
+  assert.equal(pressed, 1);
+  const off = bandTree({ items: [], counts: null, open: false, width: 120,
+                         pacer: { enabled: false }, onPacer: noop,
+                         onToggle: noop, onDismiss: noop });
+  assert.equal((keyed(off, BAND_PACER)?.props as { label?: string }).label, "⚙ Pacer off");
+  // A pacer whose switch was not read says so rather than picking a side.
+  const unread = bandTree({ items: [], counts: null, open: false, width: 120,
+                            pacer: { enabled: null }, onPacer: noop,
+                            onToggle: noop, onDismiss: noop });
+  assert.equal((keyed(unread, BAND_PACER)?.props as { label?: string }).label,
+               "⚙ Pacer not read");
+  // No pacer: the governance gear stands as before.
+  const without = bandTree({ items: [], counts: null, open: false, width: 120, pacer: null,
+                             onPacer: noop, governance: { governor: true, controller: true },
+                             onGovernance: noop, onToggle: noop, onDismiss: noop });
+  assert.equal(keyed(without, BAND_PACER), undefined);
+  assert.ok(keyed(without, BAND_GOVERNANCE));
+  // Narrow, the word drops its name and keeps the icon and the answer.
+  const narrow = bandTree({ items: [], counts: null, open: false, width: 30,
+                            pacer: { enabled: true }, onPacer: noop,
+                            onSpeak: noop, speaking: false,
+                            onToggle: noop, onDismiss: noop });
+  assert.equal((keyed(narrow, BAND_PACER)?.props as { label?: string }).label, "⚙ on");
 });
 
 test("the governance switch is drawn only for a machine that has one", () => {

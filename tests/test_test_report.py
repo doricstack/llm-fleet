@@ -351,5 +351,99 @@ class ReportTests(unittest.TestCase):
         self.assertFalse(self.out.exists())
 
 
+class NamedFileTests(unittest.TestCase):
+    """A run of the files an impact plan names, rather than of the whole folder.
+
+    The plan selects test files one at a time, and a gate still reads one report
+    for what ran. So the files are named to the same script, the report counts
+    only them, and a name that is not a test file in the folder is refused
+    rather than run as nothing.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="fleet-report-files-"))
+        self.addCleanup(self._clean)
+        self.out = self.root / "report.xml"
+        self.folder = self.root / "suite"
+        self.folder.mkdir()
+        (self.folder / "test_passing.py").write_text(PASSING, encoding="utf-8")
+        (self.folder / "test_failing.py").write_text(FAILING, encoding="utf-8")
+        (self.folder / "test_skipping.py").write_text(SKIPPING, encoding="utf-8")
+
+    def _clean(self) -> None:
+        import shutil
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def run_files(self, *names: str) -> subprocess.CompletedProcess[str]:
+        args = [sys.executable, str(SCRIPT), "--directory", str(self.folder),
+                "--junit-xml", str(self.out)]
+        for name in names:
+            args += ["--file", name]
+        return subprocess.run(args, capture_output=True, text=True, check=False,
+                              env=isolated(), cwd=str(self.root))
+
+    def test_one_named_file_runs_that_file_alone(self) -> None:
+        # The folder also holds a failing file; a run that reached it would exit
+        # red, which is how a plan that named one file and ran three shows up.
+        result = self.run_files("suite/test_passing.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        root = ElementTree.parse(self.out).getroot()
+        self.assertEqual(root.get("tests"), "2")
+        self.assertEqual({attr(case, "classname").rsplit(".", 1)[-1]
+                          for case in root.iter("testcase")}, {"Passing"})
+
+    def test_a_named_file_that_does_not_compile_is_an_error_in_the_report(self) -> None:
+        # Discovery records a module that will not load as a failed test; a
+        # named file must too, or the gate reading the report gets nothing.
+        (self.folder / "test_broken.py").write_text("def broken(:\n", encoding="utf-8")
+        result = self.run_files("suite/test_broken.py", "suite/test_passing.py")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertTrue(self.out.is_file(), result.stdout + result.stderr)
+        root = ElementTree.parse(self.out).getroot()
+        errors = list(root.iter("error"))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("test_broken could not be imported: invalid syntax",
+                      errors[0].get("message") or "")
+        self.assertEqual(root.get("tests"), "3")
+
+    def test_named_files_share_one_report_and_one_exit_code(self) -> None:
+        result = self.run_files("suite/test_passing.py", "suite/test_failing.py",
+                                "suite/test_skipping.py")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        root = ElementTree.parse(self.out).getroot()
+        self.assertEqual(root.get("tests"), "6")
+        self.assertEqual(root.get("failures"), "1")
+        self.assertEqual(root.get("skipped"), "1")
+        self.assertIn("6 tests, 1 failed, 0 errors, 1 skipped", result.stdout)
+
+    def test_a_file_named_twice_runs_once(self) -> None:
+        result = self.run_files("suite/test_passing.py", "suite/test_passing.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(ElementTree.parse(self.out).getroot().get("tests"), "2")
+
+    def test_a_named_file_that_is_not_there_is_refused(self) -> None:
+        # Running nothing for a name that does not exist would report zero tests
+        # as a pass over a file the plan believed it was checking.
+        result = self.run_files("suite/test_passing.py", "suite/test_gone.py")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("test_gone.py", result.stderr)
+        self.assertFalse(self.out.exists())
+
+    def test_a_named_file_outside_the_folder_is_refused(self) -> None:
+        (self.root / "test_elsewhere.py").write_text(PASSING, encoding="utf-8")
+        result = self.run_files("test_elsewhere.py")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("test_elsewhere.py", result.stderr)
+        self.assertFalse(self.out.exists())
+
+    def test_a_named_file_that_does_not_import_is_an_error_not_a_pass(self) -> None:
+        (self.folder / "test_broken.py").write_text("import not_a_module_anywhere\n",
+                                                    encoding="utf-8")
+        result = self.run_files("suite/test_broken.py")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        root = ElementTree.parse(self.out).getroot()
+        self.assertEqual(root.get("errors"), "1")
+
+
 if __name__ == "__main__":
     unittest.main()

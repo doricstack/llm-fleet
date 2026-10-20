@@ -15,6 +15,12 @@ are the same tests rather than two lists to keep in step.
     python3 scripts/test-report.py
     python3 scripts/test-report.py --junit-xml report.xml
     python3 scripts/test-report.py --directory tests --pattern 'test_*.py'
+    python3 scripts/test-report.py --file tests/test_a.py --file tests/test_b.py
+
+A named file runs alone, in place of discovery: the impact plan selects test
+files one at a time, and the files it names still make one report. A name that
+is not a file inside the directory is refused, because running nothing for it
+would read as a pass over a file the plan believed it was checking.
 
 Exit: 0 when every test passed, 1 when one failed or errored, 2 when the suite
       could not be run at all.
@@ -232,6 +238,54 @@ def summary(result: Recording, elapsed: float) -> str:
         outcomes.count(SKIPPED), elapsed)
 
 
+def named_suite(directory: Path, names: list[str]) -> unittest.TestSuite | None:
+    """The tests in the named files, each loaded once, or None after a refusal.
+
+    Each file is loaded as the discovery would load it, as a module named from
+    its place under the directory with the directory first on the import path,
+    so a file run alone sees the same helpers it sees in the whole suite. A
+    file that fails to import becomes a failed test rather than an exception,
+    which is how discovery reports one too.
+    """
+    top = directory.resolve()
+    modules: list[str] = []
+    for name in names:
+        path = Path(name).resolve()
+        if not path.is_file():
+            print("test-report: {0} is not a file".format(name), file=sys.stderr)
+            return None
+        try:
+            relative = path.relative_to(top)
+        except ValueError:
+            print("test-report: {0} is not inside {1}".format(name, directory),
+                  file=sys.stderr)
+            return None
+        if path.suffix != ".py":
+            print("test-report: {0} is not a Python file".format(name), file=sys.stderr)
+            return None
+        dotted = ".".join(relative.with_suffix("").parts)
+        if dotted not in modules:
+            modules.append(dotted)
+    if str(top) not in sys.path:
+        sys.path.insert(0, str(top))
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+    for dotted in modules:
+        try:
+            suite.addTests(loader.loadTestsFromName(dotted))
+        except Exception as exc:  # a module that will not load, a syntax error included
+            suite.addTest(import_failure(dotted, exc))
+    return suite
+
+
+def import_failure(dotted: str, exc: Exception) -> unittest.TestCase:
+    """A test that fails the way the named module failed to import."""
+    def test(self: unittest.TestCase) -> None:
+        raise ImportError("{0} could not be imported: {1}".format(dotted, exc))
+    case = type(dotted.replace(".", "_"), (unittest.TestCase,), {"test_import": test})
+    return case("test_import")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run the Python suite, writing a JUnit report when asked.")
@@ -244,6 +298,9 @@ def main() -> int:
     parser.add_argument("--junit-xml", default=os.environ.get("FLEET_JUNIT_XML") or None,
                         help="write the result here; nothing is written without it or "
                              "FLEET_JUNIT_XML")
+    parser.add_argument("--file", action="append", default=[],
+                        help="run this test file inside the directory instead of "
+                             "discovering; repeat for more")
     parser.add_argument("--quiet", action="store_true",
                         help="drop the per-test lines and keep the summary")
     args = parser.parse_args()
@@ -254,8 +311,13 @@ def main() -> int:
         return 2
 
     try:
-        suite = unittest.TestLoader().discover(str(directory), pattern=args.pattern,
-                                               top_level_dir=str(directory))
+        if args.file:
+            suite = named_suite(directory, args.file)
+            if suite is None:
+                return 2
+        else:
+            suite = unittest.TestLoader().discover(str(directory), pattern=args.pattern,
+                                                   top_level_dir=str(directory))
     except ImportError as exc:
         print("test-report: the suite could not be loaded: {0}".format(exc), file=sys.stderr)
         return 2

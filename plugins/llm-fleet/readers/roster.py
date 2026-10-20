@@ -20,6 +20,7 @@ from typing import Any, Mapping
 from .agents import bucket_layout, read_agent
 from .alerts import read_owned_json, reply_marker, state_root, write_json
 from .jobs import job_activity, job_entered_at, job_question, short_path
+from .rates import with_live_rates
 from .runtime import (CACHE_BYTES, ReaderFailure, child_environment, printable, read_bounded_json,
                       resolve_command, run_json, shell_command, valid_job_id, write_private_json)
 
@@ -458,6 +459,13 @@ def read_providers(config: Mapping[str, Any], *, environ: Mapping[str, str] | No
         result["state"] = "unavailable"
         errors.append({"source": "jobs", "reason": "{0} is not on PATH".format(command[0])})
     else:
+        if config["sources"]["agents"]["enabled"]:
+            # Each card is priced at the rate kept for its model, once per read.
+            # The read only reads what a refresh kept: it never waits on a page.
+            try:
+                config = with_live_rates(config, clock)
+            except Exception:  # a damaged rate record leaves the shipped table
+                pass
         timeout = float(config["timeouts"]["commandSeconds"])
         policy = config["runtime"]["childEnvironment"]
         states = _previous_states(previous)

@@ -49,6 +49,9 @@
           "haiku-5-5": 1000000,
           "haiku-4-5": 1000000
         }
+      },
+      "rates": {
+        "state": "ready"
       }
     },
     "mods": {

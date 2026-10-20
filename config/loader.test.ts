@@ -316,7 +316,8 @@ test("an open map takes a key its list does not carry and seeds the packaged one
   assert.deepEqual(agents.outputPricePerMTok,
                    { "mythos-1": 7, "fable-5-1": 50, "opus-5-5": 20, "opus-5": 25,
                      "opus-4-8": 25, "opus-4-7": 25, "sonnet-5-5": 10, "sonnet-5": 10,
-                     "haiku-5-5": 0.5, "haiku-4-5": 5 });
+                     "haiku-5-5": 0.5, "haiku-4-5": 5, "deepseek-flash": 1.2,
+                     "deepseek-v4-pro": 3.96, "kimi-k2.7-code": 4, "mimo-v2.6-flash": 0.28 });
   assert.deepEqual(agents.contextWindowTokens,
                    { "mythos-1": 200000, "fable-5-1": 1000000, "opus-5-5": 1000000,
                      "opus-5": 1000000, "opus-4-8": 1000000, "opus-4-7": 1000000,
