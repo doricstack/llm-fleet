@@ -31,7 +31,8 @@
  *
  * Speech is one switch for the whole machine, kept in the store every session
  * reads: the band's Speak button or `/speak on|off` in any session turns it on
- * or off in all the sessions running, and every session starts with it off.
+ * or off in all the sessions running, and a session that starts later joins it
+ * as it stands: on when it is on anywhere, off when it is off everywhere.
  * Off is a hard stop: a session that hears it stops the clip it is playing and
  * drops every line it was going to say. The voice is each session's own: `/speak male` here leaves the
  * session beside it speaking as it did. A session says one clip at a time, and
@@ -242,14 +243,15 @@ export function sessionVoiceKey(sessionId: string): string {
 export const SPEECH_ON_KEY = "speech.on";
 
 /**
- * Whether the stored switch speaks in a session that started at `startedAt`.
+ * Whether the stored switch speaks.
  *
- * Only a press made since the session started counts: every session starts
- * silent, and a switch an earlier session left on never reaches a new one. A
- * value from before the press was stamped, plain `true`, is off.
+ * The switch is the machine's, so a session that starts after the press joins
+ * it: speech on anywhere is on here. Only a press writes the on value, the time
+ * it was made; `false`, nothing, or a value from before presses were stamped,
+ * plain `true`, is off.
  */
-export function speechIsOn(value: unknown, startedAt: number | null): boolean {
-  return typeof value === "number" && startedAt !== null && value >= startedAt;
+export function speechIsOn(value: unknown): boolean {
+  return typeof value === "number";
 }
 /** How often a session looks for the switch another session pressed. */
 export const SPEECH_POLL_MS = 1_500;
@@ -465,8 +467,6 @@ type State = {
   playing: AbortController | null;
   /** The clips this session says, each one after the one before. */
   voiceQueue: Promise<unknown>;
-  /** When this session started, in epoch milliseconds; a switch pressed before it is off here. */
-  startedAt: number | null;
   /** Moved on each time speech is heard off, so every line asked for before it is dropped. */
   speechEpoch: number;
   /** The voice picks, run one after another so two never interleave. */
@@ -2753,7 +2753,7 @@ async function alert($: Engine, state: State, fired: FleetEvent) {
  * another session, and speech going off stops the clip playing here.
  */
 async function speechOn($: Engine, state: State): Promise<boolean> {
-  const isOn = speechIsOn(await $.store.get(SPEECH_ON_KEY).catch(() => undefined), state.startedAt);
+  const isOn = speechIsOn(await $.store.get(SPEECH_ON_KEY).catch(() => undefined));
   heard($, state, isOn);
   return isOn;
 }
@@ -3148,7 +3148,7 @@ export const register: Register = (on, options) => {
                          seen: null, alerts: ALERT_DEFAULTS, timesKnown: false, notify: options?.notify !== false,
                          speech: null, voice: null, voiceName: null, voiceSelection: 0, voiceFor: "",
                          speechOn: null, playing: null, voiceQueue: Promise.resolve(),
-                         startedAt: null, speechEpoch: 0,
+                         speechEpoch: 0,
                          voicePicks: Promise.resolve(),
                          speechTimer: null, timer: null, timerMs: 0, ended: false,
                          token: Math.random().toString(36).slice(2),
@@ -3164,9 +3164,6 @@ export const register: Register = (on, options) => {
                          lastSeen: undefined, seenAsked: false, digestThrough: null,
                          seenWrite: Promise.resolve(), afterPaint: [], afterPaintTick: null };
   on("session.start", async ($, event, next) => {
-    // Taken first, so speech is off here until a press made from now on; a
-    // clock that cannot say leaves it off for the whole session.
-    state.startedAt = await $.clock.now().catch(() => null);
     // One command at a time, and a refusal costs one command rather than the
     // session. A name can already belong to the person, whose own /speak wins
     // it, and the host then refuses the plugin's. Thrown from here, that
@@ -3697,7 +3694,7 @@ export const register: Register = (on, options) => {
         // Which way it goes is read from the store at the press, not from the
         // paint: another session may have switched it since this band drew.
         return $.store.get(SPEECH_ON_KEY)
-          .then((value) => speechIsOn(value, state.startedAt), () => state.speechOn === true)
+          .then((value) => speechIsOn(value), () => state.speechOn === true)
           .then(async (wasOn) => {
             await switchSpeech($, state, !wasOn);
             if (!wasOn) {

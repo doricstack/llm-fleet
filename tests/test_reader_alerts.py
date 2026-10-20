@@ -368,6 +368,49 @@ class ClaimTests(AlertsCase):
         if hasattr(os, "O_NOFOLLOW"):
             self.assertTrue(asked[0] & os.O_NOFOLLOW)
 
+    def test_a_lock_made_by_another_session_at_that_instant_is_opened_on_a_retry(self):
+        # macOS answers a create through a folder handle with "no such file" when
+        # another process makes the same name at that instant; the file is there.
+        asked = []
+
+        def opener(path, flags, mode=0o777, **at):
+            asked.append(path)
+            if len(asked) < 3:
+                raise FileNotFoundError(2, "No such file or directory")
+            return os.open(path, flags, mode, **at)
+
+        with alerts.private_directory(self.root / "locks") as folder:
+            handle = alerts.open_lock(folder, "a.lock", opener)
+            os.close(handle)
+        self.assertEqual(asked, ["a.lock"] * 3 if alerts._directory_handles() else
+                         [self.root / "locks" / "a.lock"] * 3)
+        self.assertTrue((self.root / "locks" / "a.lock").is_file())
+
+    def test_a_lock_that_never_opens_is_refused_after_a_bounded_retry(self):
+        asked = []
+
+        def opener(path, flags, mode=0o777, **at):
+            asked.append(path)
+            raise FileNotFoundError(2, "No such file or directory")
+
+        with alerts.private_directory(self.root / "locks") as folder:
+            with self.assertRaisesRegex(alerts.UnsafePath, "did not open: No such file"):
+                alerts.open_lock(folder, "a.lock", opener)
+        self.assertEqual(len(asked), alerts.LOCK_OPEN_TRIES)
+        self.assertGreater(alerts.LOCK_OPEN_TRIES, 1)
+
+    def test_a_lock_refused_for_any_other_reason_is_not_retried(self):
+        asked = []
+
+        def opener(path, flags, mode=0o777, **at):
+            asked.append(path)
+            raise PermissionError(13, "Permission denied")
+
+        with alerts.private_directory(self.root / "locks") as folder:
+            with self.assertRaisesRegex(alerts.UnsafePath, "did not open: Permission denied"):
+                alerts.open_lock(folder, "a.lock", opener)
+        self.assertEqual(len(asked), 1)
+
     def test_a_key_names_a_hashed_file_not_a_path(self):
         self.assertTrue(alerts.claim(self.state, "../../escape", NOW, 100))
         names = [path.name for path in (self.state / "claims").iterdir()]
@@ -825,6 +868,51 @@ class VoiceHoldTests(AlertsCase):
         self.assertTrue(slept)
         held = json.loads(alerts.voice_path(self.state).read_text())
         self.assertGreaterEqual(held["until"], NOW + 3.0 + 2 * alerts.VOICE_MARGIN_SECONDS)
+
+    def test_sessions_speaking_at_once_take_turns_and_never_overlap(self):
+        # Each session is its own process, so the turn has to hold across
+        # processes with the real clock, not only inside one helper.
+        runner = self.root / "voice-runner.py"
+        runner.write_text(
+            "import json, os, sys, time\n"
+            "sys.path.insert(0, {plugin!r})\n"
+            "from pathlib import Path\n"
+            "from readers import alerts\n"
+            "go, state = sys.argv[1], Path(sys.argv[2])\n"
+            "read = []\n"
+            "def clock():\n"
+            "    read.append(time.time())\n"
+            "    return read[-1]\n"
+            "while not os.path.exists(go):\n"
+            "    time.sleep(0.001)\n"
+            "held = alerts.hold_voice(state, 0.4, clock=clock, wait_seconds=10)\n"
+            # The last reading is the one taken inside the lock as the voice
+            # was taken: the clip's start, free of any delay after the return.
+            "print(json.dumps({{'held': held, 'start': read[-1]}}))\n".format(
+                plugin=str(paths.PLUGIN)))
+        clip = 0.4 + alerts.VOICE_MARGIN_SECONDS
+        for index in range(3):
+            if alerts.voice_path(self.state).exists():
+                alerts.voice_path(self.state).unlink()
+            go = self.root / ("voice-go-" + str(index))
+            racers = [subprocess.Popen([sys.executable, str(runner), str(go), str(self.state)],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                      for _ in range(3)]
+            time.sleep(0.05)
+            go.write_text("go")
+            turns = []
+            for racer in racers:
+                out, err = racer.communicate(timeout=60)
+                self.assertEqual(racer.returncode, 0, err)
+                turns.append(json.loads(out))
+            turns.sort(key=lambda turn: turn["start"])
+            self.assertEqual([turn["held"] for turn in turns], [True, True, True])
+            # Every clip starts once the one before it has run its length.
+            for before, after in zip(turns, turns[1:]):
+                # Each start is read where the voice is taken, and a clip is taken
+                # only once the one before has passed its end: the gap is a whole
+                # clip at least, however late a process ran after its turn.
+                self.assertGreaterEqual(after["start"] - before["start"], clip - 0.001, index)
 
     def test_a_voice_lock_that_is_a_link_is_refused_and_its_target_left_alone(self):
         now, sleep, _ = self.clock(NOW)

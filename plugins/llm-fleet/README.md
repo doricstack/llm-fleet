@@ -53,7 +53,7 @@ A session started before the update has no pane until it restarts. From a checko
 - `/llm-fleet doctor` and `/llm-fleet setup` are the two commands from the first run.
 - `/worktrees` opens the pane on its worktrees section with a fresh probe.
 - `/keys` opens the pane on its keys section, and `/keys tips off` turns off the key tip under the prompt.
-- `/speak` picks this session's voice or switches speech on or off in every running session, once you have configured a speech command. Every session starts with speech off, and off stops the line playing and every line waiting.
+- `/speak` picks this session's voice or switches speech on or off in every running session, once you have configured a speech command. A session started later joins speech as it stands: on when it is on in any session, off when it is off everywhere. Off stops the line playing and every line waiting.
 
 ## Settings
 

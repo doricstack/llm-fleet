@@ -89,6 +89,8 @@ CLAIMS = "claims"
 # directory itself, so no lock sits in, and no check runs on, the state
 # directory: that is the owner's own setting.
 LOCKS = "locks"
+# Opens of a lock that another session is making at that instant (open_lock).
+LOCK_OPEN_TRIES = 5
 VOICE_LOCK = "voice.lock"
 # Where each question a pane sent a reply to is recorded as answered.
 REPLY_ANSWERS = "reply-answers"
@@ -463,13 +465,26 @@ def open_lock(folder: Folder, name: str, opener: Callable[..., int] = os.open) -
     to them through the handle already checked.
     """
     _step("lock")
-    try:
-        handle = folder.open(name, os.O_RDWR | os.O_CREAT, 0o600, opener)
-    except UnsafePath:
-        raise
-    except OSError as error:
-        raise UnsafePath(folder.path / name, "did not open: {0}".format(error.strerror),
-                         "remove it") from error
+    tries = 0
+    while True:
+        tries += 1
+        try:
+            handle = folder.open(name, os.O_RDWR | os.O_CREAT, 0o600, opener)
+            break
+        except UnsafePath:
+            raise
+        except FileNotFoundError as error:
+            # macOS answers a create through a folder handle with "no such file"
+            # when another process makes the same name at that instant; the file
+            # is there by the next try. A folder that is gone stays gone.
+            if tries < LOCK_OPEN_TRIES:
+                time.sleep(0.001 * tries)
+                continue
+            raise UnsafePath(folder.path / name, "did not open: {0}".format(error.strerror),
+                             "remove it") from error
+        except OSError as error:
+            raise UnsafePath(folder.path / name, "did not open: {0}".format(error.strerror),
+                             "remove it") from error
     info = os.fstat(handle)
     if not stat.S_ISREG(info.st_mode) or not _owned(info):
         os.close(handle)

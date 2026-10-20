@@ -1,6 +1,6 @@
 {
   "name": "llm-fleet",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "description": "Every Claude Code session, background job and open pull request on this machine in one live pane, with alerts when one fails or waits for you.",
   "types": "./types/index.d.ts",
   "license": "MIT",

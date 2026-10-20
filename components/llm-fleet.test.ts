@@ -2742,9 +2742,24 @@ test("a row that arrives runs frames while it slides in, and they stop once it i
 /** Speech switched on at the moment the stub's sessions start, so they hear it. */
 const SPOKEN = 1790000000 * 1000;
 
-test("a session starts with speech off, whatever an earlier session left on", async () => {
-  for (const left of [SPOKEN - 1, true, "on"]) {
+test("a session joins speech that is on anywhere, and starts off when it is off everywhere", async () => {
+  // Switched on by a session that started long before this one: it is on for
+  // the machine, so this session speaks too.
+  for (const left of [SPOKEN - 1, SPOKEN - 86_400_000]) {
     const memory: Record<string, unknown> = { [SPEECH_ON_KEY]: left };
+    const helped: string[][] = [];
+    const driven = stub({ memory, answer: machine(helped) });
+    await driven.start();
+    await drain();
+    assert.equal(speakWord(await driven.band()), "♪ Speak: on", String(left));
+    // Joining says nothing on its own: only the session that pressed greets.
+    assert.equal(voicesSaid(helped).length, 0, String(left));
+    // The switch is read, never rewritten, by a session that joins it.
+    assert.equal(memory[SPEECH_ON_KEY], left);
+  }
+  // Off everywhere, never switched, or a value no press writes: off here too.
+  for (const left of [false, undefined, true, "on"]) {
+    const memory: Record<string, unknown> = left === undefined ? {} : { [SPEECH_ON_KEY]: left };
     const helped: string[][] = [];
     const driven = stub({ memory, answer: machine(helped) });
     await driven.start();
@@ -2754,9 +2769,7 @@ test("a session starts with speech off, whatever an earlier session left on", as
     // Picking a voice turns speech on, so the one line it says is the reply's.
     assert.equal(voicesSaid(helped).length, 1, String(left));
     assert.equal(reply.text.includes("speech is off"), false, reply.text);
-    // A switch left on before this session never reaches it: the press that
-    // just turned it on is what speaks, stamped now.
-    assert.equal(memory[SPEECH_ON_KEY], SPOKEN);
+    assert.equal(memory[SPEECH_ON_KEY], SPOKEN, String(left));
   }
 });
 
