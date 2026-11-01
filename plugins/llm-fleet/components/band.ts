@@ -15,12 +15,11 @@
  *
  * Beside the fleet's switch sits the voice's. Speech is one switch for every
  * session on the machine, so the word on it is what the store says, and a press
- * in any session is heard in all of them. Beside the voice sits the machine's
- * governance switch when the machine has one: it states both scopes in a word
- * and moves them together, and it is not drawn at all for a person who does not
- * run the tooling behind it. Each button carries an icon: a glyph a terminal
- * draws in one cell where the surface is a terminal, and an emoji where the
- * surface draws pictures.
+ * in any session is heard in all of them. Beside the voice sits pacer's switch
+ * when the machine runs pacer: it says whether the machine's run slots are on,
+ * and it is not drawn at all for a person who does not run that tooling. Each
+ * button carries an icon: a glyph a terminal draws in one cell where the surface
+ * is a terminal, and an emoji where the surface draws pictures.
  */
 
 import type { Color, Node } from "./host.ts";
@@ -36,9 +35,7 @@ export const BAND_TOGGLE = "fleet.band.toggle";
 export const BAND_DISMISS = "fleet.band.dismiss";
 /** The address of the switch that turns speech on or off in every session. */
 export const BAND_SPEAK = "fleet.band.speak";
-/** The address of the machine's governance switch, when the machine has one. */
-export const BAND_GOVERNANCE = "fleet.band.governance";
-/** The address of pacer's switch, which takes the gear on a machine that runs pacer. */
+/** The address of pacer's switch, which is the machine's one gear. */
 export const BAND_PACER = "fleet.band.pacer";
 /** The address of a press on one of the band's figures, before the state it names. */
 export const BAND_FOCUS = "fleet.band.focus.";
@@ -50,9 +47,9 @@ const BAND_RULE = "─";
 
 /** The icon each switch carries, as a terminal draws it and as a picture surface does. */
 const ICONS = {
-  terminal: { fleet: "\u2261", speaking: "\u266A", quiet: "\u266A", governance: "\u2699" },
+  terminal: { fleet: "\u2261", speaking: "\u266A", quiet: "\u266A", gear: "\u2699" },
   pictures: { fleet: "\u{1F4CB}", speaking: "\u{1F50A}", quiet: "\u{1F507}",
-              governance: "\u2699\ufe0f" },
+              gear: "\u2699\ufe0f" },
 } as const;
 
 function icons(surface: string | undefined) {
@@ -80,19 +77,6 @@ export function speakLabel(speaking: boolean, surface?: string, short = false): 
 }
 
 /**
- * The governance switch's word, after its icon: one word for two scopes, so the
- * band stays one line. A scope the switch did not report is "not read" rather
- * than folded into either answer.
- */
-export function governanceLabel(governor: boolean | null, controller: boolean | null,
-                                surface?: string, short = false): string {
-  const word = governor === true && controller === true ? "on"
-    : governor === false && controller === false ? "off"
-    : governor === null || controller === null ? "not read" : "mixed";
-  return icons(surface).governance + " " + (short ? "" : "Gov ") + word;
-}
-
-/**
  * Pacer's switch word, after the gear: on, off, or not read when pacer did not
  * say, and "off?" while a first press to switch it off waits for the second.
  */
@@ -100,7 +84,7 @@ export function pacerLabel(enabled: boolean | null, surface?: string, short = fa
                            confirming = false): string {
   const word = enabled === true ? (confirming ? "off?" : "on")
     : enabled === false ? "off" : "not read";
-  return icons(surface).governance + " " + (short ? "" : "Pacer ") + word;
+  return icons(surface).gear + " " + (short ? "" : "Pacer ") + word;
 }
 
 /** One thing the band can lead with, under a key that names it across readings. */
@@ -173,7 +157,7 @@ export function hiddenLimitFrom(documents: unknown): number | null {
 
 /** The source each kind of band item comes from, by the head of its key. */
 const KEY_SOURCES: Record<string, string> = {
-  job: "roster", trial: "trials", run: "progress", pr: "prs", skill: "skills", pacer: "pacer",
+  job: "roster", pr: "prs", skill: "skills", pacer: "pacer",
 };
 
 /** The source a band key belongs to, or null for a key no source makes. */
@@ -242,16 +226,12 @@ function skillItem(skill: Snapshot["skills"]["new"][number]): BandItem {
            text: "Skill to read: " + said(skill.name) + ", " + said(skill.issue) };
 }
 
-/** Change states after which a failed trial no longer needs anybody. */
-const SETTLED_CHANGES = new Set(["MERGED", "CLEANED"]);
-
 /**
  * Everything in a reading that needs a person, worst first.
  *
- * A failed trial on a change still open, a run with failures, a pull request
- * whose checks fail and a newly flagged skill are errors; a session waiting on
- * its person, and a new skill finding to read or a scan that could not finish,
- * are waits. The key of each carries what makes it the same item next time, so
+ * A run pacer refused, a pull request whose checks fail and a newly flagged
+ * skill are errors; a session waiting on its person, and a new skill finding to
+ * read or a scan that could not finish, are waits. The key of each carries what makes it the same item next time, so
  * a dismissed item stays hidden until it changes: a session that waits a second
  * time is a new item.
  *
@@ -267,32 +247,17 @@ export function bandItems(snapshot: Snapshot, dismissed: readonly string[],
   const errors: BandItem[] = [];
   const waits: BandItem[] = [];
   const now = settings.now ?? snapshot.generated_at;
-  for (const trial of snapshot.trials.recent) {
-    if (!trial.is_green && !SETTLED_CHANGES.has(trial.change_state)) {
-      errors.push({ key: "trial:" + trial.key, level: "error",
-                    text: "Trial failed on " + said(trial.repo) + " " + said(trial.branch) + ": "
-                      + (trial.failed + trial.errors) + " failed" });
-    }
-  }
-  for (const run of snapshot.progress.runs) {
-    if (run.failed > 0) {
-      errors.push({ key: "run:" + run.key + ":" + run.failed, level: "error",
-                    text: said(run.label || run.display) + ": " + run.failed + " failed" });
-    }
-  }
-  // A run pacer refused, or one that failed while pacer held its slot. A run
-  // made with pacing off failed on its own terms and is not pacer's to raise,
-  // and one the person stopped did not fail.
+  // A run pacer refused, and that alone. A command that failed inside a run
+  // already said so where it ran, and repeating it here is a line a person
+  // dismisses every time without learning anything; the run stays in the pane.
   for (const run of snapshot.pacer?.recent ?? []) {
-    const refused = run.mode === "refused";
-    if (!refused && (run.exit === 0 || run.mode === "off" || run.mode === "interrupted")) {
+    if (run.mode !== "refused") {
       continue;
     }
     const where = said(run.repo ?? "a repository");
     errors.push({ key: "pacer:" + (run.repo ?? "") + ":" + run.at, level: "error",
-                  text: refused
-                    ? "Pacer refused a run in " + where + (run.reason ? ": " + said(run.reason) : "")
-                    : "Run failed in " + where + ": exit " + run.exit });
+                  text: "Pacer refused a run in " + where
+                    + (run.reason ? ": " + said(run.reason) : "") });
   }
   for (const pull of snapshot.prs.prs) {
     if (pull.checks === "fail") {
@@ -352,18 +317,11 @@ export type BandInput = {
   surface?: string;
   /** Whether speech is on in every session; the speech switch is drawn only with `onSpeak`. */
   speaking?: boolean;
-  /**
-   * The machine's governance switch, drawn only when the machine has one: a
-   * reading whose source is unconfigured says nothing here and the button goes.
-   */
-  governance?: { governor: boolean | null; controller: boolean | null } | null;
   onToggle: () => unknown;
   onDismiss: () => void;
   onSpeak?: () => unknown;
-  onGovernance?: () => unknown;
   /**
-   * Pacer's switch, drawn only on a machine that runs pacer, where it takes
-   * the gear in place of the governance switch it replaces.
+   * Pacer's switch, drawn only on a machine that runs pacer.
    */
   pacer?: { enabled: boolean | null; confirming?: boolean } | null;
   onPacer?: () => unknown;
@@ -418,22 +376,14 @@ export function bandTree(input: BandInput): Node {
     parts.push(button(BAND_SPEAK, word, input.onSpeak, speaking));
     used += PART_GAP + word.length + BUTTON_CHROME;
   }
-  // The machine's switch sits beside the voice's, and only while the machine
-  // has one: a person who does not run that tooling never sees the button.
-  // Pacer takes the gear where it runs; the governance switch it replaces is
-  // drawn only on a machine without pacer.
+  // Pacer's switch sits beside the voice's, and only while the machine runs
+  // pacer: a person who does not run that tooling never sees the gear.
   const pacing = input.pacer !== undefined && input.pacer !== null
     && input.onPacer !== undefined;
-  const governing = !pacing && input.governance !== undefined && input.governance !== null
-    && input.onGovernance !== undefined;
   const gear: { key: string; press: () => unknown; label: (short: boolean) => string } | null =
     pacing ? { key: BAND_PACER, press: input.onPacer as () => unknown,
                label: (short) => pacerLabel(input.pacer?.enabled ?? null, input.surface, short,
                                             input.pacer?.confirming === true) }
-    : governing ? { key: BAND_GOVERNANCE, press: input.onGovernance as () => unknown,
-                    label: (short) => governanceLabel(input.governance?.governor ?? null,
-                                                      input.governance?.controller ?? null,
-                                                      input.surface, short) }
     : null;
   let gearAt = -1;
   if (gear !== null) {

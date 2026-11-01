@@ -60,7 +60,7 @@
 
 import type { ReaderDocuments } from "../components/snapshot.ts";
 import type { Engine, Register } from "./engine.ts";
-import type { Governance, Job, Pacer } from "../components/state.ts";
+import type { Job, Pacer } from "../components/state.ts";
 import type { PaneConfig } from "../components/options.ts";
 import type { FleetDigestSeen, FleetFold } from "../types/index.d.ts";
 import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.ts";
@@ -115,7 +115,7 @@ export const AHEAD_SECONDS = 2;
 export const LOOK_MS = 3_000;
 /**
  * How old a live governor run's counts may get while a pane shows them, until a
- * reading says otherwise (`refresh.progressMs`).
+ * reading says otherwise (`refresh.liveMs`).
  */
 export const LIVE_MS = 1_000;
 /**
@@ -140,7 +140,7 @@ export const CLAIM_SECONDS = 35;
 /** Where the session reading the whole machine for every session says so. */
 export const CLAIM_KEY = "reading.claim";
 /** Where the session reading a live governor run's counts for every session says so. */
-export const PROGRESS_CLAIM_KEY = "progress.claim";
+export const LIVE_CLAIM_KEY = "live.claim";
 /**
  * The interval the pane is drawn at while something on it moves, and only then:
  * about twelve frames a second, enough for a row to read as sliding.
@@ -298,13 +298,13 @@ export const SETTINGS_MS = 10_000;
  * carries it, and what stands in before one lands.
  */
 type AlertConfig = { toast: boolean; notify: boolean; toastMs: number; snapshotMs: number;
-                     synthesisMs: number; snapshotSeconds: number; progressMs: number;
+                     synthesisMs: number; snapshotSeconds: number; liveMs: number;
                      copyToastMs: number; tabCommandMs: number; keyTipMs: number; tint: TabTint;
                      helperMs: number; worktreeHelperMs: number; clockMs: number;
                      streamStepMs: number };
 const ALERT_DEFAULTS: AlertConfig = { toast: true, notify: true, toastMs: 8000,
                                       snapshotMs: LOOK_MS, synthesisMs: 30_000,
-                                      snapshotSeconds: STALE_SECONDS, progressMs: LIVE_MS,
+                                      snapshotSeconds: STALE_SECONDS, liveMs: LIVE_MS,
                                       copyToastMs: 6000, tabCommandMs: 5_000, keyTipMs: 30_000,
                                       tint: TINT_DEFAULTS, helperMs: 25_000, worktreeHelperMs: 60_000,
                                       clockMs: CLOCK_MS, streamStepMs: STREAM_MS };
@@ -318,7 +318,7 @@ export function alertConfigFrom(documents: unknown): AlertConfig {
   const flag = (key: "toast" | "notify") =>
     typeof carried[key] === "boolean" ? carried[key] as boolean : ALERT_DEFAULTS[key];
   const span = (key: "toastMs" | "snapshotMs" | "synthesisMs" | "snapshotSeconds"
-                      | "progressMs" | "copyToastMs" | "tabCommandMs" | "keyTipMs"
+                      | "liveMs" | "copyToastMs" | "tabCommandMs" | "keyTipMs"
                       | "helperMs" | "worktreeHelperMs" | "clockMs" | "streamStepMs") => {
     const value = carried[key];
     return typeof value === "number" && Number.isFinite(value) && value >= 1
@@ -328,10 +328,10 @@ export function alertConfigFrom(documents: unknown): AlertConfig {
   // interval that build read on, thirty seconds, and none of the intervals the
   // shared reading is aged by: taken here, it would slow every session drawing
   // it, and the panes would drift apart again.
-  const shared = typeof carried.progressMs === "number";
+  const shared = typeof carried.liveMs === "number";
   return { toast: flag("toast"), notify: flag("notify"), toastMs: span("toastMs"),
            snapshotMs: shared ? span("snapshotMs") : ALERT_DEFAULTS.snapshotMs, synthesisMs: span("synthesisMs"),
-           snapshotSeconds: span("snapshotSeconds"), progressMs: span("progressMs"),
+           snapshotSeconds: span("snapshotSeconds"), liveMs: span("liveMs"),
            copyToastMs: span("copyToastMs"), tabCommandMs: span("tabCommandMs"),
            keyTipMs: span("keyTipMs"), tint: tintFrom(carried.tabTint),
            helperMs: span("helperMs"), worktreeHelperMs: span("worktreeHelperMs"),
@@ -371,7 +371,7 @@ type Fold = FleetFold;
  * loads a plugin once, so a registration is a session's view of the machine,
  * and a reading is not state that outlives it.
  */
-type Held = { documents: unknown; at: number; progressAt?: number } | { reason: string; at: number };
+type Held = { documents: unknown; at: number; liveAt?: number } | { reason: string; at: number };
 type State = {
   held: Held | null;
   /** Whether a look at the store is out. */
@@ -419,13 +419,8 @@ type State = {
   /** The rows a person pressed open, by the key the row carries. */
   details: Record<string, true>;
   /**
-   * The governance scope whose switch-off is waiting for its confirming press.
-   *
-   * Switching a scope on is one press; switching one off takes two, so this is
-   * what the pane is told while the first press stands.
+   * Whether pacer's switch-off waits for the press that confirms it.
    */
-  confirmingGovernance: "governor" | "controller" | null;
-  /** Whether pacer's switch-off waits for the press that confirms it. */
   confirmingPacer: boolean;
   /** When that first press was made, in the clock's milliseconds. */
   pacerArmedAt: number;
@@ -508,8 +503,6 @@ type State = {
   shown: Record<string, unknown> | null;
   /** The held reading `shown` has fully landed, so a paint of it steps nothing. */
   shownFrom: unknown;
-  /** When the counts the pane draws were read, so run times age from then. */
-  shownCountsAt: number | undefined;
   /** The timer landing the sections still to land, and those sections in line. */
   streamTimer: { cancel(): void } | null;
   streamQueue: string[];
@@ -576,7 +569,7 @@ type State = {
  * What the store holds under `READING_KEY`: the last reading, when it was taken,
  * and when its governor counts were last read on their own, when they were.
  */
-type Carried = { documents: unknown; at: number; progressAt?: number };
+type Carried = { documents: unknown; at: number; liveAt?: number };
 
 /**
  * Whether a value the store handed back is a reading.
@@ -595,18 +588,18 @@ function isCarried(value: unknown): value is Carried {
     && isReading(candidate.documents as ReaderDocuments | null);
 }
 
-/** What the store holds under `COUNTS_KEY`: a live run's counts and when they were read. */
-type Counts = { at: number; progress: Record<string, unknown> };
+/** What the store holds under `COUNTS_KEY`: pacer's slots and when they were read. */
+type Live = { at: number; pacer: Record<string, unknown> };
 
-/** Whether a value the store handed back is a count read that worked. */
-function isCounts(value: unknown): value is Counts {
+/** Whether a value the store handed back is a pacer read that worked. */
+function isLive(value: unknown): value is Live {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
   }
-  const candidate = value as { at?: unknown; progress?: unknown };
+  const candidate = value as { at?: unknown; pacer?: unknown };
   return typeof candidate.at === "number" && Number.isFinite(candidate.at)
-    && typeof candidate.progress === "object" && candidate.progress !== null
-    && READ_STATES.has((candidate.progress as { state?: unknown }).state);
+    && typeof candidate.pacer === "object" && candidate.pacer !== null
+    && READ_STATES.has((candidate.pacer as { state?: unknown }).state);
 }
 
 /** What a failed run printed, when what it printed is a refusal document. */
@@ -831,16 +824,11 @@ function moved($: Engine, state: State, pane: Pane, nowMs: number): Pane {
  * Land one more of the held reading's sections on what the pane draws, and
  * date the counts when the step brought the governor's.
  */
-function landStep(state: State, held: { documents: unknown; at: number; progressAt?: number },
+function landStep(state: State, held: { documents: unknown; at: number; liveAt?: number },
                   only?: string): string[] {
   const before = state.shown;
   const step = stepStream(before, documentsOf(held), only);
   state.shown = step.documents;
-  // The counts are as old as the read that brought them: a live run's counts
-  // carry their own time, and a whole reading's are as old as it is.
-  if (before === null || (step.documents !== null && before.progress !== step.documents.progress)) {
-    state.shownCountsAt = held.progressAt ?? held.at;
-  }
   return step.pending;
 }
 
@@ -865,20 +853,7 @@ function stopStream(state: State): void {
  * changed every section in one frame, which is the jerk a person sees.
  */
 function streamed($: Engine, state: State,
-                  held: { documents: unknown; at: number; progressAt?: number }): unknown {
-  // A paused source replaces its rows on this paint, without waiting behind
-  // another section's transition.
-  const target = documentsOf(held);
-  if (state.shown !== null && target !== null) {
-    for (const source of ["progress", "trials"]) {
-      if ((target[source] as { state?: unknown } | null)?.state === "paused") {
-        state.shown = { ...state.shown, [source]: target[source] };
-        if (source === "progress") {
-          state.shownCountsAt = held.progressAt ?? held.at;
-        }
-      }
-    }
-  }
+                  held: { documents: unknown; at: number; liveAt?: number }): unknown {
   // A paint of the reading already landed has nothing to step, and one while
   // the timer runs leaves the stepping to it.
   if (state.streamTimer !== null || state.shownFrom === held.documents) {
@@ -986,7 +961,7 @@ async function share($: Engine, state: State): Promise<void> {
   if (isCarried(stored) && newer(stored, state.held)) {
     adopt($, state, stored);
   }
-  if (isCounts(counts)) {
+  if (isLive(counts)) {
     fold($, state, counts);
   }
   // Read once the store has answered: a reading another session wrote during
@@ -1031,11 +1006,11 @@ function look($: Engine, state: State, now: number): void {
   // an interval early: dated when the read finished, a look one interval later
   // would find them a read's length short of due and skip, and the counts would
   // move every other interval.
-  const every = state.alerts.progressMs / 1000;
-  if (state.open && held !== null && "documents" in held && liveRuns(held.documents)
-      && now - (held.progressAt ?? held.at) >= every / 2 && !state.counting) {
+  const every = state.alerts.liveMs / 1000;
+  if (state.open && held !== null && "documents" in held && pacerLive(held.documents)
+      && now - (held.liveAt ?? held.at) >= every / 2 && !state.counting) {
     state.counting = true;
-    void underClaim($, state, PROGRESS_CLAIM_KEY, now, () => readProgress($, state, now))
+    void underClaim($, state, LIVE_CLAIM_KEY, now, () => readPacerLive($, state, now))
       .finally(() => {
         state.counting = false;
         arm($, state);
@@ -1091,8 +1066,8 @@ async function underClaim($: Engine, state: State, key: string, now: number,
 
 /** When a reading's newest part was read: the whole, or its governor counts since. */
 function readAt(held: Held | Carried): number {
-  return Math.max(held.at, "progressAt" in held && typeof held.progressAt === "number"
-    ? held.progressAt : 0);
+  return Math.max(held.at, "liveAt" in held && typeof held.liveAt === "number"
+    ? held.liveAt : 0);
 }
 
 /**
@@ -1113,37 +1088,36 @@ function newer(stored: Carried, held: Held | null): boolean {
 }
 
 /**
- * A whole reading's documents with the counts this session already holds, when
- * those were read after the whole reading's own.
+ * A whole reading's documents with pacer's slots this session already holds,
+ * when those were read after the whole reading's own.
  *
- * A whole read reads the counts as it starts and lands up to a few seconds later,
- * so taking its counts over ones read meanwhile would step a run backwards.
+ * A whole read reads the machine as it starts and lands up to a few seconds
+ * later, so taking its slots over ones read meanwhile would step the pane
+ * backwards on a slot that filled in between.
  */
-function withNewerCounts(before: Held | null, documents: unknown,
-                         progressAt: number): { documents: unknown; progressAt: number } {
-  if ((documents as { progress?: { state?: unknown } } | null)?.progress?.state === "paused") {
-    return { documents, progressAt };
+function withNewerLive(before: Held | null, documents: unknown,
+                       liveAt: number): { documents: unknown; liveAt: number } {
+  if (before === null || !("documents" in before) || before.liveAt === undefined
+      || before.liveAt <= liveAt) {
+    return { documents, liveAt };
   }
-  if (before === null || !("documents" in before) || before.progressAt === undefined
-      || before.progressAt <= progressAt) {
-    return { documents, progressAt };
-  }
-  const progress = (before.documents as { progress?: unknown } | null)?.progress;
-  return { documents: { ...(documents as Record<string, unknown>), progress },
-           progressAt: before.progressAt };
+  const pacer = (before.documents as { pacer?: unknown } | null)?.pacer;
+  return { documents: { ...(documents as Record<string, unknown>), pacer },
+           liveAt: before.liveAt };
 }
 
-/** Fold counts another session read into what this session draws, when they are newer. */
-function fold($: Engine, state: State, counts: Counts): void {
+/** Fold pacer's slots another session read into what this session draws, when newer. */
+function fold($: Engine, state: State, counts: Live): void {
   const held = state.held;
-  if (held === null || !("documents" in held) || counts.at <= (held.progressAt ?? held.at)) {
+  if (held === null || !("documents" in held) || counts.at <= (held.liveAt ?? held.at)) {
     return;
   }
   state.held = { documents: { ...(held.documents as Record<string, unknown>),
-                              progress: counts.progress },
-                 at: held.at, progressAt: counts.at };
+                              pacer: counts.pacer },
+                 at: held.at, liveAt: counts.at };
   $.ui.invalidate("ui.render");
-  // A run's failures are band items, so new counts can move the tab's level.
+  // Pacer's slots are drawn in the pane and its refused runs on the band, so
+  // newer slots can move the tab's level.
   void tint($, state);
 }
 
@@ -1156,9 +1130,9 @@ function fold($: Engine, state: State, counts: Counts): void {
  */
 function adopt($: Engine, state: State, stored: Carried): void {
   const fresh = state.held === null || !("documents" in state.held) || stored.at > state.held.at;
-  const kept = withNewerCounts(state.held, stored.documents,
-                               typeof stored.progressAt === "number" ? stored.progressAt : stored.at);
-  state.held = { documents: kept.documents, at: stored.at, progressAt: kept.progressAt };
+  const kept = withNewerLive(state.held, stored.documents,
+                               typeof stored.liveAt === "number" ? stored.liveAt : stored.at);
+  state.held = { documents: kept.documents, at: stored.at, liveAt: kept.liveAt };
   state.alerts = alertConfigFrom(stored.documents);
   state.timesKnown = true;
   limitHidden(state, stored.documents);
@@ -1222,10 +1196,8 @@ async function readWhole($: Engine, state: State, fresh = false): Promise<void> 
   // landed is known for what it is and read again with it.
   state.sessionIdRead = asked;
   if ("documents" in result) {
-    const progressAt = (result.documents as { progress?: { state?: unknown } })?.progress?.state
-      === "paused" ? result.at : started;
-    const kept = withNewerCounts(state.held, result.documents, progressAt);
-    state.held = { documents: kept.documents, at: result.at, progressAt: kept.progressAt };
+    const kept = withNewerLive(state.held, result.documents, started);
+    state.held = { documents: kept.documents, at: result.at, liveAt: kept.liveAt };
   } else {
     state.held = result;
   }
@@ -1245,9 +1217,7 @@ async function readWhole($: Engine, state: State, fresh = false): Promise<void> 
     // lapses, and the one that finishes last is not the one that read last.
     const stored: unknown = await $.store.get(READING_KEY).catch(() => undefined);
     if (!(isCarried(stored) && stored.at > result.at)) {
-      const progressAt = (result.documents as { progress?: { state?: unknown } })?.progress?.state
-        === "paused" ? result.at : started;
-      await $.store.set(READING_KEY, { at: result.at, progressAt,
+      await $.store.set(READING_KEY, { at: result.at, liveAt: started,
                                        documents: result.documents })
         .catch(() => undefined);
     }
@@ -1256,26 +1226,49 @@ async function readWhole($: Engine, state: State, fresh = false): Promise<void> 
   $.ui.invalidate("ui.render");
 }
 
-/** The progress states a read that worked answers with: runs counted, or none to count. */
-const READ_STATES: ReadonlySet<unknown> = new Set(["ready", "empty", "paused"]);
+/** The states a read that worked answers with: something read, or nothing there to read. */
+const READ_STATES: ReadonlySet<unknown> = new Set(["ready", "empty"]);
 
-/** Whether a reading holds a governor run that is live now. */
-function liveRuns(documents: unknown): boolean {
-  const progress = (documents as { progress?: { runs?: unknown } } | null)?.progress;
-  return Array.isArray(progress?.runs) && progress.runs.length > 0;
+/**
+ * Whether a reading holds pacer work that moves between whole reads.
+ *
+ * A slot taken, a caller waiting or a process running outside the slots all
+ * change while a whole read is twenty seconds away, so those are worth the
+ * short read; an idle machine is not.
+ */
+function pacerLive(documents: unknown): boolean {
+  const pacer = (documents as { pacer?: { slots?: unknown; waiting?: unknown;
+                                         outsideCount?: unknown } } | null)?.pacer;
+  if (pacer === undefined || pacer === null) {
+    return false;
+  }
+  const slots = Array.isArray(pacer.slots) ? pacer.slots : [];
+  const busy = slots.some((slot) => (slot as { busy?: unknown } | null)?.busy === true);
+  const waiting = Array.isArray(pacer.waiting) ? pacer.waiting.length > 0 : false;
+  const outside = typeof pacer.outsideCount === "number" && pacer.outsideCount > 0;
+  return busy || waiting || outside;
 }
 
 /**
- * Read a live governor run's counts on their own, draw them, and keep them under
- * their own key for every session.
+ * Read pacer's slots on their own, draw them, and keep them under their own key
+ * for every session.
  *
- * A read that fails leaves the whole reading standing: the counts it held are
+ * Pacer's own status is the one machine reading that moves second by second,
+ * and its settings can be moved from a dashboard while the pane is open, so
+ * this is what makes the section live rather than twenty seconds old.
+ *
+ * A read that fails leaves the whole reading standing: the slots it held are
  * older, not wrong, and the next whole read says what the machine says. That
  * includes a reader that failed inside the read command, which answers with a
  * document naming the failure rather than with an exit code.
  */
-async function readProgress($: Engine, state: State, progressAt: number): Promise<void> {
-  const run = await runEntry($, "snapshot", ["--only", "progress"], 10_000)
+async function readPacerLive($: Engine, state: State, liveAt: number): Promise<void> {
+  // The bound is the configured one for a read command, not a number written
+  // here: the pacer reader inside is already bounded by its own configured
+  // command time, and an outer limit shorter than that stops every live read
+  // once a person raises it, leaving old slots drawn as current with nothing
+  // saying why.
+  const run = await runEntry($, "snapshot", ["--only", "pacer"], state.alerts.helperMs)
     .catch(() => null);
   if (run === null || run.exitCode !== 0) {
     return;
@@ -1286,19 +1279,19 @@ async function readProgress($: Engine, state: State, progressAt: number): Promis
   } catch {
     return;
   }
-  const progress = (part as { progress?: unknown } | null)?.progress;
+  const pacer = (part as { pacer?: unknown } | null)?.pacer;
   const held = state.held;
-  if (typeof progress !== "object" || progress === null || held === null
+  if (typeof pacer !== "object" || pacer === null || held === null
       || !("documents" in held)
-      || !READ_STATES.has((progress as { state?: unknown }).state)) {
+      || !READ_STATES.has((pacer as { state?: unknown }).state)) {
     return;
   }
-  const counts: Counts = { at: progressAt, progress: progress as Record<string, unknown> };
+  const counts: Live = { at: liveAt, pacer: pacer as Record<string, unknown> };
   fold($, state, counts);
-  // Kept only when no newer counts are there: two sessions count at once when a
+  // Kept only when no newer slots are there: two sessions read at once when a
   // claim lapses, and the one that finishes last is not the one that read last.
   const stored: unknown = await $.store.get(COUNTS_KEY).catch(() => undefined);
-  if (!(isCounts(stored) && stored.at >= progressAt)) {
+  if (!(isLive(stored) && stored.at >= liveAt)) {
     await $.store.set(COUNTS_KEY, counts).catch(() => undefined);
   }
 }
@@ -1357,8 +1350,8 @@ function hydrate($: Engine, state: State): void {
     .then((stored: unknown) => {
       if (state.held === null && isCarried(stored)) {
         state.held = { documents: stored.documents, at: stored.at,
-                       ...(typeof stored.progressAt === "number"
-                         ? { progressAt: stored.progressAt } : {}) };
+                       ...(typeof stored.liveAt === "number"
+                         ? { liveAt: stored.liveAt } : {}) };
         // The settings travel with the reading, so a pane opened on the one the
         // last session left times its toasts as that reading says, not as the
         // packaged default does until the next look.
@@ -2332,7 +2325,6 @@ function paneActions($: Engine, state: State, surface: string): PaneActions {
     resend: (job) => { void resendReply($, state, job).catch(() => undefined); },
     clearAnswered: () => { void clearAnswered($, state).catch(() => undefined); },
     clearUnreadable: (job) => { void clearUnreadable($, state, job).catch(() => undefined); },
-    governance: (scope) => { void moveGovernance($, state, scope).catch(() => undefined); },
     pacer: (wanted) => { void movePacer($, state, wanted).catch(() => undefined); },
   };
 }
@@ -2449,124 +2441,22 @@ async function switchPacer($: Engine, state: State, wanted: boolean) {
 }
 
 /**
- * The switch as the reading in hand states it, or null when it states nothing.
+ * Draw pacer's own answer at once, here and for the next session to open.
  *
- * Every press reads the value from here rather than from the drawn row: another
- * session may have moved the switch since this one painted, and a press that
- * trusted the paint would run the switch the wrong way.
- */
-function heldGovernance(state: State): Governance | null {
-  const held = state.held;
-  if (held === null || !("documents" in held)
-      || !isReading(held.documents as ReaderDocuments | null)) {
-    return null;
-  }
-  const governance = snapshotFrom(held.documents as ReaderDocuments,
-                                  "at" in held ? held.at : 0).governance;
-  return governance?.state === "ready" ? governance : null;
-}
-
-/**
- * Move one governance scope, or ask for the press that confirms switching it off.
- *
- * Switching a scope off is a gate going away, so it takes a second press;
- * switching one on is the gate coming back and does not. The band moves both
- * scopes at once and has no second press, so it only ever moves them the safe
- * way when they disagree: anything but both on turns both on.
- */
-async function moveGovernance($: Engine, state: State, scope: "governor" | "controller") {
-  const governance = heldGovernance(state);
-  const isOn = scope === "governor" ? governance?.governor : governance?.controller;
-  if (isOn === null || isOn === undefined) {
-    return;
-  }
-  if (isOn && state.confirmingGovernance !== scope) {
-    state.confirmingGovernance = scope;
-    $.ui.invalidate("ui.render");
-    return;
-  }
-  state.confirmingGovernance = null;
-  await switchGovernance($, state, scope, !isOn);
-}
-
-/** Move both scopes from the band's one press. */
-async function moveGovernanceBoth($: Engine, state: State) {
-  const governance = heldGovernance(state);
-  if (governance === null) {
-    return;
-  }
-  // Both on means both go off; anything else means both come back on, which is
-  // the direction that cannot leave a gate away because a scope was mixed.
-  const bothOn = governance.governor === true && governance.controller === true;
-  state.confirmingGovernance = null;
-  await switchGovernance($, state, "both", !bothOn);
-}
-
-/**
- * Run the switch, say why when it refused, and read again to show where it went.
- *
- * The entry answers a refusal on its standard output and exits nought, so the
- * printed document is part of what decides whether the switch moved.
- */
-async function switchGovernance($: Engine, state: State, scope: "governor" | "controller" | "both",
-                                turnOn: boolean) {
-  const args = ["--set", scope, turnOn ? "--on" : "--off"];
-  let run: Awaited<ReturnType<typeof runEntry>>;
-  try {
-    run = await runEntry($, "governance", args, ASK_MS);
-  } catch (error) {
-    const said = cancelled(error) ? "the switch was stopped before it answered"
-      : interpreterAdvice("governance", error instanceof Error ? error.message : String(error));
-    await say($, "fleet: " + said, state.alerts.copyToastMs).catch(() => undefined);
-    $.ui.invalidate("ui.render");
-    return;
-  }
-  if (run.exitCode !== 0) {
-    const reason = run.stderr.trim().split("\n")[0] || "the switch refused it";
-    await say($, "fleet: " + reason, state.alerts.copyToastMs).catch(() => undefined);
-  } else {
-    const printed = printedDocument(run.stdout);
-    if (printed !== null && (printed.state === "failed" || printed.state === "unavailable"
-        || printed.state === "unconfigured")) {
-      const first = Array.isArray(printed.errors) && typeof printed.errors[0] === "object"
-        && printed.errors[0] !== null
-        ? (printed.errors[0] as { reason?: unknown }).reason : undefined;
-      const reason = typeof first === "string" && first ? first : "the switch did not move";
-      await say($, "fleet: " + reason, state.alerts.copyToastMs).catch(() => undefined);
-    } else if (printed !== null && printed.state === "ready") {
-      // The entry answers with the state the file now holds, which is newer than
-      // the shared reading every session is drawing. A look at the store finds
-      // that reading fresh and skips the machine, so a press that only asked for
-      // a look went on drawing the old word for a whole interval: the button
-      // looked dead. Its own answer is drawn here at once.
-      await carryDocument($, state, "governance", printed);
-      return;
-    }
-  }
-  // A switch that printed nothing usable is read again, like a refusal: the
-  // file is the proof, and the next reading draws it.
-  refresh($, state, "press");
-  $.ui.invalidate("ui.render");
-}
-
-/**
- * Draw the switch's own answer at once, here and for the next session to open.
- *
- * The reading's own age is kept: only the switch's part is fresher than it,
- * and resetting the date would put off the next whole read, which is what says
+ * The reading's own age is kept: only pacer's part is fresher than it, and
+ * resetting the date would put off the next whole read, which is what says
  * whether anything else on the machine moved. Every other session draws the
- * patched reading from the store when it next looks, and reads the switch for
- * itself on its next whole read.
+ * patched reading from the store when it next looks.
  */
-async function carryDocument($: Engine, state: State, part: "governance" | "pacer",
+async function carryDocument($: Engine, state: State, part: "pacer",
                              printed: Record<string, unknown>): Promise<void> {
   const held = state.held;
   if (held !== null && "documents" in held
       && isReading(held.documents as ReaderDocuments | null)) {
     const documents = { ...(held.documents as Record<string, unknown>), [part]: printed };
-    const progressAt = typeof held.progressAt === "number" ? held.progressAt : held.at;
-    state.held = { documents, at: held.at, progressAt };
-    await $.store.set(READING_KEY, { at: held.at, progressAt, documents }).catch(() => undefined);
+    const liveAt = typeof held.liveAt === "number" ? held.liveAt : held.at;
+    state.held = { documents, at: held.at, liveAt };
+    await $.store.set(READING_KEY, { at: held.at, liveAt, documents }).catch(() => undefined);
   }
   $.ui.invalidate("ui.render");
 }
@@ -2814,8 +2704,8 @@ function arm($: Engine, state: State): void {
     return;
   }
   const held = state.held;
-  const live = state.open && held !== null && "documents" in held && liveRuns(held.documents);
-  const ms = live ? Math.min(state.alerts.snapshotMs, state.alerts.progressMs)
+  const live = state.open && held !== null && "documents" in held && pacerLive(held.documents);
+  const ms = live ? Math.min(state.alerts.snapshotMs, state.alerts.liveMs)
     : state.alerts.snapshotMs;
   if (state.timer !== null && state.timerMs === ms) {
     return;
@@ -3101,7 +2991,7 @@ function armTips($: Engine, state: State): void {
 
 /** The heading a section is named by in the commands that open the pane on it. */
 const ONE_SECTION_TITLES: Record<string, string> = {
-  worktrees: "Worktrees", keys: "Keys", governance: "Governance", pacer: "Pacer",
+  worktrees: "Worktrees", keys: "Keys", pacer: "Pacer",
 };
 
 /**
@@ -3121,12 +3011,6 @@ export function sectionOfKey(key: string): string | null {
   }
   if (key.startsWith("pr:")) {
     return "prs";
-  }
-  if (key.startsWith("run:")) {
-    return "running";
-  }
-  if (key.startsWith("trial:")) {
-    return "trials";
   }
   return null;
 }
@@ -3265,7 +3149,7 @@ export const register: Register = (on, options) => {
   const state: State = { held: null, looking: false, readingWhole: false, counting: false, hydrated: false, pressed: {},
                          restored: false, shownAll: {}, shownAllRestored: false,
                          putAway: {}, putAwayRestored: false,
-                         focus: null, details: {}, confirmingGovernance: null,
+                         focus: null, details: {},
                          confirmingPacer: false, pacerArmedAt: 0,
                          hidden: [], replied: [], replying: new Set(), cleared: [],
                          paused: null,
@@ -3279,7 +3163,7 @@ export const register: Register = (on, options) => {
                          token: Math.random().toString(36).slice(2),
                          engineSession: null, measuring: false, measured: false,
                          motion: motionMemory(), frames: null, framed: 0,
-                         shown: null, shownFrom: undefined, shownCountsAt: undefined, streamTimer: null, streamQueue: [],
+                         shown: null, shownFrom: undefined, streamTimer: null, streamQueue: [],
                          clock: null, clockMs: 0,
                          interactive: true, freshAsked: false, terminal: null,
                          tab: tabSender(), tabBeat: null, tabBeatMs: 0, tabId: null, tipsWord: undefined, tipsSet: false, tipTurn: 0, tipTimer: null,
@@ -3296,7 +3180,7 @@ export const register: Register = (on, options) => {
     // the pane opened blank.
     const commands = [
       { name: "llm-fleet",
-        description: "Background jobs, trials and PRs across this machine, in a pane",
+        description: "Background jobs, pull requests and pacer across this machine, in a pane",
         argumentHint: "[close|unhide|doctor|setup]",
         immediate: true },
       { name: "speak",
@@ -3643,16 +3527,9 @@ export const register: Register = (on, options) => {
                              closer(element);
                              return;
                            }
-                           // A governance scope armed for its confirming press
-                           // is put down by any other control: the second press
-                           // has to follow the first, not an afternoon of
-                           // reading between them.
-                           if (state.confirmingGovernance !== null) {
-                             state.confirmingGovernance = null;
-                             $.ui.invalidate("ui.render");
-                           }
-                           // Pacer's armed switch-off is put down the same way,
-                           // by any press but its own.
+                           // Pacer's armed switch-off is put down by any press
+                           // but its own: the second press has to follow the
+                           // first, not an afternoon of reading between them.
                            if (state.confirmingPacer && element !== PACER_SWITCH) {
                              state.confirmingPacer = false;
                              $.ui.invalidate("ui.render");
@@ -3748,9 +3625,7 @@ export const register: Register = (on, options) => {
                            putAway: state.putAway,
                            focus: state.focus,
                            details: state.details,
-                           confirmingGovernance: state.confirmingGovernance,
                            confirmingPacer: state.confirmingPacer,
-                           countsAt: state.shownCountsAt,
                            actions: paneActions($, state, e.surface),
                            replied: state.replied,
                            replyPendingSeconds: paneNumberFrom(state.held.documents, "replyPendingSeconds",
@@ -3813,16 +3688,7 @@ export const register: Register = (on, options) => {
       width: e.props.bodyColumns,
       surface: e.surface,
       speaking: state.speechOn === true,
-      // The switch is drawn only for a machine that has one: a reading whose
-      // governance source is unconfigured carries no state to draw.
-      governance: snapshot !== null && snapshot.governance?.state === "ready"
-        ? { governor: snapshot.governance.governor,
-            controller: snapshot.governance.controller }
-        : null,
-      onGovernance: snapshot !== null && snapshot.governance?.state === "ready"
-        ? () => moveGovernanceBoth($, state).catch(() => undefined)
-        : undefined,
-      // Pacer takes the gear on a machine that runs it.
+      // Pacer is the machine's one gear, drawn only where pacer runs.
       pacer: snapshot !== null && snapshot.pacer?.state === "ready"
         ? { enabled: snapshot.pacer.enabled,
             confirming: state.confirmingPacer && snapshot.pacer.enabled === true }

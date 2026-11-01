@@ -41,3 +41,6 @@ logs/
 *.local.json
 .advisor-context.md
 .fleet-export.json
+
+# Mutation receipts: the shared store the gate writes and the pull-request guard reads
+.mutation-receipts/

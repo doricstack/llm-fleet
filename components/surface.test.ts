@@ -141,7 +141,7 @@ test("a reading with no clock of its own is aged from when it was taken", () => 
 
 test("a source named with nothing under it is not a source", () => {
   assert.equal(isReading({ roster: null } as never), false);
-  assert.equal(isReading({ roster: null, trials: null } as never), false);
+  assert.equal(isReading({ roster: null, pacer: null } as never), false);
   // A source that is the wrong shape is named, and the assembly fails it rather
   // than reading it as empty, so it still counts as naming one.
   assert.equal(isReading({ roster: [1, 2] } as never), true);
@@ -190,7 +190,7 @@ test("the surface takes the options it is given rather than inventing them", () 
 
 test("a document naming a state this layer does not know is failed, not empty", () => {
   const documents = reading();
-  documents.trials = { state: "something-new" };
+  documents.pacer = { state: "something-new" };
   const drawn = draw(input({ documents: documents as never }));
   assert.equal(drawn.text.includes("Could not read"), true);
 });

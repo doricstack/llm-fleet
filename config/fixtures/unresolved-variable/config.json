@@ -1,9 +1,9 @@
 {
   "stateDir": "$FLEET_OTHER/state",
   "sources": {
-    "progress": {
+    "skills": {
       "enabled": true,
-      "directory": "$(pwd)/progress"
+      "directory": "$(pwd)/skills"
     }
   }
 }

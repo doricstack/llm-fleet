@@ -41,7 +41,6 @@ test("a rendered pane carries the rows, the counts and the warning", () => {
   assert.equal(text.includes("waiting 2m"), true, text);
   assert.equal(text.includes("Which source?"), true);
   assert.equal(text.includes("1 checked out"), true);
-  assert.equal(text.includes("3 cleaned this week"), true);
   // Worktrees is one of the sections the contract starts folded, so its row is
   // not drawn and its heading says so. The review page shows what the pane
   // shows; a page that unfolded it would be showing a pane nobody has.
@@ -61,8 +60,8 @@ test("a folded section still names what it holds, and opens when it is told to",
 test("the page carries every heading and both controls, which are drawn as buttons", () => {
   const text = renderText(DOCUMENTS, 100, NOW, NOW - 4);
   // The warnings are left out while nothing is wrong, which is this reading.
-  for (const heading of ["Background sessions", "Trials", "Pull requests",
-                         "Worktrees", "Skills", "Running", "Keys"]) {
+  for (const heading of ["Background sessions", "Pull requests",
+                         "Worktrees", "Skills", "Keys"]) {
     assert.equal(text.includes(heading), true, heading);
   }
   // A heading is a control now, and a control's text is its label: a renderer
@@ -176,10 +175,9 @@ test("a drawn pane fits the width it was given", () => {
   const documents: ReaderDocuments = {
     roster: { state: "ready", jobs: [], interactive: {}, errors: [], providers: {},
               sources: { jobs: "ready", interactive: "ready" } },
-    progress: { state: "ready", errors: [], runs: [
-      { key: "k", repo: "project", branch: "feature-a", label: "Test export boundaries",
-        display: "Test export boundaries", done: 42, total: 80, failed: 1,
-        first_failure: "", elapsed: 120, eta_minutes: null, phase: "running" }] },
+    // The context window is the one bar the pane draws now: a share of a
+    // hundred, which the surface draws as cells and the page as a drawing.
+    session: { state: "ready", remainingPercent: 42 },
   };
   for (const width of [60, 80, 100]) {
     const text = renderText(documents, width, NOW, NOW - 4);
@@ -215,10 +213,9 @@ test("the drawings are the open pane's bars, each with what it shows in its alt"
   const documents: ReaderDocuments = {
     roster: { state: "ready", jobs: [], interactive: {}, errors: [], providers: {},
               sources: { jobs: "ready", interactive: "ready" } },
-    progress: { state: "ready", errors: [], runs: [
-      { key: "k", repo: "project", branch: "feature-a", label: "Test export boundaries",
-        display: "Test export boundaries", done: 42, total: 80, failed: 1,
-        first_failure: "", elapsed: 120, eta_minutes: null, phase: "running" }] },
+    // The context window is the one bar the pane draws now: a share of a
+    // hundred, which the surface draws as cells and the page as a drawing.
+    session: { state: "ready", remainingPercent: 42 },
   };
   const drawn = renderVectors(documents, 100, NOW, NOW - 4);
   assert.ok(drawn.length >= 1, "no drawing for a run with counts");
@@ -227,21 +224,21 @@ test("the drawings are the open pane's bars, each with what it shows in its alt"
     assert.ok(vector.alt.trim().length > 0);
     assert.ok(vector.cells > 0 && vector.cells <= 100, String(vector.cells));
   }
-  assert.ok(drawn.some((vector) => vector.alt.includes("42")), JSON.stringify(drawn.map((v) => v.alt)));
+  assert.ok(drawn.some((vector) => vector.alt.includes("58")),
+            JSON.stringify(drawn.map((v) => v.alt)));
 });
 
 test("a section folded shut draws nothing where it would have drawn a bar", () => {
   const documents: ReaderDocuments = {
     roster: { state: "ready", jobs: [], interactive: {}, errors: [], providers: {},
               sources: { jobs: "ready", interactive: "ready" } },
-    progress: { state: "ready", errors: [], runs: [
-      { key: "k", repo: "project", branch: "feature-a", label: "Test export boundaries",
-        display: "Test export boundaries", done: 42, total: 80, failed: 1,
-        first_failure: "", elapsed: 120, eta_minutes: null, phase: "running" }] },
+    // The context window is the one bar the pane draws now: a share of a
+    // hundred, which the surface draws as cells and the page as a drawing.
+    session: { state: "ready", remainingPercent: 42 },
   };
   const open = renderVectors(documents, 100, NOW, NOW - 4);
   const shut = renderVectors(documents, 100, NOW, NOW - 4,
-                             { running: { visible: true, collapsed: true } });
+                             { session: { visible: true, collapsed: true } });
   assert.ok(shut.length < open.length, open.length + " open, " + shut.length + " shut");
 });
 

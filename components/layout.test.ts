@@ -109,15 +109,30 @@ test("a row pressed open draws what it holds in full, and a row left shut does n
 });
 
 test("a section names the figures in its columns, once, above its rows", () => {
-  const columns = [{ text: "CPU", width: 6, align: "right" as const },
-                   { text: " MEM", width: 8, align: "left" as const }];
+  const columns = [{ text: "CPU", width: 8, align: "right" as const },
+                   { text: " MEM", width: 11, align: "right" as const }];
   const open = renderedText(renderPane(pane({ groups: [group({ columns })] })));
-  const names = open.indexOf("CPU");
+  // A name is drawn in its column's own width, so it is padded: the case reads
+  // the run that holds it rather than an exact word.
+  const names = open.findIndex((entry) => entry.includes("CPU"));
   assert.equal(names > 0, true);
   assert.equal(names < open.indexOf("Test suite"), true, "the names head the rows");
+  // Each name is the width of the column under it, and the space between them
+  // is in the cells themselves: the row joins its figures the same way, so the
+  // names stand over the figures instead of beside them.
+  const run = open.slice(names).filter((entry) => entry.includes("CPU") || entry.includes("MEM"));
+  assert.deepEqual(run.map((entry) => entry.length), [8, 11]);
+  // The names end where the figures end: the rows are drawn three cells in,
+  // behind their rail, so the 115 cells the section holds leave the names 112
+  // and a spacer of 96. A header measured without the rail spends those three
+  // cells and stands past the figures its names.
+  const spacer = open[names - 1] ?? "";
+  assert.equal(spacer.trim(), "");
+  assert.equal(spacer.length + run[0]!.length + run[1]!.length, 96 + 8 + 11);
+  assert.equal(spacer.length, 96);
   // Folded, the section draws no rows, so it names no columns above them.
   const folded = renderedText(renderPane(pane({ groups: [group({ columns, collapsed: true })] })));
-  assert.equal(folded.includes("CPU"), false);
+  assert.equal(folded.some((entry) => entry.includes("CPU")), false);
 });
 
 test("the footer is the pane's last line, drawn dim and cut rather than wrapped", () => {

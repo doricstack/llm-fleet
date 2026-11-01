@@ -18,7 +18,7 @@ A machine running several agent sessions tends to accumulate the same blind spot
 - a failed job is found when you remember it, not when it fails
 - every side project grows its own script to answer "what is running"
 
-`llm-fleet` puts one read-only pane in front of those systems. It does not start, stop or change the work it reports; it reads what is already there, from the commands and files you point it at.
+`llm-fleet` puts one read-only pane in front of those systems. It does not start, stop or change the work it reports; it reads what is already there, from the commands and files you point it at. The one thing it moves is pacer's own switch, through the command you name for it.
 
 ```text
 Your prompt
@@ -43,7 +43,7 @@ Your prompt
 - Draws a band above the prompt carrying what needs you, with each figure opening the pane on its rows.
 - Reaches you with an alert when a job fails or starts waiting.
 - Folds a section by pressing its heading, and opens the rest of a row by pressing its figures.
-- Lets the machine's load, pull requests, worktrees, trials, progress, a run-slot pacer, skill scans and your own command-driven sections join the pane when you switch them on.
+- Lets the machine's load, pull requests, worktrees, pacer's run slots, skill scans and your own command-driven sections join the pane when you switch them on.
 - Reads one configuration file, refuses a key it does not know by name, and leaves the machine's own details out of the repository.
 - Starts outside commands with your Anthropic and provider API key variables removed from their environment.
 
@@ -55,14 +55,15 @@ The figures at the top are the controls: press one and the pane narrows to those
 
 | Section | What it shows | On at install |
 | --- | --- | --- |
-| Sessions | every live session, with its model, step, context use and spend | yes |
-| Background jobs | each job's command, pid and outcome | yes |
-| Agent cards | this session's own cost, context and limits | yes |
+| Background sessions | every live session as a card, with its model, step, context use and spend | yes |
+| This session | this session's own spend, context window and rate-limit windows, from the payload the status line records | no |
+| Pacer | pacer's switch, its live settings, each slot and the repository holding it, heavy work running outside them, who waits, and the last runs, read from the command you name | no |
 | Pull requests | open pull requests with their checks and pages | no |
+| Warnings | source errors, interactive session counts and data age | yes |
 | Worktrees | each worktree with its cleanup line | no |
-| Trials and progress | a run's rows and its finished steps against its total | no |
-| Pacer | a run-slot pacer's switch, each slot and who holds it, who waits, and its last runs, read from the command you name | no |
 | Skill scans | each scan with its report command | no |
+| Load | the machine's own CPU and memory as meters, then the processes using the most of either | no |
+| Keys | the pane's own bindings and your key tips | yes |
 | Your own sections | whatever one of your commands prints as rows | no |
 
 A source you have not configured is drawn as unconfigured, never as an empty list. A source that failed says so in its own row.

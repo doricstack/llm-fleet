@@ -11,12 +11,14 @@
       "interactive": {
         "state": "unconfigured"
       },
-      "trials": {
+      "worktrees": {
         "enabled": true,
         "state": "unavailable",
-        "database": "/fixture/runner/state/absent.db"
+        "roots": [
+          "/fixture/runner/state/absent-tree"
+        ]
       },
-      "progress": {
+      "skills": {
         "enabled": true,
         "state": "unavailable",
         "directory": "/fixture/runner/state/not-a-directory"

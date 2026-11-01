@@ -54,6 +54,12 @@ class TranscriptCase(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    def config_file(self):
+        """A configuration of this case's own: the command reads no machine's file."""
+        path = self.root / "config.json"
+        path.write_text(json.dumps({"stateDir": str(self.root / "state")}))
+        return path
+
     def transcript(self, records, name="session.jsonl"):
         path = self.root / name
         path.write_text("\n".join(
@@ -341,7 +347,8 @@ class TranscriptCase(unittest.TestCase):
 
     def test_the_command_reads_the_prices_from_the_configuration(self):
         path = self.transcript([assistant(0, 0, 1_000_000)])
-        result = subprocess.run([sys.executable, str(SCRIPT), "--path", str(path),
+        result = subprocess.run([sys.executable, str(SCRIPT), "--config", str(self.config_file()),
+                                 "--path", str(path),
                                  "--model", "claude-sonnet-5-5"],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -356,7 +363,8 @@ class TranscriptCase(unittest.TestCase):
         # `other` rate of 5 there, at its own rates from the agents group here.
         # The key is the family and generation the rates were checked against.
         path = self.transcript([assistant(0, 0, 1_000_000)])
-        result = subprocess.run([sys.executable, str(SCRIPT), "--path", str(path),
+        result = subprocess.run([sys.executable, str(SCRIPT), "--config", str(self.config_file()),
+                                 "--path", str(path),
                                  "--model", "claude-fable-5-1"],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -369,7 +377,8 @@ class TranscriptCase(unittest.TestCase):
         # priced at that generation's own rates, not at its family's, and the
         # generation key wins over the family key it also matches.
         path = self.transcript([assistant(0, 0, 1_000_000)])
-        result = subprocess.run([sys.executable, str(SCRIPT), "--path", str(path),
+        result = subprocess.run([sys.executable, str(SCRIPT), "--config", str(self.config_file()),
+                                 "--path", str(path),
                                  "--model", "claude-opus-4-7"],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -382,7 +391,8 @@ class TranscriptCase(unittest.TestCase):
         # no cost rather than its family's rate, and no saving rather than one
         # priced at another generation's rate.
         path = self.transcript([assistant(0, 0, 1_000_000)])
-        result = subprocess.run([sys.executable, str(SCRIPT), "--path", str(path),
+        result = subprocess.run([sys.executable, str(SCRIPT), "--config", str(self.config_file()),
+                                 "--path", str(path),
                                  "--model", "claude-opus-4-6"],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -392,8 +402,8 @@ class TranscriptCase(unittest.TestCase):
         self.assertNotIn("pricePerMTok", document)
 
     def test_the_command_exits_nonzero_when_there_is_no_economics(self):
-        result = subprocess.run([sys.executable, str(SCRIPT), "--path",
-                                 str(self.root / "not-there.jsonl")],
+        result = subprocess.run([sys.executable, str(SCRIPT), "--config", str(self.config_file()),
+                                 "--path", str(self.root / "not-there.jsonl")],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(json.loads(result.stdout)["state"], "unavailable")

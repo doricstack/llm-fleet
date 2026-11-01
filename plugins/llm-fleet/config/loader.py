@@ -30,7 +30,7 @@ SCHEMA_NAME = "schema.json"
 ROOT_PATH = ""
 
 PROVIDER_STATES = ("disabled", "unavailable", "ready")
-SOURCE_STATES = ("disabled", "unconfigured", "unavailable", "ready", "paused")
+SOURCE_STATES = ("disabled", "unconfigured", "unavailable", "ready")
 MOD_STATES = ("disabled", "unavailable", "ready")
 
 CODE_VERSION = "E_CONFIG_VERSION"
@@ -561,9 +561,6 @@ def _group_state(group: dict[str, Any], values: dict[str, Any],
             errors.append(error(CODE_REQUIRED, "{0}.{1}".format(group["path"], name)))
     if incomplete:
         return None
-    marker = values.get(group.get("pausedWhenExists"))
-    if marker and probe(marker) != "missing":
-        return "paused"
     if group.get("requiresReadyProvider") and not any(
             entry.get("state") == "ready" for entry in providers):
         return "unconfigured"

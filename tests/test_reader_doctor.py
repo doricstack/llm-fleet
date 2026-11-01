@@ -101,13 +101,13 @@ class SourceTests(DoctorCase):
                       [entry["path"] for entry in diagnosis["config"]["errors"]])
 
     def test_a_missing_target_is_unavailable_and_names_the_field_and_its_kind(self):
-        self.config({"sources": {"trials": {"enabled": True,
-                                            "database": str(self.root / "gone.db")}}})
-        trials = self.source(doctor.diagnose(environ=self.environ), "trials")
-        self.assertEqual(trials["state"], "unavailable")
-        self.assertTrue(trials["problem"])
-        self.assertIn("sources.trials.database", trials["hint"])
-        self.assertIn("file", trials["hint"])
+        self.config({"sources": {"worktrees": {"enabled": True,
+                                               "roots": [str(self.root / "gone")]}}})
+        trees = self.source(doctor.diagnose(environ=self.environ), "worktrees")
+        self.assertEqual(trees["state"], "unavailable")
+        self.assertTrue(trees["problem"])
+        self.assertIn("sources.worktrees.roots", trees["hint"])
+        self.assertIn("directory", trees["hint"])
 
     def test_a_source_switched_off_is_not_a_problem_and_says_how_to_switch_it_on(self):
         worktrees = self.source(doctor.diagnose(environ=self.environ), "worktrees")
@@ -117,7 +117,7 @@ class SourceTests(DoctorCase):
 
     def test_every_hint_names_a_key_the_schema_declares(self):
         declared = {field["path"] for field in load_schema("")["fields"]} | {"providers"}
-        self.config({"sources": {"trials": {"enabled": True, "database": str(self.root / "x")}}})
+        self.config({"sources": {"worktrees": {"enabled": True, "roots": [str(self.root / "x")]}}})
         diagnosis = doctor.diagnose(environ=self.environ)
         for entry in diagnosis["sources"]:
             for key in doctor.hint_keys(entry["hint"] or ""):

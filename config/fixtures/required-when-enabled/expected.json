@@ -2,11 +2,11 @@
   "errors": [
     {
       "code": "E_CONFIG_REQUIRED",
-      "path": "sources.prs.repositories"
+      "path": "sources.pacer.command"
     },
     {
       "code": "E_CONFIG_REQUIRED",
-      "path": "sources.trials.database"
+      "path": "sources.prs.repositories"
     },
     {
       "code": "E_CONFIG_REQUIRED",

@@ -2,7 +2,7 @@
   "errors": [
     {
       "code": "E_CONFIG_VALUE",
-      "path": "sources.progress.directory"
+      "path": "sources.skills.directory"
     },
     {
       "code": "E_CONFIG_UNRESOLVED_VAR",

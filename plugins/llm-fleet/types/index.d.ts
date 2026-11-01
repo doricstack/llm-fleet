@@ -35,11 +35,11 @@ export type FleetDigestSeen = { at: number };
 export interface FleetStore {
   /** Which session reads the whole machine for every session, and since when. */
   "reading.claim": { at: number; by: string };
-  /** Which session reads a live governor run's counts for every session. */
-  "progress.claim": { at: number; by: string };
+  /** Which session reads pacer's slots for every session. */
+  "live.claim": { at: number; by: string };
   /** The last reading, so a pane opens on the fleet as it last stood. */
-  "last-reading": { documents: unknown; at: number; progressAt?: number };
-  /** A live governor run's counts, read apart from the whole reading. */
+  "last-reading": { documents: unknown; at: number; liveAt?: number };
+  /** Pacer's slots, read apart from the whole reading. */
   "live-counts": unknown;
   /** The band items a person dismissed, by key. */
   "band-hidden": string[];

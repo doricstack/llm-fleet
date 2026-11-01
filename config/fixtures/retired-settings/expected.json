@@ -26,7 +26,7 @@
     },
     {
       "code": "E_CONFIG_UNKNOWN_KEY",
-      "path": "progress.orphanCountStaleSeconds"
+      "path": "progress"
     },
     {
       "code": "E_CONFIG_UNKNOWN_KEY",

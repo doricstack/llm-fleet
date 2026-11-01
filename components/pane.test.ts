@@ -29,20 +29,6 @@ import type { Pacer, Snapshot } from "../plugins/llm-fleet/components/state.ts";
 
 const NOW = 1_700_000_000;
 
-test("paused progress and trials each draw one paused line without rows", () => {
-  const built = paneFrom(snapshot({
-    progress: { state: "paused", runs: [], errors: [] },
-    trials: { state: "paused", running: [], recent: [], history: null, errors: [] },
-  }), options());
-  for (const title of ["Running", "Trials"]) {
-    const section = group(built, title);
-    assert.equal(section.state, "paused");
-    assert.deepEqual(section.rows, []);
-    assert.deepEqual(section.summary, []);
-    assert.deepEqual(groupMessage(section).map((slot) => slot.text), [title + " is paused."]);
-  }
-});
-
 test("a press on a figure narrows the pane to that state, and the counts stay whole", () => {
   const reading = snapshot({
     roster: { state: "ready", jobs: [{ ...JOB, state: "blocked" },
@@ -50,10 +36,7 @@ test("a press on a figure narrows the pane to that state, and the counts stay wh
                                        state: "working" }],
               interactive: {}, errors: [], providers: {},
               sources: { jobs: "ready", interactive: "empty" } },
-    trials: { state: "ready", running: [], history: null, errors: [],
-              recent: [{ key: "k", repo: "example-repo", branch: "fix", change_state: "",
-                         at: NOW - 60, is_green: false, passed: 3, failed: 1,
-                         errors: 0, skipped: 0 }] },
+    prs: { state: "ready", prs: [{ ...PULL, checks: "fail" }], errors: [] },
   });
   const failed = paneFrom(reading, options({ focus: "failed" }));
   // The line says why only some rows are drawn, and the press that widens it.
@@ -61,7 +44,7 @@ test("a press on a figure narrows the pane to that state, and the counts stay wh
   assert.equal(failed.focus?.clear.key, "fleet.focus.clear");
   // The figures still count the whole machine, not the narrowed pane.
   assert.deepEqual(failed.cards?.map((card) => card.value), ["1", "1", "1"]);
-  assert.deepEqual(failed.groups.map((group) => group.title), ["Trials"]);
+  assert.deepEqual(failed.groups.map((group) => group.title), ["Pull requests"]);
   assert.equal(failed.groups[0]?.rows.every((row) => row.state === "failed"), true);
   const waiting = paneFrom(reading, options({ focus: "waiting" }));
   assert.deepEqual(waiting.groups.map((group) => group.title), ["Background sessions"]);
@@ -105,7 +88,7 @@ test("every section names the figure its rows end in", () => {
   const built = paneFrom(snapshot(), options());
   const named = new Map(built.groups.map((section) => [section.title, section.columns]));
   assert.deepEqual(named.get("Background sessions"), [{ text: "STATE" }]);
-  assert.deepEqual(named.get("Trials"), [{ text: "RESULT" }]);
+  assert.deepEqual(named.get("Pacer"), [{ text: "STATE" }]);
   assert.deepEqual(named.get("Pull requests"), [{ text: "CHECKS" }]);
   assert.deepEqual(named.get("Worktrees"), [{ text: "STATE" }]);
   assert.deepEqual(named.get("Skills"), [{ text: "VERDICT" }]);
@@ -160,8 +143,8 @@ test("the picker lists every section the configuration made visible", () => {
   const built = paneFrom(snapshot(), options());
   assert.deepEqual(built.picker?.map((item) => item.name), options().sectionOrder);
   assert.deepEqual(built.picker?.map((item) => item.title),
-                   ["Running", "Background sessions", "This session", "Trials",
-                    "Pull requests", "Worktrees", "Skills", "Warnings", "Keys"]);
+                   ["Background sessions", "This session", "Pacer",
+                    "Pull requests", "Worktrees", "Skills", "Load", "Warnings", "Keys"]);
   // Each one carries the press that puts it away, addressed by its own name.
   for (const item of built.picker ?? []) {
     assert.equal(item.press.key, HIDE_PREFIX + item.name);
@@ -184,8 +167,8 @@ test("a section a person put away keeps its name, and draws no card", () => {
   assert.equal(putAway?.title, "Background sessions");
   assert.equal(putAway?.hidden, true);
   // A section nobody put away is drawn, and its item says so.
-  assert.equal(built.picker?.find((item) => item.name === "running")?.hidden, false);
-  assert.equal(built.groups.some((entry) => entry.title === "Running"), true);
+  assert.equal(built.picker?.find((item) => item.name === "pacer")?.hidden, false);
+  assert.equal(built.groups.some((entry) => entry.title === "Pacer"), true);
 });
 
 test("the picker draws a section a person put away dim, and the same press brings it back", () => {
@@ -218,37 +201,6 @@ test("the picker draws a section a person put away dim, and the same press bring
   assert.equal(open?.dimColor, undefined);
 });
 
-test("the governance section draws one switch per scope, and names what each press does", () => {
-  const pressed: string[] = [];
-  const actions = { copy: () => undefined, refuse: () => undefined,
-                    reply: () => undefined,
-                    governance: (scope: string) => { pressed.push(scope); } };
-  const reading = snapshot({ governance: { state: "ready", governor: true, controller: false,
-                                           source: "config", path: "/switch.json",
-                                           updated_at: null, by: null, errors: [] } });
-  const built = paneFrom(reading, options({ sectionOrder: ["governance"],
-    sections: { governance: { visible: true, collapsed: false } }, actions }));
-  const section = group(built, "Governance");
-  assert.deepEqual(section.rows.map((row) => row.title), ["Governor", "Controller"]);
-  // The right-hand word is the switch itself, and the quiet line says which way
-  // the next press goes.
-  assert.deepEqual(section.rows.map((row) => row.slot.map((slot) => slot.text)),
-                   [["on"], ["off"]]);
-  assert.deepEqual(section.rows.map((row) => row.meta.map((slot) => slot.text)),
-                   [["press to switch off"], ["press to switch on"]]);
-  assert.deepEqual(section.summary?.map((slot) => slot.text), ["governor on, controller off"]);
-  section.rows[0]?.press?.onPress();
-  section.rows[1]?.press?.onPress();
-  assert.deepEqual(pressed, ["governor", "controller"]);
-  // The first press on a scope that is on only arms the one that switches it
-  // off: the row says so, and the press is not made until it is pressed again.
-  const armed = paneFrom(reading, options({ sectionOrder: ["governance"],
-    sections: { governance: { visible: true, collapsed: false } }, actions,
-    confirmingGovernance: "governor" }));
-  assert.equal(group(armed, "Governance").rows[0]?.meta[0]?.text,
-               "press again to switch off");
-});
-
 /** A ready pacer reading: four slots, one held for ten minutes. */
 function pacerReading(overrides: Partial<Pacer> = {}): Pacer {
   return {
@@ -274,23 +226,37 @@ test("the pacer section sits where the order puts it and draws its switch and sl
   assert.deepEqual(built.groups.map((entry) => entry.title), ["This session", "Pacer"]);
   const section = group(built, "Pacer");
   assert.deepEqual(section.rows.map((row) => row.title),
-                   ["Pacer", "Slot 1", "Slot 2", "Slot 3", "Slot 4"]);
+                   ["Pacer", "Settings", "Slot 1", "Slot 2", "Slot 3", "Slot 4"]);
   assert.deepEqual(section.rows[0]?.slot.map((slot) => slot.text), ["on"]);
+  // Pacer's live settings travel with each read, so a change made while the
+  // pane is open is drawn on the next one.
+  assert.deepEqual(section.rows[1]?.meta.map((slot) => slot.text), ["4 slots, 6 per run"]);
   // A held slot names the repository and how long it has run; a free one says free.
-  assert.deepEqual(section.rows[1]?.slot.map((slot) => slot.text), ["llm-fleet-private"]);
-  assert.deepEqual(section.rows[1]?.meta.map((slot) => slot.text), ["running 10m"]);
-  assert.equal(section.rows[1]?.state, "working");
-  assert.deepEqual(section.rows[2]?.slot.map((slot) => slot.text), ["free"]);
-  assert.equal(section.rows[2]?.state, undefined);
+  assert.deepEqual(section.rows[2]?.slot.map((slot) => slot.text), ["llm-fleet-private"]);
+  assert.deepEqual(section.rows[2]?.meta.map((slot) => slot.text), ["running 10m"]);
+  assert.equal(section.rows[2]?.state, "working");
+  assert.deepEqual(section.rows[3]?.slot.map((slot) => slot.text), ["free"]);
+  assert.equal(section.rows[3]?.state, undefined);
   assert.deepEqual(section.summary?.map((slot) => slot.text), ["1 of 4 busy"]);
+});
+
+test("a busy slot's elapsed time counts on between reads", () => {
+  // The slot is aged from the clock at each paint, not from when its document
+  // was read: a slot that has run ten minutes reads twenty once ten more have
+  // passed, without another read of pacer's status.
+  const ten = group(pacerPane(pacerReading()), "Pacer");
+  assert.deepEqual(ten.rows[2]?.meta.map((slot) => slot.text), ["running 10m"]);
+  const later = group(pacerPane(pacerReading(), { now: NOW + 600 }), "Pacer");
+  assert.deepEqual(later.rows[2]?.meta.map((slot) => slot.text), ["running 20m"]);
+  assert.equal(later.rows[2]?.state, "working");
 });
 
 test("a busy slot whose holder pacer could not name is busy, never free", () => {
   const section = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: true, pid: null, repo: null, startedAt: null }] })), "Pacer");
-  assert.deepEqual(section.rows[1]?.slot.map((slot) => slot.text), ["held"]);
-  assert.deepEqual(section.rows[1]?.meta.map((slot) => slot.text), ["holder not named"]);
-  assert.equal(section.rows[1]?.state, "working");
+  assert.deepEqual(section.rows[2]?.slot.map((slot) => slot.text), ["held"]);
+  assert.deepEqual(section.rows[2]?.meta.map((slot) => slot.text), ["holder not named"]);
+  assert.equal(section.rows[2]?.state, "working");
 });
 
 test("waiters pacer did not report draw nothing, and reported ones are counted", () => {
@@ -380,7 +346,7 @@ test("a machine without pacer draws no section, and a failed read draws the fail
     assert.equal(built.groups.some((entry) => entry.title === "Pacer"), false, state);
     assert.equal((built.picker ?? []).some((item) => item.name === "pacer"), false, state);
   }
-  const older = paneFrom(snapshot(), options({ sectionOrder: ["pacer"],
+  const older = paneFrom(snapshot({ pacer: undefined }), options({ sectionOrder: ["pacer"],
     sections: { pacer: { visible: true, collapsed: false } } }));
   assert.equal(older.groups.some((entry) => entry.title === "Pacer"), false);
   const failed = group(pacerPane(pacerReading({
@@ -390,48 +356,21 @@ test("a machine without pacer draws no section, and a failed read draws the fail
   assert.deepEqual(failed.rows, []);
 });
 
-test("a machine with no governance switch draws no switch and no section", () => {
-  const reading = snapshot({ governance: { state: "unconfigured", governor: null,
-                                           controller: null, source: null, path: null,
-                                           updated_at: null, by: null, errors: [] } });
-  const built = paneFrom(reading, options({ sectionOrder: ["governance"],
-    sections: { governance: { visible: true, collapsed: false } } }));
-  assert.equal(built.groups.some((entry) => entry.title === "Governance"), false);
-  assert.equal((built.picker ?? []).some((item) => item.name === "governance"), false);
-  // A reading taken before the switch was read draws the same way: an absent
-  // document is not a machine whose gates are on.
-  const older = paneFrom(snapshot(), options({ sectionOrder: ["governance"],
-    sections: { governance: { visible: true, collapsed: false } } }));
-  assert.equal(older.groups.some((entry) => entry.title === "Governance"), false);
-});
-
-test("a governance document that failed draws the failure and no state", () => {
-  const reading = snapshot({ governance: { state: "failed", governor: null, controller: null,
-                                           source: null, path: null, updated_at: null, by: null,
-                                           errors: [{ source: "governance",
-                                                      reason: "switch file is not JSON" }] } });
-  const built = paneFrom(reading, options({ sectionOrder: ["governance"],
-    sections: { governance: { visible: true, collapsed: false } } }));
-  const section = group(built, "Governance");
-  assert.equal(section.state, "failed");
-  assert.deepEqual(section.rows, []);
-});
-
 function options(overrides: Partial<PaneOptions> = {}): PaneOptions {
   return {
     width: 120,
     narrowAt: 60,
     now: NOW,
-    sectionOrder: ["running", "sessions", "session", "trials", "prs", "worktrees", "skills",
-                   "warnings", "keys"],
+    sectionOrder: ["sessions", "session", "pacer", "prs", "worktrees", "skills",
+                   "load", "warnings", "keys"],
     sections: {
-      running: { visible: true, collapsed: false },
       sessions: { visible: true, collapsed: false },
       session: { visible: true, collapsed: false },
-      trials: { visible: true, collapsed: false },
+      pacer: { visible: true, collapsed: false },
       prs: { visible: true, collapsed: false },
       worktrees: { visible: true, collapsed: false },
       skills: { visible: true, collapsed: false },
+      load: { visible: true, collapsed: false },
       warnings: { visible: true, collapsed: false },
       keys: { visible: true, collapsed: false },
     },
@@ -446,13 +385,17 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     generated_at: NOW - 4,
     roster: { state: "empty", jobs: [], interactive: {}, errors: [], providers: {},
               sources: { jobs: "empty", interactive: "empty" } },
-    trials: { state: "empty", running: [], recent: [], history: null, errors: [] },
     session: { state: "empty", absent: [], parameters: {}, errors: [] },
-    progress: { state: "empty", runs: [], errors: [] },
+    pacer: { state: "ready", enabled: true, switchSource: "missing", reason: null,
+             version: 2, slotCount: 2, workersPerRun: 4, qos: "utility", nice: 10,
+             slots: [{ slot: 0, busy: false, pid: null, repo: null, startedAt: null },
+                     { slot: 1, busy: false, pid: null, repo: null, startedAt: null }],
+             waiting: [], recent: [], outside: [], outsideCount: 0, outsideCpu: 0,
+             outsideRssKb: 0, errors: [] },
     prs: { state: "empty", prs: [], errors: [] },
     skills: { state: "empty", generated_at: null, counts: {}, items: [], new: [], running: null,
               errors: [] },
-    worktrees: { state: "empty", worktrees: [], cleaned: null, errors: [] },
+    worktrees: { state: "empty", worktrees: [], errors: [] },
     load: { state: "empty", sampled_at: null, total: 0, processes: [], errors: [] },
     custom: { state: "disabled", sections: {}, errors: [] },
     ...overrides,
@@ -570,7 +513,7 @@ test("a failed read that still holds rows is stale, with the age of those rows",
       worktrees: [{ name: "lane", path: "/tmp/lane", branch: "x", state: "active", merged: false,
                     archived: false, held: false, cleanup_command: "clean",
                     checked_at: NOW - 180 }],
-      cleaned: null,
+      
       errors: [{ source: "worktrees", reason: "inspection in progress" }],
     },
   }), options());
@@ -588,7 +531,7 @@ test("a worktree row that was not rechecked says so and keeps its own age", () =
       worktrees: [{ name: "lane", path: "/tmp/lane", branch: "x", state: "merged", merged: true,
                     archived: false, held: false, cleanup_command: "clean",
                     checked_at: NOW - 600, recheck_error: "timed out after 2s" }],
-      cleaned: null,
+      
       errors: [],
     },
   }), options());
@@ -612,122 +555,22 @@ test("a waiting job shows what it asks and what it suggests", () => {
   assert.equal(values.some((value) => value.includes("session 1234abcd")), true);
 });
 
-test("a measured run carries a bar and its failures, and one with no denominator does not", () => {
-  const pane = paneFrom(snapshot({
-    progress: { state: "ready", errors: [], runs: [
-      { key: "abcdef12", repo: "example-repo", branch: "feat/one", label: "Test export boundaries",
-        display: "feat/one@example-repo", done: 42, total: 80, failed: 1,
-        first_failure: "test_one", elapsed: 120, eta_minutes: 3, phase: "verify" },
-      { key: "abcdef13", repo: "example-repo", branch: null, label: "", display: "full in example-repo",
-        done: 0, total: 0, failed: 0, first_failure: "", elapsed: 5, eta_minutes: null,
-        phase: "verify" },
-    ] },
-  }), options());
-  const values = texts(pane);
-  assert.equal(values.includes("Test export boundaries"), true);
-  assert.equal(values.includes("1 failed"), false);
-  assert.equal(values.some((value) => value.includes("1 failed")), true);
-  assert.equal(values.some((value) => value.includes("about 3m left")), true);
-  assert.equal(values.includes("full in example-repo"), true);
-  assert.equal(values.filter((value) => value === "No counts yet").length, 1);
-  // One bar, drawn as two runs: the part that is done, in the run's color, and
-  // the part that is not, quiet. The run with no denominator draws neither.
-  const drawn = bars(values);
-  assert.equal(drawn.length, 2);
-  const tree = renderPane({ ...pane, title: "Fleet", counts: [], updated: { text: "u" },
-                            groups: pane.groups, width: 120, narrowAt: 60 });
-  assert.deepEqual(barDimness(tree), [false, true]);
-});
-
-test("a command held in line does not ask for the person, and a failed one does", () => {
-  // The governor section leads when a command failed. A queue that is merely
-  // waiting its turn is not a failure, and moving the section for it would hand
-  // its hotkey to a row that says nothing new.
-  const held = (failed: number) => {
-    const pane = paneFrom(snapshot({
-      progress: { state: "ready", errors: [], runs: [
-        { key: "abc12345", repo: "example-repo", branch: null, label: "Build export",
-          display: "Build export", done: 1, total: 10, failed,
-          first_failure: failed ? "test_one" : "", elapsed: 30, eta_minutes: null,
-          phase: "verify" },
-      ] },
-    }), options());
-    return group(pane, "Running");
-  };
-  assert.equal(held(0).attention, false);
-  assert.equal(held(1).attention, true);
-});
-
-test("a failed try asks for the person on change control, and a green one does not", () => {
-  const trial = (is_green: boolean) => {
-    const pane = paneFrom(snapshot({
-      trials: { state: "ready", running: [], history: null, errors: [],
-                recent: [{ key: "k", repo: "example-repo", branch: "fix", change_state: "",
-                           at: NOW - 60, is_green, passed: 3, failed: is_green ? 0 : 1,
-                           errors: 0, skipped: 0 }] },
-    }), options());
-    return group(pane, "Trials");
-  };
-  assert.equal(trial(false).attention, true);
-  assert.equal(trial(true).attention, false);
-});
-
-test("a run with no published total draws no bar at all", () => {
-  const pane = paneFrom(snapshot({
-    progress: { state: "ready", errors: [], runs: [
-      { key: "abcdef12", repo: "example-repo", branch: null, label: "Unknown", display: "Unknown",
-        done: 0, total: 0, failed: 0, first_failure: "", elapsed: 30, eta_minutes: null,
-        phase: "verify" },
-    ] },
-  }), options());
-  const values = texts(pane);
-  assert.equal(bars(values).length, 0);
-  assert.equal(values.includes("No counts yet"), true);
-});
-
-test("a lease says how long it has left, not how long ago it ends", () => {
-  const pane = paneFrom(snapshot({
-    trials: { state: "ready", recent: [], history: null, errors: [], running: [
-      { repo: "example-repo", branch: "feat/one", tool: "codex", expires_at: NOW + 600,
-        session: "abcdef12-rest" },
-      { repo: "example-repo", branch: "feat/two", tool: "codex", expires_at: NOW - 120,
-        session: "abcdef13-rest" }] },
-  }), options());
-  const values = texts(pane);
-  assert.equal(values.some((value) => value.includes("lease ends in 10m")), true);
-  assert.equal(values.some((value) => value.includes("lease expired 2m ago")), true);
-  assert.equal(values.some((value) => value.includes("ends in 10m ago")), false);
-});
-
 test("a section that cannot show anything says which section it is", () => {
   const pane = paneFrom(snapshot({
     roster: { state: "disabled", jobs: [], interactive: {}, providers: {}, errors: [],
               sources: { jobs: "disabled", interactive: "disabled" } },
-    progress: { state: "disabled", runs: [], errors: [] },
+    pacer: { state: "disabled", enabled: null, switchSource: null, reason: null,
+             version: null, slotCount: null, workersPerRun: null, qos: null, nice: null,
+             slots: [], waiting: null, recent: null, outside: null, outsideCount: null,
+             outsideCpu: null, outsideRssKb: null, errors: [] },
   }), options());
   const values = texts(pane);
-  // "Running are disabled" is what a shared sentence produced before each
-  // section carried its own wording.
-  assert.equal(values.includes("Running work is disabled in configuration."), true);
-  assert.equal(values.some((value) => value.includes("Running are disabled")), false);
+  // Each section says its own words rather than a shared sentence naming the
+  // wrong one, and a section with nothing to show is left out rather than drawn
+  // with a line about another source.
   assert.equal(values.includes("Background jobs are disabled in configuration."), true);
+  assert.equal(values.includes("Pacer"), false);
   assert.equal(values.some((value) => value.includes("No background jobs")), false);
-});
-
-test("a trial verdict is colored by whether it passed and carries its counts", () => {
-  const pane = paneFrom(snapshot({
-    trials: { state: "ready", running: [], errors: [], history: null, recent: [
-      { key: "r1", repo: "example-repo", branch: "feat/one", change_state: "TRYING", at: NOW - 300,
-        is_green: true, passed: 12, failed: 0, errors: 0, skipped: 1 },
-      { key: "r2", repo: "example-repo", branch: "feat/two", change_state: "TRYING", at: NOW - 60,
-        is_green: false, passed: 3, failed: 2, errors: 1, skipped: 0 },
-    ] },
-  }), options());
-  const rows = group(pane, "Trials").rows;
-  assert.equal(rows[0]?.slot[0]?.text, "12 passed");
-  assert.equal(rows[0]?.slot[0]?.color, "success");
-  assert.equal(rows[1]?.slot.some((slot) => slot.text === " \u00b7 2 failed"), true);
-  assert.equal(rows[1]?.slot.some((slot) => slot.text === " \u00b7 1 errors"), true);
 });
 
 test("a pull request shows its check verdict and marks a draft", () => {
@@ -758,7 +601,7 @@ test("a section groups its rows under each project root, in a stable order", () 
     changes: 0, main_ahead: 0, feedback: [], dirty: 0, cleanup_command: null,
   });
   const pane = paneFrom(snapshot({
-    worktrees: { state: "ready", errors: [], cleaned: 0, worktrees: [
+    worktrees: { state: "ready", errors: [], worktrees: [
       tree("two", "/repos/b", "active"),
       tree("one", "/repos/a", "active"),
       tree("three", "/repos/a", "merged"),
@@ -783,7 +626,7 @@ test("each project root is drawn once, above its rows, in the accent", () => {
     changes: 0, main_ahead: 0, feedback: [], dirty: 0, cleanup_command: null,
   });
   const pane = paneFrom(snapshot({
-    worktrees: { state: "ready", errors: [], cleaned: 0, worktrees: [
+    worktrees: { state: "ready", errors: [], worktrees: [
       tree("one", "/repos/a"), tree("two", "/repos/b"), tree("three", "/repos/b"),
     ] },
   }), options());
@@ -816,7 +659,7 @@ test("the last project closes the section's rail, and its items hang under it", 
     changes: 0, main_ahead: 0, feedback: [], dirty: 0, cleanup_command: null,
   });
   const pane = paneFrom(snapshot({
-    worktrees: { state: "ready", errors: [], cleaned: 0, worktrees: [
+    worktrees: { state: "ready", errors: [], worktrees: [
       tree("one", "/repos/a"), tree("two", "/repos/b"),
     ] },
   }), options());
@@ -887,7 +730,7 @@ test("a skill row carries its worst finding and a newly noticed one is marked", 
 });
 
 const worktreesAtCeiling = {
-  state: "ready" as const, cleaned: 0, errors: [],
+  state: "ready" as const, errors: [],
   worktrees: [
     { name: "one", path: "/tmp/one", branch: "fix/one", state: "active" as const,
       merged: false, archived: false, held: false, cleanup_command: "", checked_at: NOW },
@@ -907,13 +750,12 @@ test("a worktree group counts its states and omits the ones at zero", () => {
     checked_at: NOW,
   });
   const pane = paneFrom(snapshot({
-    worktrees: { state: "ready", cleaned: 3, errors: [],
+    worktrees: { state: "ready", errors: [],
                  worktrees: [tree("one", "active"), tree("two", "held"), tree("three", "held"),
                              tree("four", "unknown")] },
   }), options());
   const summary = group(pane, "Worktrees").summary.map((slot) => slot.text);
-  assert.deepEqual(summary, ["4 checked out", "  1 active", "  2 held", "  1 unknown",
-                             "  3 cleaned this week"]);
+  assert.deepEqual(summary, ["4 checked out", "  1 active", "  2 held", "  1 unknown"]);
   assert.equal(summary.some((value) => value.includes("merged")), false);
 });
 
@@ -950,7 +792,7 @@ test("a worktree row sits under its project, named there rather than repeated", 
   // Two projects on one machine draw the same branch name; the root above the
   // row is what tells them apart, and the row keeps only what differs.
   const pane = paneFrom(snapshot({
-    worktrees: { state: "ready", cleaned: null, errors: [], worktrees: [
+    worktrees: { state: "ready", errors: [], worktrees: [
       { name: "lane", path: "/tmp/lane", project: "llm-fleet", project_root: "/projects/llm-fleet",
         branch: "fix/one", state: "active", merged: false, archived: false, held: false,
         cleanup_command: "clean", checked_at: NOW },
@@ -998,7 +840,7 @@ test("the header keeps test outcomes and check failures apart", () => {
 test("a count is never invented for a group that has none", () => {
   const pane = paneFrom(snapshot(), options());
   const stated: Record<string, string> = {
-    Running: "0 running", Trials: "0 in flight", "Pull requests": "0 open",
+    Pacer: "0 of 2 busy", "Pull requests": "0 open",
     Worktrees: "0 checked out", Skills: "0 need attention",
   };
   for (const [title, expected] of Object.entries(stated)) {
@@ -1271,76 +1113,6 @@ test("the configured row ceiling caps a section and says what it left out", () =
   assert.deepEqual(group2.summary.map((slot) => slot.text), ["4 need attention"]);
 });
 
-test("a trial verdict carries a meter of what it ran", () => {
-  // A trial reporting eleven hundred passes and ten failures reads as a clean
-  // run until the ten are a cell of a bar, so the trial rows carry the meter the
-  // running rows carried and the two are read the same way.
-  const built = snapshot({ trials: {
-    state: "ready", running: [], history: null, errors: [],
-    recent: [{ key: "r", repo: "example-repo", branch: "feat/one", change_state: "TRYING",
-               at: NOW - 60, is_green: false, passed: 669, failed: 10, errors: 0,
-               skipped: 2 }] } });
-  const row = group(paneFrom(built, options()), "Trials").rows[0];
-  assert.deepEqual(row?.bar && { done: row.bar.done, total: row.bar.total,
-                                 failed: row.bar.failed, label: row.bar.label },
-                   { done: 669, total: 679, failed: 10, label: null });
-  // The counts are the slot's, so the bar says them once rather than twice.
-  const drawn = renderedText(renderRow(row as never, 100, NARROW_AT));
-  assert.equal(drawn.includes("669 passed"), true);
-  assert.equal(drawn.includes("669 / 679"), false);
-
-  // A trial that reported no outcome has no denominator, so it draws no meter
-  // rather than a full one: a bar is a proportion, and there is none here.
-  const empty = snapshot({ trials: {
-    state: "ready", running: [], history: null, errors: [],
-    recent: [{ key: "r", repo: "example-repo", branch: "feat/one", change_state: "TRYING",
-               at: NOW - 60, is_green: true, passed: 0, failed: 0, errors: 0, skipped: 0 }] } });
-  const none = group(paneFrom(empty, options()), "Trials").rows[0];
-  assert.equal(none?.bar, undefined);
-  // The counts beside it say the same thing rather than drawing a nought: a
-  // trial that reported no outcome is not a trial that passed none, and "0
-  // passed" in the passing color reads as a result.
-  assert.deepEqual(none?.slot, [{ text: "No counts yet", color: "warning" }]);
-  const noneDrawn = renderedText(renderRow(none as never, 100, NARROW_AT));
-  assert.equal(noneDrawn.includes("0 passed"), false);
-});
-
-test("the trials strip is the window the reading carried", () => {
-  const history = { label: "Last 12 hours", hours: 12,
-                    cells: [{ outcomes: 2, failed: 0 }, { outcomes: 1, failed: 1 }],
-                    outcomes: 3, failed: 1 };
-  const built = snapshot({ trials: { state: "ready", running: [], recent: [],
-                                     history, errors: [] } });
-  assert.deepEqual(group(paneFrom(built, options()), "Trials").history, history);
-  // A reading that carried none draws none, and does not invent a period.
-  assert.equal(group(paneFrom(snapshot(), options()), "Trials").history, null);
-  // The window's figures are the strip's and nowhere else. On the heading as
-  // well they were one section making the same claim twice, beside a count of
-  // branches that is not the same subject.
-  const heading = group(paneFrom(built, options()), "Trials").summary;
-  // A count that comes and goes keeps its place as a quiet zero.
-  assert.deepEqual(heading.map((slot) => slot.text.trim()), ["0 in flight", "0 running"]);
-  assert.equal(heading[1]?.dim, true);
-  const captions = renderedText(renderPane(paneFrom(built, options())));
-  assert.equal(captions.includes("Last 12 hours"), true);
-  assert.equal(captions.includes(" 3 outcomes"), true);
-  assert.equal(captions.includes("  1 failed"), true);
-});
-
-test("a bar is drawn at the length the configuration declares", () => {
-  const run = { key: "one", repo: "a-repo", branch: "b", label: "a run", display: "a run",
-                done: 40, total: 80, failed: 0, first_failure: "", elapsed: 60,
-                eta_minutes: null, state: "running", stopped: false };
-  const short = options({ geometry: { ...GEOMETRY, progressCells: 10 } });
-  const built = paneFrom(snapshot({ progress: { state: "ready", runs: [run] as never,
-                                                errors: [] } }), short);
-  const row = group(built, "Running").rows[0];
-  assert.equal(row?.bar?.cells, 10);
-  const bars = renderedText(renderRow(row as never, 100, NARROW_AT))
-    .filter((value) => /^\u2501+$/.test(value));
-  assert.equal(bars.join("").length, 10);
-});
-
 test("a section's configured legend reaches the pane it is drawn by", () => {
   // Every section draws its own legend, from the choice the pane was handed. A
   // legend configured and drawn by one section only is a legend the other seven
@@ -1380,7 +1152,7 @@ function withRows(): Snapshot {
               jobs: [{ id: "j1", name: "One-DSK", tool: "codex", state: "working",
                        needs: null, suggested_reply: null, detail: null, fan: null,
                        session: null, age: 60 } as never] },
-    worktrees: { state: "ready", cleaned: null, errors: [],
+    worktrees: { state: "ready", errors: [],
                  worktrees: [{ name: "one", path: "/tmp/one", branch: "feat/one",
                                state: "active", merged: false, archived: false, held: null,
                                error: null, cleanup_command: "", change_state: null,
@@ -1414,17 +1186,17 @@ test("tips turned off leaves the bindings standing", () => {
 test("a hidden section is left out and the rest keep their configured order", () => {
   const hidden = options();
   hidden.sections.prs = { visible: false, collapsed: false };
-  hidden.sectionOrder = ["prs", "sessions", "running"];
+  hidden.sectionOrder = ["prs", "sessions", "pacer"];
   const pane = paneFrom(snapshot(), hidden);
   assert.deepEqual(pane.groups.map((entry) => entry.title),
-                   ["Background sessions", "Running"]);
+                   ["Background sessions", "Pacer"]);
 });
 
 test("a collapsed section keeps its rows out of the rendering and its summary in it", () => {
   const collapsed = options();
   collapsed.sections.worktrees = { visible: true, collapsed: true };
   const pane = paneFrom(snapshot({
-    worktrees: { state: "ready", cleaned: null, errors: [], worktrees: [
+    worktrees: { state: "ready", errors: [], worktrees: [
       { name: "lane", path: "/tmp/lane", branch: "x", state: "active", merged: false,
         archived: false, held: false, cleanup_command: "" }] },
   }), collapsed);
@@ -1437,7 +1209,7 @@ test("a worktree with no configured cleanup copies nothing and says why", () => 
   const refused: string[] = [];
   const copied: string[] = [];
   const pane = paneFrom(snapshot({
-    worktrees: { state: "ready", cleaned: null, errors: [], worktrees: [
+    worktrees: { state: "ready", errors: [], worktrees: [
       { name: "lane", path: "/tmp/lane", branch: "x", state: "active", merged: false,
         archived: false, held: false, cleanup_command: "" }] },
   }), options({ actions: { copy: (text) => { copied.push(text); },
@@ -1467,7 +1239,7 @@ test("a row that is in a state draws a dot in that state's color", () => {
   const pane = paneFrom(snapshot({
     roster: { state: "ready", jobs: [JOB], interactive: {}, errors: [], providers: {},
               sources: { jobs: "ready", interactive: "ready" } },
-    worktrees: { state: "ready", cleaned: null, errors: [], worktrees: [
+    worktrees: { state: "ready", errors: [], worktrees: [
       { name: "pane-metrics", path: "/tmp/w", branch: "task/pane-metrics", state: "active",
         merged: false, archived: false, held: false, change_owner: "peer",
         change_updated_at: NOW - 30, cleanup_command: "", checked_at: NOW },
@@ -1855,7 +1627,7 @@ const TREE = { name: "lane", path: "/w/lane", branch: "feat/x", state: "active",
 
 test("a worktree state is drawn in the tone the theme picks for it", () => {
   const drawn = (theme?: Theme): (string | undefined)[] => {
-    const pane = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+    const pane = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                   worktrees: [{ ...TREE, state: "held" } as never] } }),
                           options(theme ? { theme } : {}));
     const row = group(pane, "Worktrees").rows[0];
@@ -1881,7 +1653,7 @@ test("a worktree says what happens to it next, in the words the last pane used",
     [{ state: "unknown" }, "could not check: probe unavailable"],
   ];
   for (const [change, words] of cases) {
-    const pane = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+    const pane = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                   worktrees: [{ ...TREE, ...change } as never] } }),
                           options());
     const row = group(pane, "Worktrees").rows[0];
@@ -1901,7 +1673,7 @@ test("a worktree's owner, error and branch are masked like anything a session wr
   const trees = [{ ...TREE, change_owner: "org_ABC123", change_updated_at: NOW - 300 },
                  { ...TREE, name: "broken", path: "/w/b", state: "unknown", cleanup_command: "",
                    error: "git failed, " + secret, branch: "feat/loc_XYZ789" }];
-  const pane = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+  const pane = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                 worktrees: trees as never } }), options({ actions }));
   const values = texts(pane);
   for (const leak of ["org_ABC123", "abc123def456", "loc_XYZ789"]) {
@@ -1924,7 +1696,7 @@ test("a worktree with no safe cleanup line says to clean it by hand, with nothin
                    change_state: "PUSHED", cleanup_command: "", cleanup_note: note },
                  { ...TREE, name: "live&name", path: "C:/w/live&name", cleanup_command: "",
                    cleanup_note: note + " token: abc123def456" }];
-  const pane = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+  const pane = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                 worktrees: trees as never } }), options({ actions }));
   const rows = group(pane, "Worktrees").rows;
   // The note stands where the press would be offered, and the press is gone.
@@ -1949,7 +1721,7 @@ test("a worktree copies its cleanup line, or says why it has none", () => {
                  { ...TREE, name: "broken", path: "/w/b", cleanup_command: "", error: "git timed out" },
                  { ...TREE, name: "detached", path: "/w/d", cleanup_command: "", branch: "" },
                  { ...TREE, name: "plain", path: "/w/p", cleanup_command: "" }];
-  const pane = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+  const pane = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                 worktrees: trees as never } }), options({ actions }));
   const rows = group(pane, "Worktrees").rows;
   assert.deepEqual(rows.map((row) => row.press?.key),
@@ -1973,7 +1745,7 @@ test("a worktree whose merge is unknown is drawn as neither and offers no cleanu
   const trees = [{ ...TREE, name: "cut", path: "/w/cut", state: "unknown", merged: null,
                    error: "cannot tell whether feat/x is merged into main: git merge-base exited 128" },
                  { ...TREE, name: "quiet", path: "/w/quiet", state: "unknown", merged: null }];
-  const pane = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+  const pane = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                 worktrees: trees as never } }), options({ actions }));
   const rows = group(pane, "Worktrees").rows;
   assert.deepEqual(rows.map((row) => row.slot?.[0]?.text), ["unknown", "unknown"]);
@@ -2002,7 +1774,7 @@ test("a worktree whose archive or live holders are unknown offers no cleanup, an
                  { ...TREE, name: "no-lsof", path: "/w/no-lsof", state: "unknown", held: null,
                    error: "live process inspection unavailable: lsof is not on the PATH" },
                  { ...TREE, name: "no-holders", path: "/w/no-holders", state: "unknown", held: null }];
-  const pane = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+  const pane = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                 worktrees: trees as never } }), options({ actions }));
   const rows = group(pane, "Worktrees").rows;
   for (const row of rows) {
@@ -2027,13 +1799,13 @@ test("a machine that cannot check live holders says so once, over a section offe
   const trees = ["one", "two"].map((name) => ({
     ...TREE, name, path: "C:/w/" + name, state: "unknown", held: null,
     error: "live process inspection unavailable: lsof is not on the PATH" }));
-  const pane = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+  const pane = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                 worktrees: trees as never } }), options({ actions }));
   assert.deepEqual(group(pane, "Worktrees").notes,
                    [[{ text: "No cleanup is offered: this machine could not check which processes "
                        + "have a worktree open.", dim: true }]]);
   // A section with a row that can be copied keeps the invitation.
-  const mixed = paneFrom(snapshot({ worktrees: { state: "ready", cleaned: null, errors: [],
+  const mixed = paneFrom(snapshot({ worktrees: { state: "ready", errors: [],
                                                  worktrees: [TREE, ...trees] as never } }),
                          options({ actions }));
   assert.deepEqual(group(mixed, "Worktrees").notes,
@@ -2055,93 +1827,10 @@ test("a pull request's title links to its page when the repository names one", (
   assert.equal(rows[1]?.link, undefined);
 });
 
-test("a branch tried again after a failure is one row, marked as following it", () => {
-  const lease = { repo: "acme/app", branch: "fix", tool: "claude", expires_at: NOW + 60, session: "s" };
-  const failed = { key: "k", repo: "acme/app", branch: "fix", change_state: "", at: NOW - 60,
-                   is_green: false, passed: 3, failed: 1, errors: 0, skipped: 0 };
-  const pane = paneFrom(snapshot({ trials: { state: "ready", running: [lease], recent: [failed],
-                                             history: null, errors: [] } }), options());
-  const rows = group(pane, "Trials").rows;
-  assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0]?.slot, [{ text: "running, last try failed", color: "error" }]);
-  // A branch whose last try passed is two plain rows: the try now, and the pass.
-  const passed = paneFrom(snapshot({ trials: { state: "ready", running: [lease],
-                                               recent: [{ ...failed, is_green: true }],
-                                               history: null, errors: [] } }), options());
-  const plain = group(passed, "Trials").rows;
-  assert.equal(plain.length, 2);
-  assert.deepEqual(plain[0]?.slot, [{ text: "running", color: "text" }]);
-});
-
 test("the pane says Escape closes it, beside the key the configuration bound", () => {
   assert.equal(paneFrom(snapshot(), options()).hint, "Esc or x closes this pane");
   assert.equal(paneFrom(snapshot(), options({ keys: { ...DEFAULT_KEYS, close: "q" } })).hint,
                "Esc or q closes this pane");
-});
-
-test("a run's elapsed time counts on from when its counts were read", () => {
-  // Read once and drawn as read, the time froze between reads and then jumped
-  // (8s, then 13s a second later). Aged by the paint's clock, it counts.
-  const runs = { state: "ready" as const, errors: [], runs: [
-    { key: "abcdef12", repo: "example-repo", branch: "feat/one", label: "Suite",
-      display: "feat/one@example-repo", done: 1, total: 2, failed: 0, first_failure: "",
-      elapsed: 120, eta_minutes: null, phase: "verify" }] };
-  const at = (countsAt: number | undefined) => texts(paneFrom(snapshot({ progress: runs }),
-                                                             options({ countsAt })));
-  assert.equal(at(NOW).some((value) => value.includes("2m elapsed")), true);
-  assert.equal(at(NOW - 60).some((value) => value.includes("3m elapsed")), true);
-  // Counts dated ahead of this clock add nothing rather than taking time away.
-  assert.equal(at(NOW + 90).some((value) => value.includes("2m elapsed")), true);
-  // Without a reading time the run's own figure stands.
-  assert.equal(at(undefined).some((value) => value.includes("2m elapsed")), true);
-});
-
-test("a held command's wait counts down from when it was read, and stops at nothing", () => {
-  const held = (left: number) => ({ state: "ready" as const, errors: [], runs: [
-    { key: "abcdef14", repo: "example-repo", branch: null, label: "targeted-test",
-      display: "targeted-test", done: 0, total: 0, failed: 0, first_failure: "", elapsed: 30,
-      eta_minutes: null, phase: "wait", kind: "wait", command_class: "targeted",
-      queue_position: 2, queue_total: 3, wait_total: 900, wait_left: left }] });
-  const drawn = (left: number, countsAt: number) =>
-    texts(paneFrom(snapshot({ progress: held(left) }), options({ countsAt })));
-  assert.equal(drawn(600, NOW).some((value) => value.includes("10m left")), true);
-  assert.equal(drawn(600, NOW - 120).some((value) => value.includes("8m left")), true);
-  assert.equal(drawn(60, NOW - 600).some((value) => value.includes("0s left")), true);
-});
-
-test("a count that comes and goes keeps its place as a quiet zero", () => {
-  // "1 running" appearing and going pushed every figure after it along the line.
-  const trials = (running: number) => ({
-    state: "ready" as const, history: null, errors: [], recent: [],
-    changes: [{ repo: "example-repo", branch: "feat/one", state: "NEW", held_by: null,
-                pr: null, updated_at: NOW - 30 }],
-    running: Array.from({ length: running }, (_, index) => ({
-      repo: "example-repo", branch: "feat/run" + index, tool: "codex", expires_at: NOW + 600,
-      session: "abcdef1" + index + "-rest" })),
-  });
-  const summary = (running: number) => group(
-    paneFrom(snapshot({ trials: trials(running) as never }), options()), "Trials").summary;
-  const idle = summary(0);
-  const busy = summary(2);
-  assert.equal(idle.length, busy.length);
-  const zero = idle.find((slot) => slot.text.trim() === "0 running");
-  assert.ok(zero, idle.map((slot) => slot.text).join("|"));
-  assert.equal(zero.dim, true);
-  assert.equal(busy.some((slot) => slot.text.trim() === "2 running" && !slot.dim), true);
-});
-
-test("the governor keeps the room a run takes, so a run arriving moves nothing below it", () => {
-  const governor = (runs: unknown[]) => group(
-    paneFrom(snapshot({ progress: { state: runs.length ? "ready" : "empty", errors: [],
-                                    runs } as never }), options()), "Running");
-  const none = governor([]);
-  const one = governor([{ key: "abcdef12", repo: "example-repo", branch: "feat/one", label: "Suite",
-                          display: "Suite", done: 1, total: 2, failed: 0, first_failure: "",
-                          elapsed: 5, eta_minutes: null, phase: "verify" }]);
-  assert.equal(none.reserve, 2);
-  assert.equal(one.reserve, 2);
-  // The held count keeps its place as well.
-  assert.equal(none.summary.length, one.summary.length);
 });
 
 const PULL = { repo: "owner/project", number: 7, title: "Add the thing", branch: "feat/thing",
@@ -2195,14 +1884,14 @@ function events(list: ReturnType<typeof event>[], state = "ready"): Snapshot["ev
 }
 
 test("the digest shows only what happened since the last look, newest first", () => {
-  const list = [event("trial-failed", "repo feat/a", 60), event("pr-opened", "Add it", 600),
+  const list = [event("job-waiting", "repo feat/a", 60), event("pr-opened", "Add it", 600),
                 event("job-finished", "Old job", 7200)];
   const pane = paneFrom(snapshot({ events: events(list) }), options({ lastSeen: NOW - 3600 }));
   const digest = pane.digest;
   assert.ok(digest, "no digest for two new events");
   assert.equal(digest.lines.length, 2);
   const words = digest.lines.map((line) => line.map((slot) => slot.text).join(""));
-  assert.match(words[0] ?? "", /Trial failed.*repo feat\/a/);
+  assert.match(words[0] ?? "", /Waiting on you.*repo feat\/a/);
   assert.match(words[1] ?? "", /PR opened.*Add it/);
   assert.equal(words.some((value) => value.includes("Old job")), false);
   assert.equal(digest.through, NOW - 60);
@@ -2384,10 +2073,11 @@ test("a section keeps the place configuration gave it, whatever it holds", () =>
   // needs the person, which moved every digit below it and gave a learned
   // hotkey to another section. The order is configuration's now, and what needs
   // the person is carried by the heading's tone and count.
-  const order = ["sessions", "trials", "running", "prs", "worktrees", "keys"];
+  const order = ["sessions", "pacer", "session", "prs", "worktrees", "keys"];
   const base = options({ sectionOrder: order });
   const titles = (built: { groups: Group[] }) => built.groups.map((entry) => entry.title);
-  const calm = ["Background sessions", "Trials", "Running", "Pull requests", "Worktrees", "Keys"];
+  const calm = ["Background sessions", "Pacer", "This session", "Pull requests", "Worktrees",
+                "Keys"];
   assert.deepEqual(titles(paneFrom(snapshot(), base)), calm);
   const failing = paneFrom(snapshot({ prs: { state: "ready", prs: [PULL], errors: [] } }), base);
   assert.deepEqual(titles(failing), calm);
@@ -2405,15 +2095,12 @@ test("a failing source still leads, and a section keeps the fold a person presse
   }), options({ sectionOrder: order, folded: { prs: true } }));
   assert.deepEqual(built.groups.map((entry) => entry.title), ["Warnings", "Background sessions", "Pull requests"]);
   assert.equal(group(built, "Pull requests").collapsed, true);
-  // A passing pull request is calm, and a held governor command is not the person's to answer.
+  // A passing pull request is calm, and a slot nobody took is not the person's to answer.
   const calm = paneFrom(snapshot({
     prs: { state: "ready", prs: [{ ...PULL, checks: "pass" }], errors: [] },
-    progress: { state: "ready", errors: [], runs: [{ key: "w", repo: "r", branch: null, label: "", display: "",
-      done: 0, total: 0, failed: 0, first_failure: "", elapsed: 0, eta_minutes: null, phase: "",
-      kind: "wait", command_class: "test", queue_position: 1, queue_total: 2, wait_total: 60,
-      wait_left: 30 }] },
-  }), options({ sectionOrder: ["sessions", "prs", "running"] }));
-  assert.deepEqual(calm.groups.map((entry) => entry.title), ["Background sessions", "Pull requests", "Running"]);
+  }), options({ sectionOrder: ["sessions", "prs", "pacer"] }));
+  assert.deepEqual(calm.groups.map((entry) => entry.title),
+                   ["Background sessions", "Pull requests", "Pacer"]);
 });
 
 const PROCESS = {
@@ -2433,13 +2120,13 @@ test("a process under load is drawn by name, project, age and what it costs", ()
   assert.equal(row?.title, "CompilingProgram thing");
   assert.deepEqual(row?.meta.map((slot) => slot.text),
                    ["example-repo", " · pid 101", " · 1h 2m"]);
-  assert.deepEqual(row?.slot.map((slot) => slot.text), ["42.5%", " 1.5 GB"]);
+  assert.deepEqual(row?.slot.map((slot) => slot.text), [" 42.5%", " 1.5 GB"]);
   // Forty-two percent presses the machine without pinning it.
   assert.equal(row?.slot[0]?.color, "warning");
   assert.equal(row?.note?.text, "/projects/example-repo");
-  // The heading says how many the drawn rows were chosen from.
-  assert.deepEqual(load.summary, [{ text: "412 processes" },
-                                  { text: "  1 shown", color: "subtle" }]);
+  // The heading says how many the drawn rows were chosen from, since a machine
+  // with one row drawn from four hundred is the reason the section exists.
+  assert.deepEqual(load.summary, [{ text: "1 of 412 shown", color: "subtle" }]);
 });
 
 test("the load section names the two figures its rows draw in columns", () => {
@@ -2449,8 +2136,9 @@ test("the load section names the two figures its rows draw in columns", () => {
   const load = group(built, "Load");
   // The names are the row's own column widths, so they sit over their figures,
   // and the word before the second name is the separator the rows use.
-  assert.deepEqual(load.columns?.map((slot) => slot.text), ["CPU", " · MEM"]);
-  assert.deepEqual(load.columns?.map((slot) => slot.width), [6, 8]);
+  assert.deepEqual(load.columns?.map((slot) => slot.text), [" CPU", " MEM"]);
+  assert.deepEqual(load.columns?.map((slot) => slot.width), [8, 11]);
+  assert.deepEqual(load.columns?.map((slot) => slot.align), ["right", "right"]);
 });
 
 test("a load row keeps each figure in its own column", () => {
@@ -2462,12 +2150,92 @@ test("a load row keeps each figure in its own column", () => {
             processes: [{ ...PROCESS, pid: 1, cpu_percent: 8.6, memory_bytes: 400000 } as never,
                         { ...PROCESS, pid: 2, cpu_percent: 98.8, memory_bytes: 430000000 } as never] },
   }), options({ sectionOrder: ["load"] }));
-  const rows = group(built, "Load").rows;
-  assert.equal(rows[0]?.slot[0]?.width, 6);
+  const load = group(built, "Load");
+  const rows = load.rows;
+  assert.equal(rows[0]?.slot[0]?.width, 8);
   assert.equal(rows[0]?.slot[0]?.align, "right");
-  assert.equal(rows[1]?.slot[0]?.width, 6);
-  assert.equal(rows[0]?.slot[1]?.width, 8);
-  assert.equal(rows[1]?.slot[1]?.width, 8);
+  assert.equal(rows[1]?.slot[0]?.width, 8);
+  assert.equal(rows[0]?.slot[1]?.width, 11);
+  assert.equal(rows[1]?.slot[1]?.width, 11);
+  // The two cells are the same width as the names above them, which is what
+  // holds a figure under its own column however long the figure is.
+  assert.deepEqual(rows[0]?.slot.map((slot) => slot.width),
+                   load.columns?.map((slot) => slot.width));
+});
+
+test("the load section leads with the machine's own figures, as meters", () => {
+  const built = paneFrom(snapshot({
+    load: { state: "ready", sampled_at: NOW, total: 412, errors: [], processes: [PROCESS],
+            system: { cpuPercent: 75.4, loadAverage: [39.26, 34.6, 33.93],
+                      memoryUsedBytes: 137438953472, memoryTotalBytes: 274877906944 } },
+  }), options({ sectionOrder: ["load"] }));
+  const load = group(built, "Load");
+  // The machine's meters stand above the processes that make them up.
+  assert.deepEqual(load.rows.slice(0, 2).map((row) => row.title), ["CPU", "MEM"]);
+  assert.deepEqual(load.rows.slice(0, 2).map((row) => row.bar?.done), [75.4, 50]);
+  // Each share stands in the column its own name stands over: the processor's
+  // holds the first column's width, and the memory's leaves that column empty
+  // and takes the second. A figure with no column is drawn at the row's edge,
+  // which is the memory column's edge, so both meters would read under MEM.
+  assert.deepEqual(load.rows[0]?.slot.map((slot) => [slot.text, slot.width]),
+                   [["75%", 8], ["", 11]]);
+  assert.deepEqual(load.rows[1]?.slot.map((slot) => [slot.text, slot.width]),
+                   [["", 8], ["50%", 11]]);
+  assert.deepEqual(load.columns?.map((slot) => slot.width), [8, 11]);
+  // Seventy-five percent of the machine is a wait, not a failure.
+  assert.equal(load.rows[0]?.state, "waiting");
+  assert.equal(load.rows[1]?.state, "working");
+  // What the meter states beside its bar is the figure behind it.
+  assert.deepEqual(load.rows[0]?.meta.map((slot) => slot.text), ["load 39.3 34.6 33.9"]);
+  assert.deepEqual(load.rows[1]?.meta.map((slot) => slot.text), ["128.0 GB of 256.0 GB"]);
+  // The heading states the same two shares, then how many rows were chosen.
+  assert.deepEqual(load.summary.map((slot) => slot.text),
+                   ["CPU 75%", "  MEM 50%", "  1 of 412 shown"]);
+  assert.deepEqual(load.summary.map((slot) => slot.color), ["warning", "success", "subtle"]);
+});
+
+test("the meters draw even when the process list could not be read", () => {
+  // Windows has no process command unless one is configured, so the section is
+  // unavailable there by default. The machine's own figures were still read,
+  // and a section that drops every row for the list it could not get hides a
+  // reading it has: the meters stand, and the heading says what was missing.
+  const built = paneFrom(snapshot({
+    load: { state: "unavailable", sampled_at: NOW, total: 0, processes: [],
+            errors: [{ source: "load", reason: "no process command is configured" }],
+            system: { cpuPercent: 42, loadAverage: null,
+                      memoryUsedBytes: 1073741824, memoryTotalBytes: 2147483648 } },
+  }), options({ sectionOrder: ["load"] }));
+  const load = group(built, "Load");
+  assert.deepEqual(load.rows.slice(0, 2).map((row) => row.title), ["CPU", "MEM"]);
+  assert.deepEqual(load.rows.slice(0, 2).map((row) => row.bar?.done), [42, 50]);
+  assert.equal(load.state, "unavailable");
+});
+
+test("a meter turns red at ninety percent, and is green below seventy", () => {
+  const meter = (cpuPercent: number) => {
+    const built = paneFrom(snapshot({
+      load: { state: "ready", sampled_at: NOW, total: 1, errors: [], processes: [],
+              system: { cpuPercent, loadAverage: null, memoryUsedBytes: null,
+                        memoryTotalBytes: null } },
+    }), options({ sectionOrder: ["load"] }));
+    return group(built, "Load").rows[0];
+  };
+  assert.equal(meter(69.9)?.state, "working");
+  assert.equal(meter(70)?.state, "waiting");
+  assert.equal(meter(89.9)?.state, "waiting");
+  assert.equal(meter(90)?.state, "failed");
+  // A platform that prints above a hundred is drawn as a full bar, not past it.
+  assert.equal(meter(193.8)?.bar?.done, 100);
+});
+
+test("a machine that states no figures draws no meter, only its processes", () => {
+  const built = paneFrom(snapshot({
+    load: { state: "ready", sampled_at: NOW, total: 412, errors: [], processes: [PROCESS],
+            system: null },
+  }), options({ sectionOrder: ["load"] }));
+  const load = group(built, "Load");
+  assert.deepEqual(load.rows.map((row) => row.title), ["CompilingProgram thing"]);
+  assert.deepEqual(load.summary.map((slot) => slot.text), ["1 of 412 shown"]);
 });
 
 test("a process nobody could place draws no project rather than a guess", () => {

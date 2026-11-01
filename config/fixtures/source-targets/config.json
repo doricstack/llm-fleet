@@ -13,13 +13,11 @@
         "owner/two"
       ]
     },
-    "trials": {
+    "pacer": {
       "enabled": true,
-      "database": "/fixture/runner/state/change.db"
-    },
-    "progress": {
-      "enabled": true,
-      "directory": "/fixture/runner/state/progress"
+      "command": [
+        "/fixture/runner/state/pacer.py"
+      ]
     },
     "worktrees": {
       "enabled": true,

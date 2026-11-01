@@ -92,9 +92,6 @@ plugins/llm-fleet/readers/plugin_root.py
 plugins/llm-fleet/readers/runtime.py
 plugins/llm-fleet/readers/jobs.py
 plugins/llm-fleet/readers/roster.py
-plugins/llm-fleet/readers/trials.py
-plugins/llm-fleet/readers/governance.py
-plugins/llm-fleet/readers/progress.py
 plugins/llm-fleet/readers/prs.py
 plugins/llm-fleet/readers/skills.py
 plugins/llm-fleet/readers/host.py
@@ -140,9 +137,6 @@ tests/test_sandbox.py
 tests/test_plugin_contract.py
 tests/test_directory_rules.py
 tests/test_readers.py
-tests/test_reader_trials.py
-tests/test_reader_governance.py
-tests/test_reader_progress.py
 tests/test_reader_prs_skills.py
 tests/test_reader_worktrees.py
 tests/test_reader_snapshot.py

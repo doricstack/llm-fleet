@@ -32,49 +32,39 @@ from config.loader import ConfigError, load_config
 from readers.custom import read_custom
 from readers.events import read_events
 from readers.load import read_load
+from readers.pacer import read_pacer
 from readers.prs import read_prs
-from readers.progress import read_progress
 from readers.rates import start_refresh
 from readers.roster import keep_job_states, load_job_states, read_providers
 from readers.session import read_session
 from readers.skills import read_skills
-from readers.governance import read_governance
-from readers.pacer import read_pacer
-from readers.trials import read_trials
 from readers.worktrees import read_worktrees
 
 READERS: dict[str, Callable[..., dict[str, Any]]] = {
     "roster": read_providers,
-    "trials": read_trials,
-    "progress": read_progress,
     "prs": read_prs,
     "skills": read_skills,
     "worktrees": read_worktrees,
     "load": read_load,
     "session": read_session,
     "custom": read_custom,
-    "governance": read_governance,
     "pacer": read_pacer,
 }
 
 
 def failed(document: str, reason: str) -> dict[str, Any]:
     """The document a reader would have produced had it been able to report this."""
-    state_keys = {"roster": "jobs", "trials": "running", "progress": "runs", "prs": "prs",
+    state_keys = {"roster": "jobs", "prs": "prs",
                   "skills": "items", "worktrees": "worktrees", "load": "processes",
                   "session": "parameters", "custom": "sections", "events": "events",
-                  "governance": "scopes", "pacer": "slots"}
+                  "pacer": "slots"}
     body: dict[str, Any] = {"state": "failed", state_keys[document]: [],
                             "errors": [{"source": document, "reason": reason}]}
     if document == "roster":
         body.update({"interactive": {}, "providers": {}, "spend_series": None,
                      "sources": {"jobs": "failed", "interactive": "failed"}})
-    elif document == "trials":
-        body["history"] = None
     elif document == "skills":
         body.update({"generated_at": None, "counts": {}, "new": [], "running": None})
-    elif document == "worktrees":
-        body["cleaned"] = None
     elif document == "custom":
         body["sections"] = {}
     return body
@@ -179,7 +169,7 @@ def alerts_document(config: Mapping[str, Any]) -> dict[str, Any]:
         # reads the machine again, and how old a live run's counts may get
         # while a pane shows them.
         "snapshotSeconds": (config.get("cache") or {}).get("snapshotSeconds"),
-        "progressMs": refresh.get("progressMs"),
+        "liveMs": refresh.get("liveMs"),
         # How often an open pane is drawn so its ages count, and how far apart
         # the sections a new reading changed land on it.
         "clockMs": refresh.get("clockMs"),
@@ -225,8 +215,8 @@ def read_snapshot(config: Mapping[str, Any], *, now: float | None = None,
     """Every reader's document, keyed by its source, with a failure kept in place.
 
     `only` names the sources to read, and no other reader runs: the pane asks
-    for the governor's counts every few seconds while a run is live, and a read
-    of everything that often would ask the pull request host and every worktree
+    for pacer's slots every few seconds while a run is live, and a read of
+    everything that often would ask the pull request host and every worktree
     each time. Such a read carries no pane or alert configuration either; it is
     a part of a reading, merged into the whole one the caller holds.
 

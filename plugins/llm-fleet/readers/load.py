@@ -21,7 +21,9 @@ from __future__ import annotations
 import math
 import os
 from pathlib import Path
+import re
 import subprocess
+import sys
 import time
 from typing import Any, Mapping
 
@@ -238,6 +240,221 @@ def _ranked(rows: list[dict[str, Any]], top: int) -> list[dict[str, Any]]:
                                                     row["pid"]))
 
 
+# The machine's own figures, as the platform states them.
+#
+# The process table says what each program costs; only the platform can say how
+# much of the machine is left, and every platform says it in its own words. The
+# parsers are kept apart from the calls so each is proved against text a real
+# command printed, and a platform that states nothing answers None rather than a
+# nought: an unknown load and an idle machine are different answers.
+
+_SIZE = re.compile(r"^(?P<number>\d+(?:\.\d+)?)\s*(?P<unit>[KMGTP])?B?$", re.IGNORECASE)
+_SIZE_STEPS = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4,
+               "P": 1024 ** 5}
+# How long the two Linux samples are held apart: one read of /proc/stat counts
+# the ticks since boot, so two reads a moment apart are what make a rate.
+PROC_SAMPLE_SECONDS = 0.1
+# The platform whose reader runs, read at import so a test can stand in for
+# another one: the Windows branch is otherwise only exercised on Windows.
+PLATFORM = os.name
+
+# What a Windows machine is asked when `wmic` is not there to answer.
+_POWERSHELL_SYSTEM = (
+    "$os = Get-CimInstance Win32_OperatingSystem; "
+    "$c = (Get-CimInstance Win32_Processor | "
+    "Measure-Object -Property LoadPercentage -Average).Average; "
+    "\"TotalVisibleMemorySize=$($os.TotalVisibleMemorySize)\"; "
+    "\"FreePhysicalMemory=$($os.FreePhysicalMemory)\"; "
+    # A machine whose processor query answers nothing is drawn with no CPU
+    # meter at all: casting the empty answer to a number would publish a
+    # measured zero for a figure nobody read.
+    "if ($null -ne $c) { \"LoadPercentage=$([int]$c)\" }"
+)
+
+
+def _size_of(text: str) -> int | None:
+    """Bytes from a size a platform printed, such as `126G`, `9887M` or `1634MB`."""
+    match = _SIZE.match(text.strip())
+    if match is None:
+        return None
+    return int(float(match.group("number")) * _SIZE_STEPS[match.group("unit").upper()
+                                                         if match.group("unit") else ""])
+
+
+def parse_top_system(output: str) -> dict[str, Any] | None:
+    """macOS `top -l 1 -n 0`: the load averages, the CPU split and the memory summary."""
+    averages: list[float] | None = None
+    cpu: float | None = None
+    used: int | None = None
+    total: int | None = None
+    for line in output.splitlines():
+        text = line.strip()
+        if text.startswith("Load Avg:"):
+            numbers = [float(part) for part in
+                       re.findall(r"\d+(?:\.\d+)?", text.partition(":")[2])]
+            if len(numbers) >= 3:
+                averages = numbers[:3]
+        elif text.startswith("CPU usage:"):
+            # Busy is everything that is not idle, which is one number to trust
+            # rather than a sum of the words a platform happened to print.
+            for amount, word in re.findall(r"(\d+(?:\.\d+)?)%\s*(\w+)", text):
+                if word == "idle":
+                    cpu = max(0.0, min(100.0, 100.0 - float(amount)))
+        elif text.startswith("PhysMem:"):
+            body = text.partition(":")[2]
+            used_text = re.search(r"([\d.]+[KMGTP]?)\s+used", body, re.IGNORECASE)
+            unused_text = re.search(r"([\d.]+[KMGTP]?)\s+unused", body, re.IGNORECASE)
+            if used_text is not None:
+                used = _size_of(used_text.group(1))
+            if used is not None and unused_text is not None:
+                spare = _size_of(unused_text.group(1))
+                total = used + spare if spare is not None else None
+    if cpu is None and averages is None and used is None:
+        return None
+    return {"cpuPercent": cpu, "loadAverage": averages,
+            "memoryUsedBytes": used, "memoryTotalBytes": total}
+
+
+def parse_proc_stat(text: str) -> tuple[int, int] | None:
+    """The whole machine's ticks since boot, as (total, idle), from /proc/stat."""
+    for line in text.splitlines():
+        if not line.startswith("cpu "):
+            continue
+        fields = [int(part) for part in line.split()[1:] if part.isdigit()]
+        if len(fields) < 4:
+            return None
+        # Idle and waiting on input/output are both time the machine spent with
+        # nothing to run, which is what a busy figure leaves out.
+        #
+        # Only the first eight fields count. Guest time is already inside user
+        # and nice, so a machine running virtual machines would otherwise have
+        # those ticks charged twice and read as twice as busy as it is.
+        counted = fields[:8]
+        idle = counted[3] + (counted[4] if len(counted) > 4 else 0)
+        return sum(counted), idle
+    return None
+
+
+def parse_proc_system(first: str, second: str, loadavg: str, meminfo: str
+                      ) -> dict[str, Any] | None:
+    """Linux: the busy share between two samples, the load averages and the memory."""
+    cpu: float | None = None
+    before = parse_proc_stat(first)
+    after = parse_proc_stat(second)
+    if before is not None and after is not None:
+        total = after[0] - before[0]
+        idle = after[1] - before[1]
+        if total > 0:
+            cpu = max(0.0, min(100.0, 100.0 * (total - idle) / total))
+    averages: list[float] | None = None
+    numbers = [float(part) for part in loadavg.split()[:3] if part.replace(".", "", 1).isdigit()]
+    if len(numbers) == 3:
+        averages = numbers
+    values = {}
+    for line in meminfo.splitlines():
+        key, _, rest = line.partition(":")
+        amount = rest.strip().split(" ")[0]
+        if amount.isdigit():
+            # Every figure in /proc/meminfo is in kilobytes.
+            values[key] = int(amount) * 1024
+    used = None
+    total = values.get("MemTotal")
+    available = values.get("MemAvailable")
+    if total is not None and available is not None:
+        used = max(0, total - available)
+    if cpu is None and averages is None and used is None:
+        return None
+    return {"cpuPercent": cpu, "loadAverage": averages,
+            "memoryUsedBytes": used, "memoryTotalBytes": total}
+
+
+def parse_wmic_system(os_text: str, cpu_text: str) -> dict[str, Any] | None:
+    """Windows: `wmic` prints one `key=value` pair per line, in kilobytes."""
+    values = {}
+    # wmic prints one block per processor package, so the processor's share is
+    # every figure it printed: keeping the last one drew one package's load as
+    # the machine's, which on a two-socket box is a reading of the wrong thing.
+    processor: list[int] = []
+    for line in (os_text + "\n" + cpu_text).splitlines():
+        key, separator, rest = line.strip().partition("=")
+        if not (separator and rest.strip().isdigit()):
+            continue
+        if key.strip() == "LoadPercentage":
+            processor.append(int(rest.strip()))
+        else:
+            values[key.strip()] = int(rest.strip())
+    total_kb = values.get("TotalVisibleMemorySize")
+    free_kb = values.get("FreePhysicalMemory")
+    load = sum(processor) / len(processor) if processor else None
+    cpu = float(min(100, max(0, load))) if load is not None else None
+    total = total_kb * 1024 if total_kb is not None else None
+    used = max(0, total - free_kb * 1024) if total is not None and free_kb is not None else None
+    if cpu is None and used is None:
+        return None
+    return {"cpuPercent": cpu, "loadAverage": None,
+            "memoryUsedBytes": used, "memoryTotalBytes": total}
+
+
+def _print(environment: Mapping[str, str], command: list[str], seconds: float) -> str | None:
+    """One bounded call whose text answers, or None when it cannot be made."""
+    resolved = resolve_command(command, environment)
+    if resolved is None:
+        return None
+    try:
+        completed = subprocess.run(resolved, capture_output=True, text=True,
+                                   env=dict(environment), timeout=seconds,
+                                   errors="replace")
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+def _file_text(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def system_load(environment: Mapping[str, str], seconds: float) -> dict[str, Any] | None:
+    """What the whole machine is doing, or None where the platform does not say."""
+    try:
+        if PLATFORM == "nt":
+            wmic = parse_wmic_system(
+                _print(environment, ["wmic", "OS", "get",
+                                     "FreePhysicalMemory,TotalVisibleMemorySize", "/value"],
+                       seconds) or "",
+                _print(environment, ["wmic", "cpu", "get", "LoadPercentage", "/value"],
+                       seconds) or "")
+            if wmic is not None:
+                return wmic
+            # Windows 11 24H2 turns `wmic` off by default, so the same three
+            # figures come from the interface it points people at, printed in
+            # the shape the wmic parser already reads.
+            return parse_wmic_system(
+                _print(environment, ["powershell", "-NoProfile", "-NonInteractive",
+                                     "-Command", _POWERSHELL_SYSTEM], seconds + 4.0) or "",
+                "")
+        if sys.platform == "darwin":
+            # `top` computes its first sample since boot and every later one
+            # since the sample before it, so two samples a second apart are what
+            # make the number say what the machine is doing now rather than how
+            # it has averaged over its uptime. The parser keeps the last block.
+            printed = _print(environment, ["top", "-l", "2", "-n", "0", "-s", "1"],
+                             seconds + 1.0)
+            return parse_top_system(printed) if printed is not None else None
+        first = _file_text("/proc/stat")
+        if not first:
+            return None
+        time.sleep(PROC_SAMPLE_SECONDS)
+        return parse_proc_system(first, _file_text("/proc/stat"), _file_text("/proc/loadavg"),
+                                 _file_text("/proc/meminfo"))
+    except OSError:
+        return None
+
+
 def read_load(config: Mapping[str, Any], *, now: float | None = None,
               environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     """The processes under the most load, each with the project it works in."""
@@ -245,13 +462,18 @@ def read_load(config: Mapping[str, Any], *, now: float | None = None,
     clock = float(now) if now is not None else time.time()
     errors: list[dict[str, str]] = []
     result: dict[str, Any] = {"state": "disabled", "sampled_at": clock, "total": 0,
-                              "processes": [], "errors": errors}
+                              "system": None, "processes": [], "errors": errors}
     if not source["enabled"]:
         return result
     inherited = dict(os.environ if environ is None else environ)
     # Both calls are handed the same stripped environment, and every command is
     # resolved on the PATH the child actually receives.
     environment = child_environment(config["runtime"]["childEnvironment"], inherited)
+    # The machine's own figures are read before the process list, so a platform
+    # that states no process table still draws its meters: Windows has no
+    # process command unless one is configured, and the meters do not depend on
+    # that list at all.
+    result["system"] = system_load(environment, float(config["timeouts"]["commandSeconds"]))
     try:
         rows, unreadable = _sample(config, environment)
     except MissingCommand as missing:

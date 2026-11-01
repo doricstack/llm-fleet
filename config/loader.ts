@@ -80,7 +80,6 @@ export interface Field {
 }
 
 export interface Group {
-  pausedWhenExists?: string;
   id: string;
   path: string;
   fields: string[];
@@ -884,10 +883,6 @@ function groupState(
   }
   if (incomplete) {
     return null;
-  }
-  const marker = group.pausedWhenExists === undefined ? null : values[group.pausedWhenExists];
-  if (typeof marker === "string" && marker && probe(marker) !== "missing") {
-    return "paused";
   }
   if (group.requiresReadyProvider && !entries.some((entry) => entry.state === "ready")) {
     return "unconfigured";

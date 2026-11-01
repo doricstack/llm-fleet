@@ -4,8 +4,8 @@
 The unit cases hand the event builder documents in the shape the readers write
 them, including the rows that must not become an event: a time that is missing,
 not a number, or not a time. The reading cases run the read itself against a
-controller store on disk, a stub pull-request command, a stub roster command
-and a transcript, so the events are the ones a real read produces.
+stub pull-request command, a stub roster command and a transcript, so the
+events are the ones a real read produces.
 
 Run with: python3 tests/test_reader_events.py -v
 """
@@ -14,7 +14,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -31,15 +30,6 @@ from readers import events, snapshot
 NOW = 1_700_000_000.0
 SESSION = "0123abcd-0000-4000-8000-00000000beef"
 
-STORES = """
-CREATE TABLE repos (repo_id INTEGER PRIMARY KEY, remote_url TEXT, root_oid TEXT);
-CREATE TABLE changes (change_id INTEGER PRIMARY KEY, repo_id INTEGER, branch TEXT,
-                      state TEXT, worktree_path TEXT);
-CREATE TABLE leases (change_id INTEGER, tool TEXT, expires_at REAL, session TEXT);
-CREATE TABLE receipts (receipt_id TEXT, change_id INTEGER, evidence TEXT, created_at REAL);
-CREATE TABLE milestones (change_id INTEGER, session TEXT, created_at REAL, to_state TEXT);
-"""
-
 GITHUB_STUB = """import json, os, sys
 argv = sys.argv[1:]
 if os.environ.get("FLEET_GITHUB_MODE") == "fail":
@@ -51,12 +41,9 @@ ROSTER_STUB = """import sys
 print(open(sys.argv[1]).read())
 """
 
-GREEN = {"failed": 0, "errors": 0, "selector_rc": 0, "executed": 3, "selected": 3}
-RED = {"failed": 2, "errors": 0, "selector_rc": 0, "executed": 3, "selected": 3}
-
 
 def configured(limit=50):
-    # The probe answers for every path, so no configuration on the machine the
+    # A configuration whose schema is loaded from the fixture home, so no code
     # suite runs on can be read here even if one sits at the fixture home.
     config = load_config(None, environ={"HOME": "/nonexistent-fleet-home"},
                          probe=lambda path: "missing")
@@ -69,14 +56,11 @@ class EventTests(unittest.TestCase):
 
     def test_each_kind_comes_from_its_own_document_newest_first(self):
         reading = {
-            "trials": {"state": "ready", "recent": [
-                {"key": "r1", "repo": "example", "branch": "feat/one", "at": NOW - 300,
-                 "is_green": True},
-                {"key": "r2", "repo": "example", "branch": "feat/two", "at": NOW - 100,
-                 "is_green": False}]},
             "prs": {"state": "ready", "prs": [
                 {"repo": "owner/one", "number": 7, "title": "Fix it",
-                 "opened_at": "2023-11-14T22:10:00Z"}]},
+                 "opened_at": "2023-11-14T22:10:00Z"},
+                {"repo": "owner/two", "number": 8, "title": "Add it",
+                 "opened_at": "2023-11-14T22:12:00Z"}]},
             "roster": {"state": "ready", "jobs": [
                 {"provider": "primary", "id": "a1", "name": "Builder", "state": "done",
                  "since": NOW - 50, "entered_at": NOW - 200},
@@ -90,18 +74,15 @@ class EventTests(unittest.TestCase):
         self.assertEqual(document["events"], [
             {"at": "2023-11-14T22:13:00Z", "kind": "job-waiting", "title": "Asker",
              "ref": "primary:b2"},
-            {"at": "2023-11-14T22:11:40Z", "kind": "trial-failed", "title": "example feat/two",
-             "ref": "r2"},
+            {"at": "2023-11-14T22:12:00Z", "kind": "pr-opened", "title": "Add it",
+             "ref": "owner/two#8"},
             # One time, two events: the kind breaks the tie, so the order holds
             # from one read to the next.
             {"at": "2023-11-14T22:10:00Z", "kind": "job-finished", "title": "Builder",
              "ref": "primary:a1"},
             {"at": "2023-11-14T22:10:00Z", "kind": "pr-opened", "title": "Fix it",
-             "ref": "owner/one#7"},
-            {"at": "2023-11-14T22:08:20Z", "kind": "trial-passed", "title": "example feat/one",
-             "ref": "r1"}])
-        self.assertEqual(document["sources"], {"trials": "ready", "prs": "ready",
-                                               "roster": "ready"})
+             "ref": "owner/one#7"}])
+        self.assertEqual(document["sources"], {"prs": "ready", "roster": "ready"})
 
     def test_no_pull_request_is_ever_reported_merged(self):
         reading = {"prs": {"state": "ready", "prs": [
@@ -112,16 +93,6 @@ class EventTests(unittest.TestCase):
 
     def test_a_row_without_a_real_time_makes_no_event(self):
         reading = {
-            "trials": {"recent": [
-                {"key": "r1", "at": None, "is_green": True},
-                {"key": "r2", "at": "2023-11-14T22:10:00Z", "is_green": True},
-                {"key": "r3", "at": True, "is_green": True},
-                {"key": "r4", "at": float("nan"), "is_green": False},
-                {"key": "r5", "at": -5, "is_green": False},
-                # A real time with no verdict is neither a pass nor a failure.
-                {"key": "r6", "at": NOW},
-                {"key": "r7", "at": NOW, "is_green": "yes"},
-                "not a row"]},
             "prs": {"prs": [{"repo": "o/p", "number": 1, "opened_at": None},
                             {"repo": "o/p", "number": 2, "opened_at": "yesterday"},
                             {"repo": "o/p", "number": 3, "opened_at": "2023-11-14T22:10:00"},
@@ -160,18 +131,18 @@ class EventTests(unittest.TestCase):
         self.assertEqual((document["state"], document["events"]), ("empty", []))
 
     def test_documents_that_are_not_documents_make_no_events(self):
-        reading = {"trials": None, "prs": [], "roster": {"jobs": "many"}}
+        reading = {"prs": [], "roster": {"jobs": "many"}}
         document = events.read_events(reading, configured())
         self.assertEqual(document["events"], [])
-        self.assertEqual(document["sources"], {"trials": "absent", "prs": "absent",
-                                               "roster": "absent"})
+        self.assertEqual(document["sources"], {"prs": "absent", "roster": "absent"})
 
     def test_the_newest_events_are_kept_up_to_the_limit(self):
-        reading = {"trials": {"recent": [
-            {"key": "r{0}".format(index), "repo": "x", "branch": "b", "at": NOW + index,
-             "is_green": True} for index in range(10)]}}
+        reading = {"prs": {"prs": [
+            {"repo": "x/y", "number": index, "title": "t",
+             "opened_at": "2023-11-14T22:{0:02d}:00Z".format(index % 60)} for index in range(10)]}}
         document = events.read_events(reading, configured(limit=3))
-        self.assertEqual([event["ref"] for event in document["events"]], ["r9", "r8", "r7"])
+        self.assertEqual([event["ref"] for event in document["events"]],
+                         ["x/y#9", "x/y#8", "x/y#7"])
 
     def test_a_pull_request_without_a_number_is_named_by_its_repository(self):
         reading = {"prs": {"prs": [{"repo": "o/p", "number": None, "title": "t",
@@ -180,24 +151,11 @@ class EventTests(unittest.TestCase):
 
 
 class ReadingTests(unittest.TestCase):
-    """The events of a whole read, against a store, two commands and a transcript."""
+    """The events of a whole read, against two commands and a transcript."""
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="fleet-events-"))
         self.addCleanup(shutil.rmtree, self.root, True)
-        self.database = self.root / "changes.db"
-        with sqlite3.connect(self.database) as connection:
-            connection.executescript(STORES)
-            connection.execute("INSERT INTO repos VALUES (1, ?, ?)",
-                               ("https://example.invalid/owner/example-repo.git", "abc"))
-            connection.execute("INSERT INTO changes VALUES (1, 1, 'feat/one', 'TRIALED', NULL)")
-            connection.execute("INSERT INTO changes VALUES (2, 1, 'feat/two', 'TRIALED', NULL)")
-            connection.execute("INSERT INTO receipts VALUES ('old', 1, ?, ?)",
-                               (json.dumps(RED), NOW - 900))
-            connection.execute("INSERT INTO receipts VALUES ('new', 1, ?, ?)",
-                               (json.dumps(GREEN), NOW - 600))
-            connection.execute("INSERT INTO receipts VALUES ('two', 2, ?, ?)",
-                               (json.dumps(RED), NOW - 30))
         self.home = self.root / "home"
         transcript = self.home / "projects" / "-work" / (SESSION + ".jsonl")
         transcript.parent.mkdir(parents=True)
@@ -236,8 +194,7 @@ class ReadingTests(unittest.TestCase):
                          "claude": [sys.executable, str(self.root / "claude.py"),
                                     str(self.roster_rows)]},
             "providers": [{"id": "primary", "home": str(self.home)}],
-            "sources": {"trials": {"enabled": True, "database": str(self.database)},
-                        "prs": {"enabled": True, "repositories": ["owner/one"]}},
+            "sources": {"prs": {"enabled": True, "repositories": ["owner/one"]}},
         }), encoding="utf-8")
         return path
 
@@ -251,36 +208,31 @@ class ReadingTests(unittest.TestCase):
         reading = self.read()
         self.assertEqual(reading["events"]["state"], "ready", reading["events"])
         self.assertEqual(reading["events"]["events"], [
-            {"at": "2023-11-14T22:12:50Z", "kind": "trial-failed",
-             "title": "example-repo feat/two", "ref": "two"},
             {"at": "2023-11-14T22:12:00Z", "kind": "pr-opened", "title": "Add dots",
              "ref": "owner/one#4"},
             {"at": "2023-11-14T22:08:00Z", "kind": "job-finished", "title": "Finisher",
-             "ref": "primary:job1"},
-            {"at": "2023-11-14T22:03:20Z", "kind": "trial-passed",
-             "title": "example-repo feat/one", "ref": "new"}])
+             "ref": "primary:job1"}])
 
     def test_a_source_that_failed_is_named_and_the_rest_still_answer(self):
         reading = self.read(FLEET_GITHUB_MODE="fail")
         document = reading["events"]
         self.assertEqual(document["sources"]["prs"], "failed")
-        self.assertEqual({event["kind"] for event in document["events"]},
-                         {"trial-failed", "trial-passed", "job-finished"})
+        self.assertEqual({event["kind"] for event in document["events"]}, {"job-finished"})
 
     def test_a_reader_that_raised_leaves_its_events_out(self):
         original = dict(snapshot.READERS)
 
         def explode(config, **_):
-            raise RuntimeError("the store moved")
+            raise RuntimeError("the command moved")
 
-        snapshot.READERS["trials"] = explode
+        snapshot.READERS["prs"] = explode
         try:
             document = self.read()["events"]
         finally:
             snapshot.READERS.clear()
             snapshot.READERS.update(original)
-        self.assertEqual(document["sources"]["trials"], "failed")
-        self.assertNotIn("trial-passed", {event["kind"] for event in document["events"]})
+        self.assertEqual(document["sources"]["prs"], "failed")
+        self.assertNotIn("pr-opened", {event["kind"] for event in document["events"]})
 
     def test_an_event_build_that_raises_keeps_its_slot_as_failed(self):
         with mock.patch.object(snapshot, "read_events", side_effect=RuntimeError("boom")):
@@ -291,7 +243,7 @@ class ReadingTests(unittest.TestCase):
     def test_a_partial_read_carries_no_events(self):
         environment = self.environment()
         config = load_config(self.config_file(), environ=environment)
-        reading = snapshot.read_snapshot(config, now=NOW, only=["trials"])
+        reading = snapshot.read_snapshot(config, now=NOW, only=["pacer"])
         self.assertNotIn("events", reading)
 
     def test_the_read_command_prints_the_events(self):
@@ -303,7 +255,7 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr[-400:])
         document = json.loads(completed.stdout)["events"]
         self.assertEqual([event["kind"] for event in document["events"]],
-                         ["trial-failed", "pr-opened", "job-finished", "trial-passed"])
+                         ["pr-opened", "job-finished"])
 
 
 if __name__ == "__main__":

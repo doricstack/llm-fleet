@@ -9,13 +9,13 @@ are listed in AGENTS.md. No component in this checkout loads an agent plugin.
 
 ```text
 Provider homes -- runtime roster and job state --+
-Controller store -- leases and receipts --------+
-Governor files -- liveness and real counts -----+-- Snapshot reader
-GitHub CLI -- open PR checks -------------------+        |
-Worktrees -- preservation and live holders -----+        +-- attention band
-Skill scan files -- counts and findings --------+        +-- detail pane
-                                                        +-- alert decisions
-Session payload + provider caches + governor files ---------- statusline
+Pacer status -- run slots and who holds each ---+
+GitHub CLI -- open PR checks -------------------+-- Snapshot reader
+Worktrees -- preservation and live holders -----+        |
+Skill scan files -- counts and findings --------+        +-- attention band
+Process table -- the busiest CPU and memory ----+        +-- detail pane
+Session payload + session transcript -----------+        +-- alert decisions
+Session payload + transcript + branch ---------------------- statusline
 ```
 
 ## Scaffold command layout
@@ -246,18 +246,21 @@ and unfinished fan entries. State reads are bounded regular-file reads; job IDs
 are validated before constructing paths. A failed roster call enters the errors
 list, rather than proving there are zero sessions.
 
-The controller SQLite store is opened read-only. Live trial leases establish
-running work and session-to-branch association. Latest receipts per branch carry
-outcomes. Separate governor run records and adjacent progress files carry actual
-done/total counts, failures, and the first failure. The reader checks PID liveness,
-run age, count validity, and whether a count file belongs to the current run.
-Ambiguous association is labeled unlinked instead of borrowing another branch.
+The pacer source is read through pacer's own command, not its files. The reader
+runs the configured `sources.pacer.command` with `status --json` and reports what
+pacer says: whether pacer is on and which of its sources decided that, its live
+settings (slots, workers per run, scheduling class and nice), each slot with the
+repository holding it, heavy work running outside the slots, the callers waiting
+for one, and the runs that finished. It never reads pacer's lock files or its
+configuration, so nothing about pacer is duplicated locally, and a setting moved
+from pacer's own command or a dashboard is drawn on the next read. The only write
+is the switch: `on` or `off` runs the same command with that word, then reads the
+status again inside the same time budget.
 
 PRs come from `gh pr list` for explicitly selected repositories. Worktree probes
-use controller preservation helpers, Git, and bounded live-holder checks. Skill
-findings come from a scan summary, progress, and notices. These integrations have
-dependencies on the original tooling repository today; standalone adapters have
-not been extracted.
+use Git and bounded live-holder checks. Skill findings come from a scan summary
+and its notices. Load comes from one bounded sample of the process table. Each
+reads what its owner already wrote and changes none of it.
 
 ## Readers as built
 
@@ -303,21 +306,18 @@ array holding an executable and any fixed leading arguments, and the reader
 appends its own arguments. A bare name resolves on the PATH the child actually
 receives, so a resolution that succeeds cannot fail inside the child.
 
-The other readers follow the same pattern, one module each. The trial reader
-opens the change controller's store read-only and never migrates it: a live lease
-is a running trial, a recent receipt is a verdict, and only the newest receipt
-per branch is kept. A run counts as green only when its own evidence says nothing
-failed, nothing errored, the selector succeeded, and it executed what it
-selected. An unreadable store is an error with a reason, never a claim about
-work.
-
-The progress reader trusts nothing on its own. A run must have a live process, a
-record inside its age ceiling, and a count file newer than the run that wrote it
-before any number is reported; a count above its total is clamped, a run that
-already finished is dropped instead of shown as a stopped bar, and an estimate
-appears only after the configured number of outcomes. A branch is named only
-when exactly one live lease claims the run, because an ambiguous association is
-worse than none.
+The other readers follow the same pattern, one module each. The pacer reader
+runs the configured command with `status --json` under the command timeout and
+the job-state byte bound, and treats the answer as another program's bytes. The
+switch, the slot count and every slot are checked: a status that is not an
+object, one that names no slot count, or one that lists a different number of
+slots than it declares fails the section, and a slot whose busy flag cannot be
+read is never counted as free. A field pacer did not send is reported absent,
+never as zero or an empty list, because nobody waiting and nobody counted are
+different answers. A run that finished without a time or an exit code is
+dropped, since an exit nobody wrote is not a pass. The switch is the only write:
+`on` or `off` runs the same command with that word and reads the status again
+inside the same time budget.
 
 The pull-request reader runs one command per configured repository and each
 repository answers for itself: the rows from the ones that answered are kept, the
@@ -402,7 +402,7 @@ prove without a host. It does not claim to prove how either surface paints.
 ## Reading, and looking at what was read
 
 `plugins/llm-fleet/readers/snapshot.py` is the command a view layer calls: it resolves
-the configuration, runs the seven readers once, and prints one object. A reader
+the configuration, runs the eight readers once, and prints one object. A reader
 that raises does not remove its document; the slot is filled with a failed source
 that names the reason, because a missing key reads downstream as a source nobody
 asked about, and a source that failed is not the same thing.
@@ -434,7 +434,7 @@ their own group, because a failing check and a failing test are different
 denominators. A group's primary count is stated even at zero, since zero observed
 is a reading; the legend entries after it omit the states nothing is in.
 
-The six reader documents arrive as parsed JSON from another process, so
+The reader documents arrive as parsed JSON from another process, so
 `plugins/llm-fleet/components/snapshot.ts` checks every field before it is used. An absent document
 is a source nothing was claimed for, which reads as empty; a document that is
 present and unreadable, or that names a state this layer does not know, reads as
@@ -514,19 +514,20 @@ writes the reading back and lets the claim go; the others draw what it wrote.
 A claim older than a read could take belongs to a session that died mid-read
 and is taken over; a session lets go only a claim that is still its own. A
 reading or claim dated up to 2 seconds ahead of a session's clock is current,
-since another session may write it during a look. While a pane is open on a
-live governor run, that run's counts are read on their own every second the
-same way, a read of the progress files alone, dated when the look decided to
-read them. They are kept under their own key and drawn over the whole
-reading's own counts when newer, so a count read never writes the whole
-reading and cannot put an older fleet over a newer one. The two reads do not
-wait for each other: the counts keep moving while the machine is read, and a
-whole read that lands keeps counts read since it began. Neither kind of read
-is written over a newer one of its kind. A count read that failed leaves the
-counts it would replace standing. A paint while this session reads the whole
-machine does not look at the store again; the read's landing redraws the
-pane. A reading from a build before the shared reading carries a 30-second
-look interval, which is ignored.
+since another session may write it during a look. While an open pane shows
+pacer holding a slot, a caller waiting for one, or heavy work running outside
+its slots, pacer's own status is read on its own every `refresh.liveMs` (one
+second by default) the same way, as a read of that one source (`--only pacer`),
+dated when the look decided to read it. It is kept under its own key and drawn
+over the whole reading's pacer document when newer, so a live read never writes
+the whole reading and cannot put an older fleet over a newer one. The two reads
+do not wait for each other: pacer's slots keep moving while the machine is read,
+and a whole read that lands keeps slots read since it began. Neither kind of
+read is written over a newer one of its kind. A live read that failed leaves the
+slots it would replace standing: they are older, not wrong. A paint while this
+session reads the whole machine does not look at the store again; the read's
+landing redraws the pane. A reading from a build before the shared reading
+carries a 30-second look interval, which is ignored.
 PR data has a separate 120-second cache. Worktree inspection has its own
 300-second cache; opening that section requests a fresh probe.
 
@@ -540,7 +541,7 @@ These are distinct stores; neither belongs in the exported source tree.
 The attention band ranks failures ahead of requests for input. It suppresses
 the current session's own job and dismissed attention keys. The pane opens on
 request and groups background sessions, this session's own spend and parameters,
-trials, PRs, warnings, worktrees, skills, running work, and key help. Section
+pacer's run slots, PRs, warnings, worktrees, skills, load, and key help. Section
 expansion choices persist. A job row can copy an
 attach command; a waiting job can receive a message after a fresh question check.
 Message delivery does not establish that an approval was granted.
@@ -626,8 +627,8 @@ question between the helper's read and the message landing, and no check from
 outside the job can close that window. The message then waits in the job's
 queue and is read as an answer to whatever it asks next.
 
-The statusline remains separate: branch, context, cost, rate limits, provider
-balances, and governor activity belong there. The personal renderer also has
+The statusline remains separate: branch, context, cost, rate limits and provider
+balances belong there. The personal renderer also has
 weather, network, disk, routing, and model-policy integrations. Their standalone
 scope needs a separate inventory. The pane must not duplicate these fields.
 
@@ -650,9 +651,12 @@ a live desktop session was exercised during scaffolding.
 ## Alerts and speech
 
 The first snapshot establishes a baseline without replaying old events. New job
-completion or blocking, trial receipts, failing PR checks, and skill findings
-can raise alerts. Toasts go to the session with the last submitted prompt for
-30 minutes. A machine-wide event claim deduplicates native notifications.
+completion or blocking, failing PR checks, and skill findings can raise alerts.
+A run pacer refused is drawn on the band and raises no alert of its own: the
+band is where a run nobody can start is readable, and a refusal is not a
+question waiting for an answer. Toasts go to the session with the last submitted
+prompt for 30 minutes. A machine-wide event claim deduplicates native
+notifications.
 Only a terminal session claims native notifications in the current implementation.
 Waiting-job alerts can also speak if speech is enabled.
 
@@ -675,19 +679,23 @@ waits for it to end and is dropped after 60 seconds rather than said late. iTerm
 tmux requires passthrough, and tint is restored when attention clears or the
 session ends. There is no configurable notification-tone asset system yet.
 
-## Controller boundary and truthful states
+## External work and truthful states
 
-llm-fleet observes the controller; it is not the controller. Worktree rows copy a
-cleanup command, not execute cleanup. Trial execution, preservation, cleanup
-authorization, and scheduling remain external. An optional controller adapter
-must allow fleet to run without that personal workflow.
+llm-fleet observes; it is not the runner. Worktree rows copy a cleanup command,
+not execute cleanup. A heavy run is started by whatever started it, and pacer
+only grants it a slot: fleet draws the slots and the runs and never schedules,
+refuses or stops one itself. The one control it offers is pacer's switch, and
+that press runs pacer's own command.
 
 Keep stale rows with their age and source failure when a refresh fails. Incomplete
 reads must not become "nothing running". Process disappearance alone cannot mean
 success. Preserve a stopped run's measured count and final outcome; never replace
 its denominator with completed work to manufacture 100%.
 
-The existing Still running view handles incomplete source reads, and its jobs
-have no invented progress. The Trials formatter still constructs an empty bar
-when total is zero. Removing that bar and proving interrupted-run behavior across
-the extracted controller and governor adapters are explicit work-queue items.
+The pane handles incomplete source reads, and its jobs have no invented
+progress. A bar is drawn only where a real denominator exists: a custom section's
+row draws one when both halves of its count are present, the total is above
+zero, and the done count does not exceed it; a run the pane cannot measure draws
+its state in words instead. A
+pacer read that fails names the failure and leaves the slots it held standing
+rather than drawing an empty machine.

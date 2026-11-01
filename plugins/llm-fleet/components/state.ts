@@ -175,48 +175,6 @@ export type Events = {
   errors: ReaderError[];
 };
 
-export type Lease = {
-  repo: string;
-  branch: string;
-  tool: string;
-  expires_at: number;
-  session: string;
-};
-
-export type Trial = {
-  key: string;
-  repo: string;
-  branch: string;
-  change_state: string;
-  at: number;
-  is_green: boolean;
-  passed: number;
-  failed: number;
-  errors: number;
-  skipped: number;
-};
-
-/** One hour of the trials window: how many landed in it and how many failed. */
-export type TrialBucket = {
-  outcomes: number;
-  failed: number;
-};
-
-/**
- * The trials window as buckets, which is what the pane's strip is drawn from.
- *
- * It is null, rather than a run of empty buckets, whenever the store behind it
- * was not read: a strip of track is a claim about twelve hours, and a source
- * that was switched off has not measured any.
- */
-export type TrialHistory = {
-  label: string;
-  hours: number;
-  cells: TrialBucket[];
-  outcomes: number;
-  failed: number;
-};
-
 /**
  * This session's own figures, as the renderer last recorded them.
  *
@@ -264,70 +222,6 @@ export type SessionFigures = {
   parameters: Record<string, string>;
   errors: ReaderError[];
 };
-
-/** One change still moving through the controller, and its place on the stage path. */
-export type Change = {
-  repo: string;
-  branch: string;
-  state: string;
-  /** Its place on the configured path, first stage 1; null for a state the path does not name. */
-  stage: number | null;
-  stages: number;
-  moved_at: number | null;
-  /** The tool holding a live lease on it, when one does. */
-  held_by: string | null;
-};
-
-export type Trials = {
-  state: ReaderState;
-  running: Lease[];
-  recent: Trial[];
-  history: TrialHistory | null;
-  /** Changes in flight; absent from a snapshot assembled before they were read. */
-  changes?: Change[];
-  /**
-   * The machine-wide on/off switch the reader found, or null when no switch file
-   * is configured or it could not be looked at.
-   */
-  switch?: "on" | "off" | null;
-  errors: ReaderError[];
-};
-
-export type Run = {
-  key: string;
-  repo: string;
-  branch: string | null;
-  label: string;
-  display: string;
-  done: number;
-  total: number;
-  failed: number;
-  first_failure: string;
-  elapsed: number;
-  eta_minutes: number | null;
-  phase: string;
-  /** "wait" while the governor holds the command, "run" once it runs; absent from older readings. */
-  kind?: string | null;
-  command_class?: string;
-  /** The command's place in the governor's queue, and the queue's length, when it said. */
-  queue_position?: number | null;
-  queue_total?: number | null;
-  /** The wait the governor set, and what is left of it, in seconds, while it holds the command. */
-  wait_total?: number | null;
-  wait_left?: number | null;
-};
-
-export type Progress = {
-  state: ReaderState;
-  runs: Run[];
-  /**
-   * The machine-wide on/off switch the reader found, or null when no switch file
-   * is configured or it could not be looked at.
-   */
-  switch?: "on" | "off" | null;
-  errors: ReaderError[];
-};
-
 export type PullRequest = {
   repo: string;
   /** Absent when the command did not report one: a row shows no number rather than a zero. */
@@ -415,8 +309,6 @@ export type Worktree = {
 export type Worktrees = {
   state: ReaderState;
   worktrees: Worktree[];
-  /** Worktrees cleaned inside the retention window, absent when nothing could say. */
-  cleaned: number | null;
   errors: ReaderError[];
 };
 
@@ -438,23 +330,34 @@ export type LoadProcess = {
   project_root?: string;
 };
 
+/**
+ * What the whole machine is doing, as the platform stated it.
+ *
+ * A figure the platform does not state is null, never a nought: a machine
+ * nobody measured and an idle one are different answers, and the pane draws a
+ * figure only where there is one.
+ */
+export type LoadSystem = {
+  /** How much of every core was busy when the platform sampled it. */
+  cpuPercent: number | null;
+  /** The one, five and fifteen minute run-queue averages; Windows states none. */
+  loadAverage: number[] | null;
+  memoryUsedBytes: number | null;
+  memoryTotalBytes: number | null;
+};
+
 export type Load = {
   state: ReaderState;
   /** When the process table was sampled, in epoch seconds. */
   sampled_at: number | null;
   /** How many processes the machine reported, which is what the drawn ones were chosen from. */
   total: number;
+  /** The machine's own figures; absent on a platform that states none. */
+  system: LoadSystem | null;
   processes: LoadProcess[];
   errors: ReaderError[];
 };
 
-/**
- * The machine's governor and controller switch.
- *
- * The tool that owns the switch writes one small document, so a state this
- * layer draws is one the reader read: a file that could not be read is failed
- * and carries no scope at all, rather than the tool's own "both on" default.
- */
 /** One of pacer's machine-wide run slots. */
 export type PacerSlot = {
   slot: number;
@@ -482,6 +385,17 @@ export type PacerRun = {
   reason: string | null;
 };
 
+/** A heavy process running while pacer holds the machine's slots. */
+export type PacerOutside = {
+  pid: number | null;
+  /** The program, as the process table named it; unnamed when pacer could not read it. */
+  pattern: string | null;
+  /** Percent of one core. */
+  cpu: number | null;
+  /** Peak resident memory, in kilobytes. */
+  rssKb: number | null;
+};
+
 /** The machine's run slots, as pacer's own status reports them. */
 export type Pacer = {
   state: ReaderState;
@@ -493,27 +407,21 @@ export type Pacer = {
   version: number | null;
   slotCount: number | null;
   workersPerRun: number | null;
+  /** The scheduling class, as pacer's live configuration sets it. */
+  qos: string | null;
+  /** The nice value, signed: a negative one raises priority. */
+  nice: number | null;
   slots: PacerSlot[];
   /** Null when pacer did not report its waiters, which is not nobody waiting. */
   waiting: PacerWaiter[] | null;
   /** Null when pacer did not report its runs. */
   recent: PacerRun[] | null;
-  errors: ReaderError[];
-};
-
-export type Governance = {
-  state: ReaderState;
-  /** Whether each scope is on, absent when the document was not a reading. */
-  governor: boolean | null;
-  controller: boolean | null;
-  /** Where the answer came from: the file, a legacy marker, or a missing file's default. */
-  source: string | null;
-  /** The switch file the configuration named. */
-  path: string | null;
-  /** When the switch last moved, as the writer stamped it. */
-  updated_at: string | null;
-  /** Who moved it, as the writer recorded. */
-  by: string | null;
+  /** Heavy work running without a slot. Null when pacer did not report it. */
+  outside: PacerOutside[] | null;
+  outsideCount: number | null;
+  /** Percent of one core, summed over the processes running outside. */
+  outsideCpu: number | null;
+  outsideRssKb: number | null;
   errors: ReaderError[];
 };
 
@@ -557,16 +465,12 @@ export type Custom = {
 export type Snapshot = {
   generated_at: number;
   roster: Roster;
-  trials: Trials;
   session: SessionFigures;
-  progress: Progress;
   prs: PullRequests;
   skills: Skills;
   worktrees: Worktrees;
   load: Load;
   custom: Custom;
-  /** The machine's governor and controller switch; absent from a reading taken before it was read. */
-  governance?: Governance;
   /** Pacer's run slots; absent from a reading taken before they were read. */
   pacer?: Pacer;
   /** The digest's events; absent from a reading taken before they were read, or a part of one. */

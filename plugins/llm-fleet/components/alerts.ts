@@ -1,6 +1,6 @@
 /**
- * What in a reading is news: a job that finished or needs its person, a trial
- * that passed or failed, a skill flagged, a pull request whose checks fail.
+ * What in a reading is news: a job that finished or needs its person, a skill
+ * flagged, a pull request whose checks fail.
  *
  * Each event carries a key that names it once across readings and across
  * sessions. A session alerts on what is new to it, and the machine-wide claim
@@ -49,16 +49,6 @@ export function eventsOf(snapshot: Snapshot, sessionId: string): FleetEvent[] {
       });
     }
   }
-  for (const trial of snapshot.trials.recent) {
-    const where = said(trial.repo) + " " + said(trial.branch);
-    events.push({
-      key: "trial:" + trial.key,
-      text: trial.is_green
-        ? "Trial passed on " + where + ": " + trial.passed + " passed"
-        : "Trial failed on " + where + ": " + (trial.failed + trial.errors) + " failed, "
-          + trial.passed + " passed",
-    });
-  }
   for (const skill of snapshot.skills.new ?? []) {
     const key = "skill:" + skill.target + ":" + skill.verdict + ":" + skill.hash;
     const name = said(skill.name);
@@ -84,7 +74,8 @@ export function eventsOf(snapshot: Snapshot, sessionId: string): FleetEvent[] {
 
 /** Whether any source this reading draws from could not be read. */
 function degraded(snapshot: Snapshot): boolean {
-  return [snapshot.roster, snapshot.trials, snapshot.prs, snapshot.skills]
+  return [snapshot.roster, snapshot.prs, snapshot.skills,
+          ...(snapshot.pacer === undefined ? [] : [snapshot.pacer])]
     .some((source) => source.state === "failed" || source.state === "unavailable");
 }
 

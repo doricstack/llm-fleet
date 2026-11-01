@@ -22,11 +22,7 @@ function reading(jobs: unknown[], overrides: Record<string, unknown> = {}): Read
   return {
     roster: { state: "ready", providers: { one: { state: "ready", jobs: jobs.length } }, jobs,
               sources: { jobs: "ready", interactive: "empty" }, interactive: {} },
-    trials: { state: "ready", running: [], history: null, recent: [
-      { key: "t1", repo: "repo", branch: "feat/a", change_state: "TRYING", at: AT - 30,
-        is_green: false, passed: 4, failed: 2, errors: 1, skipped: 0 },
-    ] },
-    progress: { state: "empty" },
+    pacer: { state: "ready", slots: [], waiting: [], recent: [] },
     prs: { state: "ready", prs: [
       { repo: "owner/project", number: 7, title: "Fix it", branch: "fix", head: "abc",
         is_draft: false, checks: "fail" },
@@ -56,7 +52,6 @@ test("a waiting job is said aloud; a finished one is shown, not said", () => {
   assert.equal(byKey["job:cccc3333:done"]?.text, "Job finished: Job cccc3333");
   assert.equal(byKey["job:cccc3333:done"]?.spoken, undefined);
   assert.equal(events.some((event) => event.key.startsWith("job:dddd4444")), false);
-  assert.equal(byKey["trial:t1"]?.text, "Trial failed on repo feat/a: 3 failed, 4 passed");
   assert.equal(byKey["pr:owner/project#7:abc"]?.text, "PR 7 checks failing: Fix it");
   assert.equal(byKey["skill:/s/helper:flagged:h1"]?.text, "Skill flagged: helper, reads keys");
   assert.equal(events.some((event) => event.text.includes("Fine")), false);

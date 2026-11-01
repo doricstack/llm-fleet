@@ -27,7 +27,6 @@ export const ENTRIES = {
   transcript: "readers/transcript.py",
   doctor: "readers/doctor.py",
   setup: "readers/setup.py",
-  governance: "readers/governance.py",
   rates: "readers/rates.py",
   pacer: "readers/pacer.py",
 } as const;

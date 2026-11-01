@@ -113,17 +113,15 @@ test("a desktop tile's outline follows the quiet tone, as the terminal's border 
 });
 
 test("the review page draws the reading's theme, as the live pane does", () => {
+  // A rate window's bar is the drawing a desktop surface shows in place of the
+  // cells, so it is where a review page's color can be read back from.
   const documents = (theme: Record<string, string>) => ({
-    pane: { state: "ready", order: ["running"],
-            sections: { running: { title: "Running", visible: true, collapsed: false, legend: null,
-                                   hideWhenEmpty: false, maxRows: null } },
+    generated_at: NOW,
+    pane: { state: "ready", order: ["session"],
+            sections: { session: { title: "This session", visible: true, collapsed: false,
+                                   legend: null, hideWhenEmpty: false, maxRows: null } },
             theme },
-    roster: { state: "ready", jobs: [], interactive: {}, errors: [], providers: {},
-              sources: { jobs: "ready", interactive: "ready" } },
-    progress: { state: "ready", errors: [], runs: [
-      { key: "k", repo: "project", branch: "feature-a", label: "Test export boundaries",
-        display: "Test export boundaries", done: 42, total: 80, failed: 0,
-        first_failure: "", elapsed: 120, eta_minutes: null, phase: "running" }] },
+    session: { state: "ready", remainingPercent: 42, fiveHourUsedPercent: 30 },
   });
   const drawn = (theme: Record<string, string>): string =>
     renderVectors(documents(theme) as never, 100, NOW, NOW - 4).map((vector) => vector.source).join("");

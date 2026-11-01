@@ -1,4 +1,4 @@
-.PHONY: test test-report test-impacted test-unit test-doc-format test-export test-config test-config-parity test-readers test-components test-components-drift test-typescript test-engine test-pane plugin-validate install-check test-ci test-export-roundtrip mutants
+.PHONY: test test-report test-impacted test-unit test-doc-format test-export test-config test-config-parity test-readers test-components test-components-drift test-typescript test-engine test-pane plugin-validate install-check test-ci test-export-roundtrip mutants mutants-measure
 
 test: test-report ## Run every implemented scaffold test
 
@@ -8,7 +8,9 @@ test-report: ## Run every implemented scaffold test, writing a JUnit report when
 test-impacted: ## Run only the tests the working tree's changes affect
 	.cits/test-impact.sh --tier commit --repo "$(CURDIR)"
 
-mutants: script-mutation-check ## Run the declared mutants against their suites; every survivor fails unless declared equivalent
+mutants: script-mutation-gate ## Measure what changed through the receipt store and judge it; a survivor fails
+
+mutants-measure: script-mutation-check ## Run the declared mutants against their suites; pick some with MUTANTS
 
 test-unit: test-doc-format ## Run the scaffold unit/checker suite
 
@@ -24,23 +26,17 @@ test-config: ## Run the configuration contract, behavior, and parity suites
 test-config-parity: ## Refuse unless both loaders agree on the shared fixture corpus
 	FLEET_CONFIG_REQUIRE_NODE=1 $(TEST_ENV) $(PYTHON) tests/test_config_loader.py -k FixtureParityTests -v
 
-.PHONY: test-reader-progress test-reader-trials
-test-reader-progress: ## Run progress reader behavior and pause-marker checks
-	$(TEST_ENV) $(PYTHON) tests/test_reader_progress.py -v
-
-test-reader-trials: ## Run trial reader behavior and pause-marker checks
-	$(TEST_ENV) $(PYTHON) tests/test_reader_trials.py -v
-
+.PHONY: test-readers
 test-readers: ## Run the reader suites against real stub commands, stores and files
 	$(TEST_ENV) $(PYTHON) tests/test_readers.py -v
-	$(TEST_ENV) $(PYTHON) tests/test_reader_trials.py -v
-	$(TEST_ENV) $(PYTHON) tests/test_reader_progress.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_prs_skills.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_worktrees.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_snapshot.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_host.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_transcript.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_agents.py -v
+	$(TEST_ENV) $(PYTHON) tests/test_reader_pacer.py -v
+	$(TEST_ENV) $(PYTHON) tests/test_reader_load.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_events.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_session.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_alerts.py -v

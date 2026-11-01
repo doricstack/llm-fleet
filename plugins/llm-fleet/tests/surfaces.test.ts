@@ -31,8 +31,6 @@ const READING = {
     sources: { jobs: "ready", interactive: "empty" },
     interactive: { one: 1 },
   },
-  trials: { state: "empty" },
-  progress: { state: "empty" },
   prs: { state: "empty" },
   skills: { state: "empty" },
   worktrees: { state: "empty" },

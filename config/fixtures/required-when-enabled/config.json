@@ -3,7 +3,7 @@
     "prs": {
       "enabled": true
     },
-    "trials": {
+    "pacer": {
       "enabled": true
     },
     "worktrees": {

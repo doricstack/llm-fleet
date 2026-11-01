@@ -11,11 +11,13 @@
     }
   ],
   "sources": {
-    "trials": {
+    "worktrees": {
       "enabled": true,
-      "database": "/fixture/runner/state/absent.db"
+      "roots": [
+        "/fixture/runner/state/absent-tree"
+      ]
     },
-    "progress": {
+    "skills": {
       "enabled": true,
       "directory": "/fixture/runner/state/not-a-directory"
     }

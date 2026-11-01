@@ -1,6 +1,6 @@
 {
   "pane": {
-    "sectionOrder": ["prs", "sessions", "trials", "running", "custom:disk", "session",
+    "sectionOrder": ["prs", "sessions", "pacer", "custom:disk", "session",
                      "worktrees", "skills", "warnings", "keys"],
     "custom": {
       "disk": {

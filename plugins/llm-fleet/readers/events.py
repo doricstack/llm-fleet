@@ -8,7 +8,6 @@ module does not track.
 
 | Kind | Document | Time |
 | --- | --- | --- |
-| `trial-passed`, `trial-failed` | `trials.recent`: the newest receipt per branch within `history.trialsSeconds` | The receipt's own created time |
 | `pr-opened` | `prs.prs` | `opened_at`, the time GitHub states the pull request was opened |
 | `job-finished` | `roster.jobs` in the `done` state | `entered_at`: the finish the job's own file records, else the read that saw it finish |
 | `job-waiting` | `roster.jobs` in the `blocked` state | `entered_at`: the time the job's own file last wrote while waiting, else the read that saw it begin to wait |
@@ -23,8 +22,6 @@ What is never emitted, and why:
   before the change, so none of them is the change; dated by one, a job
   waiting for a day would read as new. The event is left out rather than
   given a time nobody recorded.
-- An earlier receipt on a branch that has a newer one: the trial document keeps
-  the newest per branch, so one event per branch is what the reading holds.
 - Any event whose time is missing, not a number, or not a time.
 """
 
@@ -37,7 +34,7 @@ from typing import Any, Mapping
 from .agents import iso_time
 
 # The documents events come from, each named with the state it was read in.
-SOURCES = ("trials", "prs", "roster")
+SOURCES = ("prs", "roster")
 
 
 def _number_time(value: Any) -> float | None:
@@ -66,21 +63,6 @@ def _text(value: Any) -> str:
 def _rows(document: Any, key: str) -> list[Mapping[str, Any]]:
     rows = document.get(key) if isinstance(document, Mapping) else None
     return [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
-
-
-def trial_events(document: Any) -> list[tuple[float, dict[str, str]]]:
-    events = []
-    for row in _rows(document, "recent"):
-        at = _number_time(row.get("at"))
-        verdict = row.get("is_green")
-        # A row that states no verdict is neither a pass nor a failure.
-        if at is None or not isinstance(verdict, bool):
-            continue
-        kind = "trial-passed" if verdict else "trial-failed"
-        title = " ".join(part for part in (_text(row.get("repo")), _text(row.get("branch")))
-                         if part)
-        events.append((at, {"kind": kind, "title": title, "ref": _text(row.get("key"))}))
-    return events
 
 
 def pr_events(document: Any) -> list[tuple[float, dict[str, str]]]:
@@ -123,8 +105,7 @@ def read_events(reading: Mapping[str, Any], config: Mapping[str, Any]) -> dict[s
     read as a quiet stretch.
     """
     limit = int(config["history"]["eventLimit"])
-    gathered = (trial_events(reading.get("trials")) + pr_events(reading.get("prs"))
-                + job_events(reading.get("roster")))
+    gathered = (pr_events(reading.get("prs")) + job_events(reading.get("roster")))
     gathered.sort(key=lambda pair: (-pair[0], pair[1]["kind"], pair[1]["ref"]))
     events = [{"at": iso_time(at), **body} for at, body in gathered[:limit]]
     sources = {}

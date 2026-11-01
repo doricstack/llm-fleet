@@ -305,7 +305,7 @@ export type Group = {
    * What this section's counts mean, as the configuration words it.
    *
    * Drawn under the heading while the section is open. It is the one line that
-   * says a count is of trials, or of worktrees, or of sources that could not be
+   * says a count is of jobs, or of worktrees, or of sources that could not be
    * read, which is what a row of numbers at the right of a heading cannot say
    * for itself.
    */
@@ -341,7 +341,7 @@ export type Group = {
   spark?: Spark | null;
   /**
    * Whether the section holds something that needs the person: a failed check,
-   * a job waiting on input, a failed trial or run. Such a section is drawn above
+   * a job waiting on input, a failed pull request or run. Such a section is drawn above
    * the calm ones.
    */
   attention?: boolean;
@@ -1087,9 +1087,23 @@ export function renderGroup(given: Group, width: number, narrowAt: number,
   }
   // The columns are named once, above the rows they align with, in the same
   // dim tone as any other label. A folded section draws none: it draws no rows.
+  // The names stand where the figures stand, at the right edge: a text drawing
+  // lays a run out left to right and knows nothing of a layout's justification,
+  // so the room the names do not take is written out rather than left to it.
+  //
+  // The room is the rows' own: they are drawn inside the rail, three cells in,
+  // and `line` writes a separator before every name that does not carry one,
+  // which `slotsWidth` counts. A header measured without either ran past the
+  // content box and sat right of the figures it names.
   if (group.columns?.length && group.rows.length && !group.collapsed) {
-    parts.push(box({ flexDirection: "row", justifyContent: "flex-end" },
-                   [line(group.columns.map((slot): Slot => ({ ...slot, dim: true })))]));
+    const named = group.columns.map((slot): Slot => {
+      const placed = slot.width === undefined ? slot.text
+        : slot.align === "left" ? slot.text.padEnd(slot.width) : slot.text.padStart(slot.width);
+      return { ...slot, text: placed, dim: true };
+    });
+    const room = Math.max(0, inner - (graphical ? 0 : RAIL_BRANCH.length + 1));
+    const spare = Math.max(0, room - slotsWidth(named));
+    parts.push(line(spare > 0 ? [{ text: " ".repeat(spare) }, ...named] : named));
   }
   if (group.rows.length && !group.collapsed) {
     // The section is the parent and its items hang off one rail in its tone. A

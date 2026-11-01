@@ -9,7 +9,8 @@
 
 import type { Control, Digest, Group, Pane, PickerItem, Row, RowLine, GroupState, Slot,
               Spark } from "./layout.ts";
-import { ageText, countLabel, durationText, fit } from "./layout.ts";
+import { ageText, durationText, fit } from "./layout.ts";
+import { stateColor } from "./cards.ts";
 import { mask, MASK } from "./mask.ts";
 import { THEME, worktreeToken, type Theme } from "./palette.ts";
 import { money, spendWindowTile } from "./session.ts";
@@ -19,9 +20,9 @@ import { FOOTER_TEXT } from "./version.ts";
 // before the machine-wide spend tile needed the same rule in that module.
 export { money };
 import type {
-  AgentFigures, Governance, Job, Load, LoadProcess, Progress, PullRequest, PullRequests, Roster,
-  Run, SessionFigures, SkillItem, Skills, Snapshot, SpendSeries, Trial, Trials, Worktree,
-  Worktrees, Change, CustomRow, CustomSection, Pacer, PacerRun, PacerSlot } from "./state.ts";
+  AgentFigures, Job, Load, LoadProcess, LoadSystem, PullRequest, PullRequests, Roster,
+  SessionFigures, SkillItem, Skills, Snapshot, SpendSeries, Worktree,
+  Worktrees, CustomRow, CustomSection, Pacer, PacerRun, PacerSlot } from "./state.ts";
 
 /** The prefix a section a person added is named by in the order. */
 export const CUSTOM_PREFIX = "custom:";
@@ -123,22 +124,11 @@ export type PaneActions = {
   /** Clear a reply's record that does not read, so the question can take a reply. */
   clearUnreadable?: (job: Job) => void;
   /**
-   * Move one of the machine's governance scopes.
-   *
-   * A scope that is on is switched off only on a second press, so this is
-   * called once to arm that press and again to make it; the option that says
-   * which scope is armed is `confirmingGovernance`.
-   */
-  governance?: (scope: GovernanceScope) => void;
-  /**
    * Switch pacer on or off. Switching it off is called once to arm the press
    * and again to make it; `confirmingPacer` says it is armed.
    */
   pacer?: (wanted: boolean) => void;
 };
-
-/** The two scopes the machine's governance switch carries, which the pane can move. */
-export type GovernanceScope = "governor" | "controller";
 
 /**
  * Why replies are paused on this machine, as the helper last refused one: too
@@ -151,13 +141,6 @@ export type PaneOptions = {
   width: number;
   narrowAt: number;
   now: number;
-  /**
-   * When the governor's counts were read, on the same clock as `now`. A run's
-   * times are aged from it at each paint, so they count on between reads
-   * instead of freezing and then jumping. Absent, the reading's own figures
-   * stand.
-   */
-  countsAt?: number;
   /** Section order and per-section choices, as configuration resolved them. */
   sectionOrder: string[];
   sections: Record<string, SectionChoice>;
@@ -246,13 +229,6 @@ export type PaneOptions = {
   focus?: Focus | null;
   /** The rows a person pressed open, by the key the row carries. */
   details?: Record<string, true>;
-  /**
-   * The scope whose switch-off is waiting for the press that confirms it.
-   *
-   * Switching a scope on takes one press; switching one off is a gate going
-   * away, so the row asks again and this is what says it is asking.
-   */
-  confirmingGovernance?: GovernanceScope | null;
   /** Whether pacer's switch-off is waiting for the press that confirms it. */
   confirmingPacer?: boolean;
 };
@@ -266,14 +242,12 @@ export const FOCUS_PREFIX = "fleet.focus.";
 export const FOCUS_CLEAR = "fleet.focus.clear";
 /** The address of a press that opens the rest of a row. */
 export const DETAILS_PREFIX = "fleet.details.";
-/** The address of a press on one of the machine's governance switches, before the scope. */
-export const GOVERNANCE_PREFIX = "fleet.governance.";
 
 /**
  * Whether a row is one the focused figure counted.
  *
  * The words are the states the rows carry: a job works or waits, a pull request
- * and a trial pass or fail, and a run is running. A figure for working counts
+ * and a pacer run pass or fail. A figure for working counts
  * every live state, because a lapse of one word is not a different outcome.
  */
 export function focusMatches(state: string | undefined, focus: Focus): boolean {
@@ -390,15 +364,12 @@ export const ALL_CONTROLS = [
  * travelled draws instead of a section with no heading at all.
  */
 const DEFAULT_TITLES: Record<string, string> = {
-  running: "Running",
   sessions: "Background sessions",
   session: "This session",
-  trials: "Trials",
   prs: "Pull requests",
   worktrees: "Worktrees",
   skills: "Skills",
   load: "Load",
-  governance: "Governance",
   pacer: "Pacer",
   warnings: "Warnings",
   keys: "Keys",
@@ -459,6 +430,11 @@ export function working(job: Job): boolean {
 
 export function active(job: Job): boolean {
   return !waiting(job) && !working(job) && !TERMINAL_STATES.has(job.state);
+}
+
+/** A session that ended in failure, which is an outcome a person has to read. */
+export function failed(job: Job): boolean {
+  return job.state === "failed" || job.state === "error";
 }
 
 /**
@@ -987,181 +963,6 @@ export function agentStrip(jobs: Job[], now: number): Slot[] {
   return strip;
 }
 
-/**
- * A command the governor is holding: its place in the queue and how much of the
- * wait it set has gone, drawn as a bar of that wait. Every figure is the
- * governor's own; a wait it did not state draws no bar rather than a guess.
- */
-function heldRow(run: Run, options: PaneOptions): Row {
-  const what = run.command_class ? run.command_class + " in " + run.repo : run.repo;
-  const meta: Slot[] = [{ text: "waiting" }];
-  if (run.queue_position !== null && run.queue_position !== undefined) {
-    meta.push({ text: " \u00b7 " + ordinal(run.queue_position)
-                  + (run.queue_total ? " of " + run.queue_total : "") + " in line" });
-  }
-  if (run.phase) {
-    meta.push({ text: " \u00b7 " + run.phase + " gate", dim: true });
-  }
-  const total = run.wait_total ?? 0;
-  const read = run.wait_left;
-  const left = read === null || read === undefined ? read
-    : Math.max(0, read - aged(options));
-  const waited = left !== null && left !== undefined && total > 0
-    ? Math.max(0, Math.min(total, total - left)) : null;
-  return {
-    title: shown(run.branch ? run.branch + " \u00b7 " + what : what).text,
-    state: "waiting",
-    meta,
-    slot: [],
-    bar: waited !== null
-      ? { done: waited, total, cells: options.geometry.progressCells,
-          label: { text: durationText(left as number) + " left", dim: true } }
-      : undefined,
-  };
-}
-
-/**
- * How long ago the governor's counts were read, by this paint's clock: never
- * less than nothing, since counts dated ahead of the clock are the store being
- * quick, not time running backwards.
- */
-function aged(options: PaneOptions): number {
-  return options.countsAt === undefined ? 0 : Math.max(0, options.now - options.countsAt);
-}
-
-/** 1st, 2nd, 3rd, 4th: a place in a queue as a person says it. */
-function ordinal(place: number): string {
-  const tens = place % 100;
-  const suffix = tens >= 11 && tens <= 13 ? "th"
-    : ["th", "st", "nd", "rd"][place % 10] ?? "th";
-  return place + suffix;
-}
-
-function runRow(run: Run, options: PaneOptions): Row {
-  if (run.kind === "wait") {
-    return heldRow(run, options);
-  }
-  const meta: Slot[] = [];
-  if (run.branch) {
-    meta.push({ text: run.branch });
-  }
-  meta.push({ text: (meta.length ? " \u00b7 " : "") + durationText(run.elapsed + aged(options))
-                    + " elapsed" });
-  if (run.eta_minutes !== null) {
-    meta.push({ text: " \u00b7 about " + run.eta_minutes + "m left", dim: true });
-  }
-  return {
-    title: shown(run.label || run.display).text,
-    meta,
-    // The count label and the failure count are the layout's to write, so the
-    // slot stays empty here and the bar carries the measurement.
-    slot: [],
-    bar: { done: run.done, total: run.total, failed: run.failed,
-           cells: options.geometry.progressCells },
-    note: run.first_failure ? { text: run.first_failure, color: "error" } : undefined,
-  };
-}
-
-function leaseRow(lease: { repo: string; branch: string; tool: string; expires_at: number },
-                  options: PaneOptions, retrying = false): Row {
-  const left = lease.expires_at - options.now;
-  return {
-    title: shown(lease.branch).text,
-    meta: [{ text: lease.repo }, { text: " \u00b7 " + lease.tool },
-           { text: " \u00b7 lease " + (left > 0 ? "ends in " + durationText(left)
-                                           : "expired " + ageText(-left)) }],
-    state: left > 0 ? "running" : "expired",
-    // The slot repeats what the dot says, so the two cannot disagree: a dot
-    // that warned of an expired lease beside the word "running" would be the
-    // row contradicting itself.
-    // A branch tried again after a failure says so on the one row it keeps:
-    // the failed trial is not drawn a second time beside the try that follows it.
-    slot: [{ text: (left > 0 ? "running" : "expired") + (retrying ? ", last try failed" : ""),
-             color: retrying ? "error" : left > 0 ? "text" : "warning" }],
-  };
-}
-
-/**
- * A change on its way through the controller: where it stands on the stage
- * path, drawn as a bar of the path, who holds it, and when it last moved. The
- * path is the configuration's, so the bar's whole is a declared length rather
- * than a guess at how much work is left.
- */
-function changeRow(change: Change, options: PaneOptions, trial?: Trial): Row {
-  const meta: Slot[] = [{ text: change.repo }];
-  meta.push({ text: " \u00b7 " + change.state.toLowerCase().replace(/_/g, " ") });
-  if (change.held_by) {
-    meta.push({ text: " \u00b7 held by " + change.held_by });
-  }
-  if (change.moved_at !== null) {
-    meta.push({ text: " \u00b7 moved " + ageText(Math.max(0, options.now - change.moved_at)),
-                dim: true });
-  }
-  // The change's latest trial is its own verdict, so it sits on the change's
-  // row rather than as a second row for the same branch further down. A trial
-  // that reported no outcome has no verdict to state: it says so rather than
-  // drawing a nought, which is the rule the bar beside it already follows.
-  const bad = trial ? trial.failed + trial.errors : 0;
-  const outcomes = trial ? trial.passed + bad : 0;
-  return {
-    title: shown(change.branch).text,
-    state: change.held_by ? "running" : undefined,
-    meta,
-    slot: trial
-      ? outcomes > 0
-        ? [{ text: trial.passed + " passed", color: trial.is_green ? "success" : "error" },
-           ...(bad ? [{ text: " \u00b7 " + bad + " failed", color: "error" as const }] : [])]
-        : [countLabel(undefined)]
-      : [],
-    bar: change.stage !== null && change.stages > 0
-      ? { done: change.stage, total: change.stages, cells: options.geometry.progressCells,
-          label: { text: "stage " + change.stage + " of " + change.stages, dim: true } }
-      : undefined,
-  };
-}
-
-function trialRow(trial: Trial, options: PaneOptions): Row {
-  const counts = trial.passed + " passed";
-  const bad = trial.failed + trial.errors;
-  const outcomes = trial.passed + bad;
-  return {
-    key: "trial:" + trial.key,
-    title: shown(trial.branch).text,
-    state: trial.is_green ? "passed" : "failed",
-    // The repository is the root above these rows; the row says what changed
-    // since it mattered.
-    meta: [{ text: ageText(options.now - trial.at) }],
-    slot: outcomes > 0
-      ? [{ text: counts, color: trial.is_green ? "success" : "error" },
-         ...(trial.failed ? [{ text: " \u00b7 " + trial.failed + " failed", color: "error" as const }]
-                          : []),
-         ...(trial.errors ? [{ text: " \u00b7 " + trial.errors + " errors", color: "error" as const }]
-                          : [])]
-      : [countLabel(undefined)],
-    // The share of the run that did not pass, drawn rather than written: the
-    // figure a person reads at a glance is the one with the bar under it, and a
-    // trial reporting eleven hundred passes and ten failures reads as a clean
-    // run until the ten are a cell of a bar. The denominator is what the run
-    // reported outcomes for, which is not what it selected: a trial that ran
-    // nothing reports no bar rather than a full one.
-    //
-    // The counts are already in the slot beside the title, so the bar carries no
-    // label of its own. Written twice they would be one row making two claims
-    // that a reader has to check against each other.
-    bar: outcomes > 0
-      ? { done: trial.passed, total: outcomes, failed: bad, label: null,
-          cells: options.geometry.progressCells }
-      : undefined,
-    // The counts in full, the repository the branch belongs to, and when the
-    // trial ran: what a person checking a red row wants before opening the log.
-    details: [
-      { text: outcomes + " outcomes: " + trial.passed + " passed, " + trial.failed
-              + " failed, " + trial.errors + " errors" },
-      { text: "repository " + trial.repo + " · ran " + ageText(options.now - trial.at) + " ago" },
-    ],
-  };
-}
-
 /** The longest check name a row states, so a long one leaves room for the dots. */
 const CHECK_NAME_CELLS = 32;
 
@@ -1215,23 +1016,9 @@ function pullRequestRow(pull: PullRequest): Row {
   };
 }
 
-/**
- * What names the repository on a pull request's row.
- *
- * Every repository the person's own search finds is under the same owner, so
- * drawing "owner/project" spends the row's width on the one part that never
- * varies and leaves the project name to be cut. A repository the configuration
- * named is left whole: there the owner is what tells two of the same name apart.
- */
-function repoLabel(pull: PullRequest): string {
-  // The row is a line of project names: an owner drawn on every one of them is
-  // the part that never tells two rows apart, and cut to eight cells it told
-  // nothing at all. The whole repository is kept on the row's hover card.
-  const slash = pull.repo.lastIndexOf("/");
-  return slash > 0 ? pull.repo.slice(slash + 1) : pull.repo;
-}
-
-function skillRow(item: SkillItem, isNew: boolean): Row {  const meta: Slot[] = [{ text: item.target }];
+/** One skill finding: its target, its score, and whether a read found it new. */
+function skillRow(item: SkillItem, isNew: boolean): Row {
+  const meta: Slot[] = [{ text: item.target }];
   if (item.score !== null) {
     meta.push({ text: " \u00b7 score " + item.score });
   }
@@ -1422,12 +1209,6 @@ function countSlot(count: number, label: string,
  * Dropped at zero, every figure after it moved along the line each time it
  * came back, which on a pane that redraws every second reads as a jump.
  */
-function steadyCount(count: number, label: string, color?: Slot["color"]): Slot[] {
-  return count > 0 ? [{ text: count + " " + label, ...(color ? { color } : {}) }]
-    : [{ text: "0 " + label, dim: true }];
-}
-
-/** The count a group always states, even at zero: an empty reading is a reading. */
 function primaryCount(count: number, label: string, color?: Slot["color"]): Slot[] {
   return [{ text: count + " " + label, ...(color ? { color } : {}) }];
 }
@@ -1451,10 +1232,6 @@ const SECTION_TEXT: Record<string, { disabled: string; empty: string }> = {
   // payload source is off means only that the engine has not answered yet.
   session: { disabled: "Waiting for the engine to report this session's figures.",
              empty: "Waiting for the engine to report this session's figures." },
-  trials: { disabled: "Trials are disabled in configuration.",
-            empty: "No trials in the configured sources." },
-  running: { disabled: "Running work is disabled in configuration.",
-             empty: "No measured runs in the configured sources." },
   prs: { disabled: "Pull requests are disabled in configuration.",
          empty: "No open pull requests in the configured repositories." },
   worktrees: { disabled: "Worktrees are disabled in configuration.",
@@ -1463,8 +1240,6 @@ const SECTION_TEXT: Record<string, { disabled: string; empty: string }> = {
             empty: "No findings in the configured scan folder." },
   load: { disabled: "The machine's load is switched off in configuration.",
           empty: "The process table held nothing to read." },
-  governance: { disabled: "The governance switch is not configured on this machine.",
-                empty: "The governance switch has nothing to show." },
 };
 
 /**
@@ -1527,7 +1302,12 @@ function sectionGroup(name: string, rows: Row[], state: GroupState, summarySlots
     name: title,
     title,
     summary: stated,
-    rows: state === "ready" || state === "stale" ? rows : [],
+    // Rows are drawn whenever there are any. A state describes the read, and a
+    // section can hold one thing that was read while another was not: Load's
+    // meters are the machine's own answer, and on Windows there is no process
+    // command by default, so the section is unavailable with two figures in
+    // hand. A state word over an empty body hid them.
+    rows,
     ...(withheld.length ? { held: withheld } : {}),
     state,
     collapsed,
@@ -1557,7 +1337,7 @@ function sectionGroup(name: string, rows: Row[], state: GroupState, summarySlots
 /** What a section's right-hand figures are, where the words beside them do not say. */
 const COLUMN_NAMES: Record<string, Slot[]> = {
   sessions: [{ text: "STATE" }],
-  trials: [{ text: "RESULT" }],
+  pacer: [{ text: "STATE" }],
   prs: [{ text: "CHECKS" }],
   worktrees: [{ text: "STATE" }],
   skills: [{ text: "VERDICT" }],
@@ -1904,97 +1684,6 @@ function sparkFrom(series: SpendSeries | null): Spark | null {
   return { values: series.buckets, label, keep: series.complete ? 1 : 2 };
 }
 
-/** The lines one governor run takes: its row and its bar or its words. */
-const RUN_LINES = 2;
-
-/**
- * The machine switch a section's heading states.
- *
- * It is a file the person touches for the whole machine, so every session draws
- * the same answer. Switched off is drawn as a warning, because it is the state
- * that stops work from running; on is drawn dim, because a switch nobody
- * touched is not news. A reading that reported no switch draws nothing rather
- * than claiming one is on.
- */
-function switchSlot(state: "on" | "off" | null | undefined): Slot[] {
-  if (state === "off") {
-    return [{ text: "switched off", color: "warning" }];
-  }
-  if (state === "on") {
-    return [{ text: "switch on", dim: true }];
-  }
-  return [];
-}
-
-function trialGroups(trials: Trials, progress: Progress, options: PaneOptions): Group[] {
-  // Commands the governor runs come first, then the ones it holds in line.
-  const ordered = [...progress.runs.filter((run) => run.kind !== "wait"),
-                   ...progress.runs.filter((run) => run.kind === "wait")];
-  const runRows = byProject(ordered.map((run) => ({ project: run.repo, row: runRow(run, options) })));
-  const held = progress.runs.filter((run) => run.kind === "wait").length;
-  const runningCounts = combine([primaryCount(ordered.length - held, "running", "text"),
-                                 steadyCount(held, "waiting", "warning")]);
-  const runningSwitch = switchSlot(progress.switch);
-  const running = sectionGroup(
-    "running", runRows, partial(runRows, progress.state),
-    // The switch leads when it is off: it is the reason the counts are nought,
-    // and a heading that says "0 running" without it reads as an idle machine.
-    progress.switch === "off" ? [...runningSwitch, ...runningCounts]
-      : [...runningCounts, ...runningSwitch],
-    options);
-  running.observed = runRows.length;
-  // A run that failed is the person's to read; one the governor holds in line is not.
-  running.attention = progress.runs.some((run) => run.failed > 0);
-  // The room one run takes, its line and its bar, is kept when there is none:
-  // a run that comes and goes in seconds otherwise moved every section below.
-  running.reserve = RUN_LINES;
-  // A change in flight carries its own lease as "held by", so a lease is drawn on
-  // its own only when no change in flight names its branch.
-  // A snapshot built before changes were read carries none.
-  const changes = trials.changes ?? [];
-  const moving = new Set(changes.map((change) => change.repo + "|" + change.branch));
-  const latest = new Map(trials.recent.map((trial) => [trial.repo + "|" + trial.branch, trial]));
-  // A branch whose latest trial failed and that holds a lease again is being
-  // tried again: it is drawn once, as the try in progress, marked as following a
-  // failure.
-  const leased = trials.running.filter((lease) => !moving.has(lease.repo + "|" + lease.branch));
-  const retrying = new Set(leased.map((lease) => lease.repo + "|" + lease.branch)
-    .filter((key) => latest.get(key)?.is_green === false));
-  const trialEntries = [
-    ...changes.map((change) => ({ project: change.repo,
-                                  row: changeRow(change, options,
-                                                 latest.get(change.repo + "|" + change.branch)) })),
-    ...leased.map((lease) => ({ project: lease.repo,
-                                row: leaseRow(lease, options,
-                                              retrying.has(lease.repo + "|" + lease.branch)) })),
-    ...trials.recent.filter((trial) => !moving.has(trial.repo + "|" + trial.branch)
-                                       && !retrying.has(trial.repo + "|" + trial.branch))
-      .map((trial) => ({ project: trial.repo, row: trialRow(trial, options) })),
-  ];
-  const trialRows = byProject(trialEntries);
-  // The window's failures are the strip's caption and nowhere else. Stated on
-  // the heading as well they were one section making the same claim twice, and
-  // the two numbers sat next to "8 recent", which counts branches in a
-  // twelve-hour window rather than trials in it.
-  const trialCounts = combine([primaryCount(changes.length, "in flight", "text"),
-                               steadyCount(trials.running.length, "running"),
-                               countSlot(trials.recent.length, "recent")]);
-  const trialSwitch = switchSlot(trials.switch);
-  const groups = sectionGroup(
-    "trials", trialRows, partial(trialRows, trials.state),
-    // The switch leads when it is off: a controller nobody is running is not the
-    // same controller as one with no work, and the heading is where a person
-    // looks to tell the two apart.
-    trials.switch === "off" ? [...trialSwitch, ...trialCounts]
-      : [...trialCounts, ...trialSwitch],
-    options);
-  groups.observed = trialEntries.length;
-  groups.history = trials.history;
-  // The latest trial of a branch is its verdict, so one that failed needs reading.
-  groups.attention = trials.recent.some((trial) => !trial.is_green);
-  return [running, groups];
-}
-
 /**
  * A section's items under the project each belongs to.
  *
@@ -2150,9 +1839,6 @@ function worktreeGroup(worktrees: Worktrees, options: PaneOptions): Group {
     }))
     .filter((entry) => entry.count > 0)
     .map((entry) => ({ text: entry.count + " " + entry.state, dim: true }));
-  const cleaned = worktrees.cleaned === null || worktrees.cleaned === 0
-    ? []
-    : [{ text: worktrees.cleaned + " cleaned this week", dim: true }];
   const stale = worktrees.worktrees.some((tree) => tree.recheck_error !== undefined);
   const age = rows.length
     ? Math.max(...worktrees.worktrees.map((tree) =>
@@ -2161,7 +1847,7 @@ function worktreeGroup(worktrees: Worktrees, options: PaneOptions): Group {
   const state: GroupState = partial(rows, worktrees.state);
   const group = sectionGroup(
     "worktrees", rows, state,
-    combine([primaryCount(worktrees.worktrees.length, "checked out"), legend, cleaned]),
+    combine([primaryCount(worktrees.worktrees.length, "checked out"), legend]),
     options);
   group.observed = worktrees.worktrees.length;
   group.staleSeconds = stale && state === "stale" ? age : undefined;
@@ -2201,14 +1887,95 @@ function cpuTone(cpu: number): Slot["color"] {
 }
 
 /**
- * How wide each of a load row's two figures is drawn.
+ * How wide each of a load row's two figures is drawn, the space before it included.
  *
- * A percentage is drawn up to five cells ("100.0%", and above one core it goes
- * higher) and a figure of memory up to seven ("999.9 GB"): each column is that
- * wide on every row, so the column beside it starts in the same place.
+ * A percentage is drawn up to seven cells ("1000.0%", which is a core overloaded
+ * ten times and is what a platform prints above a hundred) and a figure of
+ * memory up to nine ("999.9 GB"). Each cell is written with the space that
+ * separates it from the one before, so the column is the same width whatever
+ * the figure: the layout joins two cells with a space unless the second already
+ * starts with one, and a width that moved with the figure's length is what
+ * walked the memory column out from under its own name.
  */
-const CPU_COLUMN = 6;
-const MEMORY_COLUMN = 8;
+const CPU_COLUMN = 8;
+const MEMORY_COLUMN = 11;
+
+/** Where a meter changes tone: the points a person reading a bar expects to mean something. */
+const METER_WARNING = 70;
+const METER_ERROR = 90;
+
+/** The tone a share of the machine is drawn in, which is what colours its bar. */
+function meterState(percent: number): string {
+  return percent >= METER_ERROR ? "failed" : percent >= METER_WARNING ? "waiting" : "working";
+}
+
+/**
+ * One meter for the whole machine, above the processes that make it up.
+ *
+ * The bar is the pane's own, so its colour follows the state this row carries
+ * and therefore the theme's failure, waiting and working tones: red at ninety
+ * and above, amber from seventy, green below. The share is the row's right-hand
+ * figure, where every other row states its number: words set beside a bar are
+ * what the line cuts first when it is tight, and a share of the machine is the
+ * one figure this row cannot lose.
+ */
+function loadMeterRow(key: string, title: string, percent: number, said: Slot[],
+                      column: "cpu" | "memory"): Row {
+  const figure: Slot = { text: Math.round(percent) + "%" };
+  // The share stands in the column its own name stands over: the processor's
+  // under CPU, the memory's under MEM. The figures are drawn as a right-hand
+  // block, so a column is placed by what follows it as much as by its own
+  // width: the processor's figure keeps the memory column's cells after it,
+  // and a figure drawn at the row's edge would sit under MEM whichever meter
+  // it belonged to.
+  const slot: Slot[] = column === "cpu"
+    ? [{ ...figure, width: CPU_COLUMN, align: "right" },
+       { text: "", width: MEMORY_COLUMN }]
+    : [{ text: "", width: CPU_COLUMN },
+       { ...figure, width: MEMORY_COLUMN, align: "right" }];
+  return {
+    key: "load:" + key,
+    title,
+    state: meterState(percent),
+    meta: said,
+    slot,
+    // `null` rather than absent: the words a bar computes are the counts it was
+    // given, and the share is already stated in the row's own column. The cells
+    // are a gauge's, not the line's whole length: a bar drawn to the edge is the
+    // one part of this row a narrow card cuts, and a meter that loses its end
+    // states less than one that does not.
+    bar: { done: Math.max(0, Math.min(100, percent)), total: 100, label: null, cells: 24 },
+  };
+}
+
+/**
+ * The machine's own figures, as meters: CPU with its load averages, then memory.
+ *
+ * Drawn only for what the platform stated. A platform that states none draws no
+ * meter, which is why this is empty rather than a pair of noughts.
+ */
+function loadMeters(system: LoadSystem | null | undefined): Row[] {
+  if (system === null || system === undefined) {
+    return [];
+  }
+  const rows: Row[] = [];
+  if (system.cpuPercent !== null) {
+    const averages = system.loadAverage === null ? null
+      : system.loadAverage.map((value) => value.toFixed(1)).join(" ");
+    rows.push(loadMeterRow("cpu", "CPU", system.cpuPercent,
+                           averages === null ? [] : [{ text: "load " + averages, dim: true }],
+                           "cpu"));
+  }
+  if (system.memoryUsedBytes !== null && system.memoryTotalBytes !== null
+      && system.memoryTotalBytes > 0) {
+    rows.push(loadMeterRow("memory", "MEM",
+                            (100 * system.memoryUsedBytes) / system.memoryTotalBytes,
+                            [{ text: bytes(system.memoryUsedBytes) + " of "
+                                     + bytes(system.memoryTotalBytes), dim: true }],
+                            "memory"));
+  }
+  return rows;
+}
 
 /**
  * One process under load: what it is, where it works, and what it costs the
@@ -2229,12 +1996,14 @@ function loadRow(entry: LoadProcess): Row {
     meta: [...project,
            { text: " \u00b7 pid " + entry.pid, dim: true },
            { text: " \u00b7 " + durationOf(entry.elapsed_seconds * 1000), dim: true }],
-    // Two columns, each its own width: a percentage of four characters and one
-    // of five put the memory figure one cell apart, so the columns walked.
+    // Two columns, each its own width and both right-aligned, which is what
+    // puts a column's digits under its own name rather than beside it: a
+    // percentage and a byte count are not the same length, and a leading space
+    // inside the cell is what used to walk the memory column out of its header.
     slot: [
-      { text: entry.cpu_percent.toFixed(1) + "%", color: cpuTone(entry.cpu_percent),
+      { text: " " + entry.cpu_percent.toFixed(1) + "%", color: cpuTone(entry.cpu_percent),
         width: CPU_COLUMN, align: "right" },
-      { text: " " + bytes(entry.memory_bytes), width: MEMORY_COLUMN, align: "left" },
+      { text: " " + bytes(entry.memory_bytes), width: MEMORY_COLUMN, align: "right" },
     ],
     ...(entry.project_root ? { note: { text: entry.project_root, dim: true } } : {}),
     // The row is read by a name; the command it was started from is what a
@@ -2249,27 +2018,49 @@ function loadRow(entry: LoadProcess): Row {
 }
 
 /**
- * The machine's load: the processes at the top of the CPU list and the top of
- * the memory list, each drawn once.
+ * The machine's load: what the whole machine is doing, then the processes at the
+ * top of the CPU list and the top of the memory list, each drawn once.
  *
- * The heading says how many processes the drawn ones were chosen from, because
- * "6 rows" on a machine running four hundred reads as a quiet machine.
+ * The heading states the machine's own figures rather than a process count: a
+ * count of four hundred processes says nothing about whether the machine has
+ * room for one more, and the share of the CPU and of the memory is what a person
+ * looking at this section is asking. How many processes the drawn ones were
+ * chosen from is kept as the quiet tail of that line.
  */
 function loadGroup(load: Load, options: PaneOptions): Group {
-  const rows = load.processes.map(loadRow);
-  const summary = combine([primaryCount(load.total, "processes"),
-                           countSlot(rows.length, "shown", "subtle")]);
+  const processes = load.processes.map(loadRow);
+  const rows = [...loadMeters(load.system), ...processes];
+  // A reading from a build that carried no machine figures has none to draw.
+  const system = load.system ?? null;
+  const parts: Slot[][] = [];
+  if (system !== null && system.cpuPercent !== null) {
+    parts.push([{ text: "CPU " + Math.round(system.cpuPercent) + "%",
+                  color: toneOf(meterState(system.cpuPercent)) }]);
+  }
+  if (system !== null && system.memoryUsedBytes !== null && system.memoryTotalBytes !== null
+      && system.memoryTotalBytes > 0) {
+    const share = (100 * system.memoryUsedBytes) / system.memoryTotalBytes;
+    parts.push([{ text: "MEM " + Math.round(share) + "%", color: toneOf(meterState(share)) }]);
+  }
+  parts.push(countSlot(processes.length, "of " + load.total + " shown", "subtle"));
+  const summary = combine(parts);
   const group = sectionGroup("load", rows, partial(rows, load.state), summary, options);
   // The two figures are the section's only meaning that a shape does not tell
   // on its own: a percentage and a byte count, in columns wide enough to hold
-  // them. Naming them once costs one line and stops a reader guessing which is
-  // which. The widths are the row's own, so the names sit over their columns.
+  // them. The names are drawn in the same cells the rows draw: same width, same
+  // alignment, so a name sits over its own column instead of beside it.
   group.columns = [
-    { text: "CPU", width: CPU_COLUMN, align: "right" },
-    { text: " · MEM", width: MEMORY_COLUMN, align: "left" },
+    { text: " CPU", width: CPU_COLUMN, align: "right" },
+    { text: " MEM", width: MEMORY_COLUMN, align: "right" },
   ];
-  group.observed = rows.length;
+  group.observed = processes.length;
   return group;
+}
+
+/** The colour a tone is drawn in, for a summary slot that is not a row's own. */
+function toneOf(state: string): Slot["color"] {
+  const tone = stateColor(state);
+  return tone === "subtle" ? "text" : tone as Slot["color"];
 }
 
 /**
@@ -2373,80 +2164,6 @@ function keyRow(key: string, does: string): Row {
   return { title: key, meta: [{ text: does }], slot: [] };
 }
 
-/** The title a governance scope is drawn under. */
-function scopeTitle(scope: GovernanceScope): string {
-  return scope === "governor" ? "Governor" : "Controller";
-}
-
-/**
- * One scope: how it stands, and the press that moves it.
- *
- * The word at the right is the switch itself, and the quiet line says what the
- * next press does. A scope that is on takes two presses to switch off, which is
- * the one press in this pane that changes a gate in front of every session; the
- * line says so while the first press stands.
- */
-function governanceRow(scope: GovernanceScope, on: boolean | null, armed: boolean,
-                       options: PaneOptions): Row {
-  const title = scopeTitle(scope);
-  const key = GOVERNANCE_PREFIX + scope;
-  const word = on === true ? "on" : on === false ? "off" : "not read";
-  const color: Slot["color"] | undefined = on === true ? "success"
-    : on === false ? "warning" : undefined;
-  const does = armed ? "press again to switch off"
-    : on === true ? "press to switch off"
-    : on === false ? "press to switch on" : "the switch did not say";
-  const behind = on === true ? "off" : "on";
-  return {
-    key,
-    title,
-    meta: [{ text: does, ...(armed ? { color: "warning" as const } : { dim: true }) }],
-    slot: [{ text: word, ...(color ? { color } : { dim: true }) }],
-    press: {
-      key,
-      label: "Turn " + title.toLowerCase() + " " + behind,
-      onPress: () => options.actions?.governance?.(scope),
-    },
-  };
-}
-
-/**
- * The machine's governor and controller switch.
- *
- * A machine whose configuration names no switch draws no section at all: the
- * tooling behind it is the owner's, and a pane that offered the switch to
- * someone who does not run it would be drawing a card for a control that does
- * nothing. A source that failed is drawn, because a failure is a reading.
- */
-function governanceGroup(document: Governance | undefined,
-                         options: PaneOptions): Group | undefined {
-  if (document === undefined || document.state === "disabled"
-      || document.state === "unconfigured") {
-    return undefined;
-  }
-  const state = groupState(document.state);
-  const rows = state === "ready"
-    ? [governanceRow("governor", document.governor,
-                     options.confirmingGovernance === "governor", options),
-       governanceRow("controller", document.controller,
-                     options.confirmingGovernance === "controller", options)]
-    : [];
-  const held: Slot[] = [];
-  if (state === "ready") {
-    const on = [document.governor, document.controller].filter((value) => value === true).length;
-    const word = on === 2 ? "both on" : on === 0 ? "both off"
-      : document.governor === true ? "governor on, controller off"
-      : "governor off, controller on";
-    held.push({ text: word });
-    if (document.updated_at !== null) {
-      const stamp = Date.parse(document.updated_at);
-      const age = Number.isFinite(stamp) ? ageText(options.now - stamp / 1000) : "";
-      held.push({ text: "  " + (document.by ? shown(document.by).text + " " : "") + age,
-                  dim: true });
-    }
-  }
-  return sectionGroup("governance", rows, state, held, options);
-}
 
 /** The key a pacer row is addressed by. */
 export const PACER_PREFIX = "pacer.";
@@ -2454,6 +2171,69 @@ export const PACER_PREFIX = "pacer.";
 const PACER_RUNS = 3;
 /** The address of pacer's switch row, which the entry keeps armed across one press. */
 export const PACER_SWITCH = PACER_PREFIX + "switch";
+
+/**
+ * Pacer's live configuration, as its own status reports it.
+ *
+ * Pacer's slots, its worker count and its scheduling class are tunable while
+ * the machine runs, from pacer's own command or from a dashboard driving it, so
+ * this row is drawn from each read rather than from what the configuration said
+ * when the session started. A field pacer did not report is left out of the
+ * row instead of being filled with a default it never sent.
+ */
+function pacerSettingsRow(document: Pacer): Row | null {
+  const said: string[] = [];
+  if (document.slotCount !== null) {
+    const workers = document.workersPerRun === null ? ""
+      : ", " + document.workersPerRun + " per run";
+    said.push(document.slotCount + (document.slotCount === 1 ? " slot" : " slots") + workers);
+  } else if (document.workersPerRun !== null) {
+    said.push(document.workersPerRun + " per run");
+  }
+  const scheduling: string[] = [];
+  if (document.qos !== null && document.qos !== undefined && document.qos !== "") {
+    scheduling.push("qos " + shown(document.qos).text);
+  }
+  if (typeof document.nice === "number") {
+    scheduling.push("nice " + document.nice);
+  }
+  if (said.length === 0 && scheduling.length === 0) {
+    return null;
+  }
+  const meta: Slot[] = [];
+  if (said.length > 0) {
+    meta.push({ text: said.join("") });
+  }
+  if (scheduling.length > 0) {
+    meta.push({ text: (meta.length > 0 ? "  " : "") + scheduling.join(", "), dim: true });
+  }
+  return { key: PACER_PREFIX + "settings", title: "Settings", slot: [], meta };
+}
+
+/**
+ * Heavy work running while pacer's slots sit idle.
+ *
+ * Drawn only when pacer counted something: a machine with nothing outside is
+ * the ordinary case, and a row saying so on every read is noise.
+ */
+function pacerOutsideRow(document: Pacer): Row | null {
+  const counted = document.outsideCount ?? document.outside?.length ?? null;
+  if (counted === null || counted === 0) {
+    return null;
+  }
+  const said: string[] = [];
+  if (document.outsideCpu !== null) {
+    said.push(Math.round(document.outsideCpu * 10) / 10 + "% cpu");
+  }
+  const named = (document.outside ?? []).map((entry) => entry.pattern)
+    .filter((pattern): pattern is string => pattern !== null && pattern !== "");
+  if (named.length > 0) {
+    said.push(named.slice(0, 3).map((pattern) => shown(pattern).text).join(", "));
+  }
+  return { key: PACER_PREFIX + "outside", title: "Outside pacer",
+           meta: said.length > 0 ? [{ text: said.join(", "), dim: true }] : [],
+           slot: [{ text: counted + (counted === 1 ? " process" : " processes") }] };
+}
 
 /** Pacer's own switch, as a row a person can press. */
 function pacerSwitchRow(document: Pacer, options: PaneOptions): Row {
@@ -2473,9 +2253,12 @@ function pacerSwitchRow(document: Pacer, options: PaneOptions): Row {
   const armed = options.confirmingPacer === true && on === true;
   const does = armed ? "press again to switch off"
     : on === true ? "press to switch off" : "press to switch on";
+  // An off a press cannot undo says why: the switch a person owns is one of
+  // two, and the machine's own off wins over this one.
+  const why = on === false && document.reason !== null ? ", " + shown(document.reason).text : "";
   const row: Row = { key, title: "Pacer", slot,
-                     meta: [{ text: does, ...(armed ? { color: "warning" as const }
-                                                    : { dim: true }) }] };
+                     meta: [{ text: does + why, ...(armed ? { color: "warning" as const }
+                                                          : { dim: true }) }] };
   const act = options.actions?.pacer;
   if (act !== undefined && on !== null) {
     row.press = { key, label: on ? "Turn pacer off" : "Turn pacer on",
@@ -2484,16 +2267,36 @@ function pacerSwitchRow(document: Pacer, options: PaneOptions): Row {
   return row;
 }
 
-/** One slot: the repository holding it and for how long, or free. */
+/**
+ * What a run's folder name says to a person.
+ *
+ * Pacer names a run by the folder it started in: the git root, or the folder
+ * itself where there is no repository. A session an agent launched runs from a
+ * temporary worktree, which has no useful name, so its folder is said for what
+ * it is with as much of its identity as still tells two of them apart. Pacer
+ * publishes no command text, so this is what is known.
+ */
+function runLabel(repo: string | null): string | null {
+  if (repo === null || repo === "") {
+    return null;
+  }
+  const agent = /^(?:agent|worktree)-([0-9a-f]{6,})/i.exec(repo);
+  if (agent !== null) {
+    return "agent " + agent[1].slice(0, 8);
+  }
+  return shown(repo).text;
+}
+
+/** One slot: what is running in it and for how long, or free. */
 function pacerSlotRow(slot: PacerSlot, now: number): Row {
   const key = PACER_PREFIX + "slot:" + slot.slot;
   const title = "Slot " + (slot.slot + 1);
   if (!slot.busy) {
     return { key, title, meta: [], slot: [{ text: "free", dim: true }] };
   }
-  // The lock says busy; the text inside it says who. A slot held by somebody
-  // pacer could not name is still held.
-  const holder = slot.repo === null ? null : shown(slot.repo).text;
+  // The lock says busy; the text inside it says who, in the only terms pacer
+  // keeps. A slot held by somebody pacer could not name is still held.
+  const holder = runLabel(slot.repo);
   const meta: Slot[] = slot.startedAt === null
     ? [{ text: holder === null ? "holder not named" : "start not recorded", dim: true }]
     : [{ text: "running " + durationText(now - slot.startedAt), dim: true }];
@@ -2520,7 +2323,7 @@ function pacerRunRow(run: PacerRun, index: number, now: number): Row {
   said.push(ageText(now - run.at));
   return {
     key: PACER_PREFIX + "run:" + index + ":" + run.at,
-    title: run.repo === null ? "a run" : shown(run.repo).text,
+    title: runLabel(run.repo) ?? "a run",
     ...(passed ? { dim: true } : { state: "failed" }),
     meta: [{ text: said.join(", "), dim: true }],
     slot: [{ text: word, ...(passed ? { dim: true } : { color: "error" as const }) }],
@@ -2544,7 +2347,15 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
     return sectionGroup("pacer", [], state, [], options);
   }
   const rows: Row[] = [pacerSwitchRow(document, options)];
+  const settings = pacerSettingsRow(document);
+  if (settings !== null) {
+    rows.push(settings);
+  }
   rows.push(...document.slots.map((slot) => pacerSlotRow(slot, options.now)));
+  const outside = pacerOutsideRow(document);
+  if (outside !== null) {
+    rows.push(outside);
+  }
   const waiting = document.waiting;
   if (waiting !== null && waiting.length > 0) {
     const longest = waiting.reduce((first, caller) => caller.since < first.since ? caller : first);
@@ -2608,12 +2419,9 @@ function keyGroup(options: PaneOptions): Group {
  * them, and a header that says what was observed and what could not be read.
  */
 export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
-  const [runningGroup, trialsGroup] = trialGroups(snapshot.trials, snapshot.progress, options);
   const built: Record<string, Group[]> = {
     sessions: rosterGroups(snapshot.roster, options),
     session: [sessionGroup(snapshot.session, options)],
-    running: [runningGroup],
-    trials: [trialsGroup],
     prs: [pullRequestGroup(snapshot.prs, options)],
     skills: [skillGroup(snapshot.skills, options)],
     worktrees: [worktreeGroup(snapshot.worktrees, options)],
@@ -2621,12 +2429,6 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     warnings: [warningGroup(allErrors(snapshot), snapshot.roster, options)],
     keys: [keyGroup(options)],
   };
-  // A machine that has no switch has no section for one: the section is left
-  // out of what the pane knows, so neither a card nor a picker entry is drawn.
-  const governed = governanceGroup(snapshot.governance, options);
-  if (governed !== undefined) {
-    built.governance = [governed];
-  }
   const paced = pacerGroup(snapshot.pacer, options);
   if (paced !== undefined) {
     built.pacer = [paced];
@@ -2728,7 +2530,7 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   ]);
   // Each label names what its figure counts, because the three do not count the
   // same thing. Two of them are background sessions and the third is every
-  // failed outcome, trials and runs alike, and a row of bare "Working / Waiting
+  // failed outcome, a job and a pull request alike, and a row of bare "Working / Waiting
   // / Failed" reads as three states of one subject, which is a claim none of
   // them makes. "Outcomes" is the word that holds both, and it is short enough
   // to be drawn whole at the width the three figures share.
@@ -2803,8 +2605,6 @@ export const DIGEST_LINES = 5;
 
 /** What each kind of event is called on the digest, in the tone it is drawn in. */
 const EVENT_WORDS: Record<string, { word: string; color: Slot["color"] }> = {
-  "trial-failed": { word: "Trial failed", color: "error" },
-  "trial-passed": { word: "Trial passed", color: "success" },
   "pr-opened": { word: "PR opened", color: "suggestion" },
   "job-waiting": { word: "Waiting on you", color: "warning" },
   "job-finished": { word: "Finished", color: "subtle" },
@@ -2861,7 +2661,7 @@ export function digestFrom(snapshot: Snapshot, options: PaneOptions): Digest | n
     const parts: Slot[] = [{ text: named.word, color: named.color },
                            { text: shown(entry.title).text || "untitled" }];
     // A pull request's reference is the one a person reads, `owner/name#7`; a
-    // trial's receipt key and a job's identifier are addresses, not words.
+    // job's identifier is an address, not a word.
     if (entry.ref && entry.kind === "pr-opened") {
       parts.push({ text: " · " + shown(entry.ref).text, dim: true });
     }
@@ -2887,9 +2687,7 @@ export function digestFrom(snapshot: Snapshot, options: PaneOptions): Digest | n
 export function allErrors(snapshot: Snapshot): { source: string; reason: string }[] {
   const errors = [
     ...snapshot.roster.errors,
-    ...snapshot.trials.errors,
     ...snapshot.session.errors,
-    ...snapshot.progress.errors,
     ...snapshot.prs.errors,
     ...snapshot.skills.errors,
     ...snapshot.worktrees.errors,
@@ -2913,9 +2711,7 @@ export function unreadableSources(snapshot: Snapshot): string[] {
     // The roster answers for both job rows and session counts: one read, one
     // source, so a failure there is one unreadable source and not two.
     ["roster", snapshot.roster.state],
-    ["trials", snapshot.trials.state],
     ["session", snapshot.session.state],
-    ["progress", snapshot.progress.state],
     ["prs", snapshot.prs.state],
     ["skills", snapshot.skills.state],
     ["worktrees", snapshot.worktrees.state],
@@ -2929,14 +2725,14 @@ export function unreadableSources(snapshot: Snapshot): string[] {
 }
 
 /**
- * Failed test outcomes, counted once.
+ * What failed, counted once.
  *
- * A trial verdict and a run with failures are the same class of thing, so they
- * share one number. A pull-request check failure is a different denominator and
- * stays in its own group rather than being added to this one.
+ * A background session that ended in failure and a pull request whose checks
+ * fail are the two outcomes a person acts on, and each is counted where it is
+ * drawn rather than twice: a session pacer also recorded is one failed session.
  */
 export function failedOutcomes(snapshot: Snapshot): number {
-  const trials = snapshot.trials.recent.filter((trial) => !trial.is_green).length;
-  const runs = snapshot.progress.runs.filter((run) => run.failed > 0).length;
-  return trials + runs;
+  const sessions = snapshot.roster.jobs.filter(failed).length;
+  const pulls = snapshot.prs.prs.filter((pull) => pull.checks === "fail").length;
+  return sessions + pulls;
 }

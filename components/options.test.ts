@@ -67,7 +67,7 @@ test("a reading carrying no configuration draws the packaged default", () => {
   for (const name of ["worktrees", "skills", "keys"]) {
     assert.equal(options.sections[name]?.collapsed, true, name);
   }
-  for (const name of ["sessions", "trials", "prs", "warnings", "running"]) {
+  for (const name of ["sessions", "session", "pacer", "prs", "warnings", "load"]) {
     assert.equal(options.sections[name]?.collapsed, false, name);
   }
 });

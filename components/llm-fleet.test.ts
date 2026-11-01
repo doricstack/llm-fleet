@@ -22,11 +22,11 @@ import { elementTypes, renderedText } from "../plugins/llm-fleet/components/layo
 import { recordingPrimitives } from "../plugins/llm-fleet/components/mount.ts";
 import { SECTIONS } from "../plugins/llm-fleet/components/options.ts";
 import { AFTER_PAINT_MS, AHEAD_SECONDS, CLAIM_KEY, END_WRITES_MS, COUNTS_KEY, FOLDS_KEY, FRAME_MS, FRESH_RATES, FRESH_WORKTREES, HIDDEN_KEY, LIVE_MS, LOOK_MS,
-         MARK, PANE, PROGRESS_CLAIM_KEY, READER, READING_KEY, REPLIED_LIMIT, SPEECH_ON_KEY, SPEECH_POLL_MS,
+         MARK, PANE, LIVE_CLAIM_KEY, READER, READING_KEY, REPLIED_LIMIT, SPEECH_ON_KEY, SPEECH_POLL_MS,
          SETTINGS_MS, SETTINGS_ONLY, STALE_SECONDS, TAB_HELPER, TIPS_KEY, alertConfigFrom, repliedLimitFrom,
          CLOCK_MS, STREAM_MS, needsSessionRead, notPlaced, sectionOfKey, PACER_ARM_MS,
          register } from "../plugins/llm-fleet/hooks/llm-fleet.ts";
-import { BAND_DISMISS, BAND_GOVERNANCE, BAND_PACER, BAND_SPEAK, BAND_TOGGLE }
+import { BAND_DISMISS, BAND_PACER, BAND_SPEAK, BAND_TOGGLE }
   from "../plugins/llm-fleet/components/band.ts";
 import type { CommandEvent, Engine, Next, On, PromptHintEvent, RenderEvent, StartupEvent }
   from "../plugins/llm-fleet/hooks/engine.ts";
@@ -459,7 +459,7 @@ function stub(options: { exitCode?: number; stdout?: string; placed?: boolean;
       set: async (key, value) => {
         // A claim is how sessions take turns reading, not something kept for the
         // pane, so it is recorded apart and answered from memory like the store.
-        if (key === CLAIM_KEY || key === PROGRESS_CLAIM_KEY) {
+        if (key === CLAIM_KEY || key === LIVE_CLAIM_KEY) {
           calls.claims.push({ key, value });
           calls.written.push({ key, value });
           memory[key] = value;
@@ -1006,7 +1006,7 @@ test("a reading that lands is kept for the next session to open on", async () =>
   // The documents as the reader printed them, the time they were read, and the
   // time the read began, which is when its counts were read: what the next
   // session draws, the age it draws beside them, and how old the counts are.
-  assert.deepEqual(kept.value, { at: 1790000000, progressAt: 1790000000, documents: OUTPUT });
+  assert.deepEqual(kept.value, { at: 1790000000, liveAt: 1790000000, documents: OUTPUT });
 });
 
 test("a read that failed is not kept for the next session to open on", async () => {
@@ -1665,85 +1665,20 @@ test("a machine that keeps failing is read again once the interval has passed", 
   assert.equal(driven.calls.argv.length, reads + 1);
 });
 
-/** A reading as the store holds it for every session, with a governor run live in it. */
-function liveReading(at: number, done: number): Record<string, unknown> {
-  return { at, documents: { ...OUTPUT, progress: { state: "ready", errors: [], runs: [{
-    key: "e8623195", repo: "owner/project", branch: "", label: "tests", display: "tests",
-    done, total: 3444, failed: 0, first_failure: "", elapsed: 22, eta_minutes: 3,
-    phase: "run", kind: "run", command_class: "targeted-test",
-  }] } } };
+/** Pacer's status as the reader prints it, with one slot held. */
+function livePacer(repo = "owner/project", at = 1_790_000_000): Record<string, unknown> {
+  return { state: "ready", enabled: true, switchSource: "missing", reason: null, version: 2,
+           slotCount: 2, workersPerRun: 4, qos: "utility", nice: 10,
+           slots: [{ slot: 0, busy: true, pid: 42, repo, startedAt: at - 22 },
+                   { slot: 1, busy: false, pid: null, repo: null, startedAt: null }],
+           waiting: [], recent: [], outside: [], outsideCount: 0, outsideCpu: 0,
+           outsideRssKb: 0, errors: [] };
 }
 
-test("a paused live reading replaces cached governor rows and is shared", async () => {
-  const memory: Record<string, unknown> = {};
-  const paused = { state: "paused", runs: [], errors: [] };
-  const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290), memory,
-    answer: (argv) => argv.includes("--only")
-      ? { exitCode: 0, stdout: JSON.stringify({ progress: paused }) } : undefined });
-  await driven.start();
-  await driven.run();
-  driven.advance(LIVE_MS / 1000);
-  driven.tick(LOOK_MS);
-  await drain();
-  const text = renderedText(await driven.render() as never).join("\n");
-  assert.equal(text.includes("Running is paused."), true, text);
-  assert.equal(text.includes("290"), false, text);
-  assert.deepEqual((memory[COUNTS_KEY] as { progress: unknown }).progress, paused);
-});
-
-test("a paused stored reading replaces live counts and resumes on a later ready reading", async () => {
-  const memory: Record<string, unknown> = {};
-  const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290), memory });
-  await driven.start();
-  await drain();
-  memory[COUNTS_KEY] = { at: 1790000000,
-    progress: (liveReading(0, 350).documents as { progress: unknown }).progress };
-  driven.tick(LOOK_MS);
-  await drain();
-  await driven.render();
-  memory[READING_KEY] = { at: 1790000001, progressAt: 1790000001, documents: {
-    ...OUTPUT, progress: { state: "paused", runs: [], errors: [] },
-    trials: { state: "paused", running: [], recent: [], changes: [], errors: [] },
-  } };
-  driven.advance(1);
-  driven.tick(LOOK_MS);
-  await drain();
-  let text = renderedText(await driven.render() as never).join("\n");
-  assert.equal(text.includes("Running is paused."), true, text);
-  assert.equal(text.includes("350"), false, text);
-  assert.equal(text.includes("Trials is paused."), true, text);
-  memory[READING_KEY] = liveReading(1790000002, 500);
-  driven.advance(1);
-  driven.tick(LOOK_MS);
-  await drain();
-  text = renderedText(await driven.render() as never).join("\n");
-  assert.equal(text.includes("500"), true, text);
-  assert.equal(text.includes("Running is paused."), false, text);
-});
-
-test("a paused whole reading clears counts read while it was running", async () => {
-  const paused = { ...OUTPUT, progress: { state: "paused", runs: [], errors: [] },
-                   trials: { state: "paused", running: [], recent: [], changes: [], errors: [] } };
-  const driven = stub({ held: false, stored: liveReading(1790000000 - STALE_SECONDS, 290),
-    stdout: JSON.stringify(paused),
-    answer: (argv) => argv.includes("--only") ? countsAnswer(400) : undefined });
-  await driven.start();
-  await driven.run();
-  await drain();
-  driven.advance(LIVE_MS / 1000);
-  driven.tick(LOOK_MS);
-  driven.tick(LIVE_MS);
-  await drain();
-  await driven.settle();
-  await drain();
-  await driven.render();
-  driven.tick(STREAM_MS);
-  driven.advance(1);
-  const text = renderedText(await driven.render() as never).join("\n");
-  assert.equal(text.includes("Running is paused."), true, text);
-  assert.equal(text.includes("Trials is paused."), true, text);
-  assert.equal(text.includes("400"), false, text);
-});
+/** A reading as the store holds it for every session, with a slot live in it. */
+function liveReading(at: number, done = 0): Record<string, unknown> {
+  return { at, documents: { ...OUTPUT, pacer: livePacer("repo-" + done, at) } };
+}
 
 test("a fresh reading another session took is drawn here without reading the machine again", async () => {
   // Two panes side by side showed two moments, an interval apart, because each
@@ -1816,14 +1751,13 @@ test("a newer reading another session wrote is drawn on the next look, and an ol
   assert.equal(driven.calls.argv.length, 0);
 });
 
-test("while a governor run is live its counts are read on their own, every few seconds", async () => {
+test("while a slot is busy pacer's status is read on its own, every second", async () => {
   let done = 290;
   const driven = stub({
     held: false, stored: liveReading(1790000000 - 1, 290),
     answer: (argv) => argv.includes("--only")
       ? { exitCode: 0, stdout: JSON.stringify({ generated_at: 1790000000,
-                                               progress: (liveReading(0, done).documents as
-                                                 { progress: unknown }).progress }) }
+                                               pacer: (liveReading(0, done).documents as { pacer: unknown }).pacer }) }
       : undefined,
   });
   await driven.start();
@@ -1835,25 +1769,30 @@ test("while a governor run is live its counts are read on their own, every few s
   driven.advance(LIVE_MS / 1000);
   driven.tick(LOOK_MS);
   await drain();
-  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "progress"]]);
+  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "pacer"]]);
   // The counts are kept under their own key with their own time, and the whole
   // reading is not written at all: a count read has nothing to say about the rest.
   const kept = driven.calls.stored.filter((entry) => entry.key === COUNTS_KEY).at(-1)?.value as
-    { at: number; progress: { runs: { done: number }[] } };
+    { at: number; pacer: { slots: { busy: boolean }[] } };
   assert.equal(kept.at, 1790000000 + LIVE_MS / 1000);
-  assert.equal(kept.progress.runs[0].done, 388);
+  assert.equal(kept.pacer.slots[0].busy, true);
   assert.deepEqual(driven.calls.stored.filter((entry) => entry.key === READING_KEY), []);
   const text = renderedText(await driven.render() as never).join("\n");
-  assert.equal(text.includes("388"), true);
+  assert.equal(text.includes("repo-388"), true);
 });
 
-test("the whole reading still ages while a governor run's counts are read on their own", async () => {
+test("a live pacer read is bounded by the configured read time, not a number in the entry", async () => {
+  // The pacer reader inside is bounded by its own configured command time, and
+  // an outer limit shorter than that would stop every live read once a person
+  // raised it, leaving old slots drawn as current with nothing saying why.
+  const reading = liveReading(1790000000 - 1, 290);
+  (reading.documents as { alerts?: object }).alerts = { ...OUTPUT.alerts, helperMs: 47_000,
+                                                         liveMs: LIVE_MS };
   const driven = stub({
-    held: false, stored: liveReading(1790000000 - 1, 290),
+    held: false, stored: reading,
     answer: (argv) => argv.includes("--only")
       ? { exitCode: 0, stdout: JSON.stringify({ generated_at: 1790000000,
-                                               progress: (liveReading(0, 300).documents as
-                                                 { progress: unknown }).progress }) }
+                                               pacer: (liveReading(0, 290).documents as { pacer: unknown }).pacer }) }
       : undefined,
   });
   await driven.start();
@@ -1862,7 +1801,28 @@ test("the whole reading still ages while a governor run's counts are read on the
   driven.advance(LIVE_MS / 1000);
   driven.tick(LOOK_MS);
   await drain();
-  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "progress"]]);
+  const live = driven.calls.argv.map((argv) => argv.slice(2));
+  assert.deepEqual(live, [["--only", "pacer"]]);
+  assert.deepEqual(driven.calls.runTimeouts, [47_000]);
+  assert.equal(driven.calls.runTimeouts.includes(10_000), false);
+});
+
+test("the whole reading still ages while pacer's slots are read on their own", async () => {
+  const driven = stub({
+    held: false, stored: liveReading(1790000000 - 1, 290),
+    answer: (argv) => argv.includes("--only")
+      ? { exitCode: 0, stdout: JSON.stringify({ generated_at: 1790000000,
+                                               pacer: (liveReading(0, 300).documents as
+                                                 { pacer: unknown }).pacer }) }
+      : undefined,
+  });
+  await driven.start();
+  await driven.run();
+  await drain();
+  driven.advance(LIVE_MS / 1000);
+  driven.tick(LOOK_MS);
+  await drain();
+  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "pacer"]]);
   // Fresh counts are not a fresh reading: the rest of the pane was read when it
   // was, and once that is old the whole machine is read, live run or not.
   // Twenty seconds after the whole reading was read, nineteen after the counts:
@@ -1879,7 +1839,7 @@ test("a count read never writes the whole reading, so a newer one another sessio
   // fleet over the newer one, and every session would draw it.
   const memory: Record<string, unknown> = {};
   // Its read began before this session's counts were read, so its own counts are older.
-  const newer = { at: 1790000000 + 1, progressAt: 1790000000,
+  const newer = { at: 1790000000 + 1, liveAt: 1790000000,
                   documents: { ...liveReading(0, 0).documents as Record<string, unknown>,
                                roster: { ...OUTPUT.roster, jobs: [] } } };
   const driven = stub({
@@ -1890,8 +1850,8 @@ test("a count read never writes the whole reading, so a newer one another sessio
       }
       memory[READING_KEY] = newer;
       return { exitCode: 0, stdout: JSON.stringify({ generated_at: 1790000000,
-                                                    progress: (liveReading(0, 388).documents as
-                                                      { progress: unknown }).progress }) };
+                                                    pacer: (liveReading(0, 388).documents as
+                                                      { pacer: unknown }).pacer }) };
     },
   });
   await driven.start();
@@ -1908,10 +1868,10 @@ test("a count read never writes the whole reading, so a newer one another sessio
   driven.advance(1);
   const text = renderedText(await driven.render() as never).join("\n");
   assert.equal(text.includes("Review adapter behavior"), false);
-  assert.equal(text.includes("388"), true);
+  assert.equal(text.includes("repo-388"), true);
 });
 
-test("a live run's counts younger than the progress interval are not read again", async () => {
+test("pacer's slots younger than the live interval are not read again", async () => {
   const driven = stub({ held: false, stored: liveReading(1790000000, 290) });
   await driven.start();
   await driven.run();
@@ -1922,15 +1882,15 @@ test("a live run's counts younger than the progress interval are not read again"
   driven.advance(LIVE_MS / 1000);
   driven.tick(LOOK_MS);
   await drain();
-  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "progress"]]);
+  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "pacer"]]);
 });
 
-test("a reading the paint found keeps its counts' own age, so a live run's counts are read when due", async () => {
+test("a reading the paint found keeps the slots' own age, so they are read when due", async () => {
   // The paint finds the reading the last session left before the session's
   // first look, so the look finds nothing newer and keeps what the paint held.
   // Its counts are older than the reading itself, and due.
   const driven = stub({ held: false,
-                        stored: { ...liveReading(1790000000, 290), progressAt: 1789999995 } });
+                        stored: { ...liveReading(1790000000, 290), liveAt: 1789999995 } });
   await driven.band();
   await drain();
   await driven.start();
@@ -1938,10 +1898,10 @@ test("a reading the paint found keeps its counts' own age, so a live run's count
   await driven.run();
   driven.tick(LOOK_MS);
   await drain();
-  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "progress"]]);
+  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "pacer"]]);
 });
 
-test("with the pane shut, a live run's counts wait for the whole reading", async () => {
+test("with the pane shut, pacer's slots wait for the whole reading", async () => {
   // The band does not draw a run's counts, so reading them every second for a
   // pane nobody opened would be a read nothing shows.
   const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290) });
@@ -1954,14 +1914,14 @@ test("with the pane shut, a live run's counts wait for the whole reading", async
   assert.equal(driven.calls.argv.length, 0);
 });
 
-test("the look runs every few seconds, and every second while an open pane shows a live run", async () => {
+test("the look runs every few seconds, and every second while an open pane shows a busy slot", async () => {
   const memory: Record<string, unknown> = {};
   const driven = stub({
     held: false, stored: liveReading(1790000000 - 1, 290), memory,
     answer: (argv) => argv.includes("--only")
       ? { exitCode: 0, stdout: JSON.stringify({ generated_at: 1790000000,
-                                               progress: (liveReading(0, 300).documents as
-                                                 { progress: unknown }).progress }) }
+                                               pacer: (liveReading(0, 300).documents as
+                                                 { pacer: unknown }).pacer }) }
       : undefined,
   });
   await driven.start();
@@ -2001,7 +1961,7 @@ test("how old the shared reading may get comes from the reading", async () => {
   assert.equal(driven.calls.argv.length, 1);
 });
 
-test("with no governor run live, the counts are not read on their own", async () => {
+test("with no slot busy, the slots are not read on their own", async () => {
   const driven = stub({ held: false, stored: { at: 1790000000 - 1, documents: OUTPUT } });
   await driven.start();
   await drain();
@@ -2103,12 +2063,12 @@ test("the pane is drawn into the room the surface reports", async () => {
 });
 
 /** Lets every chain in flight run, a bounded number of turns. */
-/** What the read command prints when it reads a live run's counts alone. */
+/** What the read command prints when it reads pacer's slots alone. */
 function countsAnswer(done: number, state = "ready"): { exitCode: number; stdout: string } {
-  const progress = state === "ready"
-    ? (liveReading(0, done).documents as { progress: unknown }).progress
-    : { state, runs: [], errors: [{ source: "progress", reason: "could not list the directory" }] };
-  return { exitCode: 0, stdout: JSON.stringify({ generated_at: 1790000000, progress }) };
+  const pacer = state === "ready"
+    ? (liveReading(0, done).documents as { pacer: unknown }).pacer
+    : { state, slots: [], errors: [{ source: "pacer", reason: "could not read pacer" }] };
+  return { exitCode: 0, stdout: JSON.stringify({ generated_at: 1790000000, pacer }) };
 }
 
 /**
@@ -2130,7 +2090,7 @@ const WAITING = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
     started_at: 1789999400, last_seen_at: 1789999995, folder: "/tmp/q", since: 1789999990 },
 ] } };
 
-test("a live run's counts are read on every look, though the timer fires a little early", async () => {
+test("pacer's slots are read on every look, though the timer fires a little early", async () => {
   // A timer is not exact: one that fires a few milliseconds short of its
   // interval found the counts not yet due and skipped, so they moved every
   // other interval.
@@ -2148,7 +2108,7 @@ test("a live run's counts are read on every look, though the timer fires a littl
   assert.equal(driven.calls.argv.filter((argv) => argv.includes("--only")).length, 4);
 });
 
-test("a live run's counts are dated when the look read them, not when the read came back", async () => {
+test("pacer's slots are dated when the look read them, not when the read came back", async () => {
   // A read that takes most of an interval, dated when it finished, leaves the
   // next look short of due, and the counts move every other interval. The
   // clock moves one interval from look to look, the read's time included.
@@ -2177,7 +2137,7 @@ test("a live run's counts are dated when the look read them, not when the read c
 
 test("a count read takes the counts' own claim, lets it go, and waits while another session holds it", async () => {
   const memory: Record<string, unknown> = {
-    [PROGRESS_CLAIM_KEY]: { at: 1790000000, by: "another" } };
+    [LIVE_CLAIM_KEY]: { at: 1790000000, by: "another" } };
   const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290), memory,
                         answer: (argv) => argv.includes("--only") ? countsAnswer(300) : undefined });
   await driven.start();
@@ -2186,12 +2146,12 @@ test("a count read takes the counts' own claim, lets it go, and waits while anot
   driven.tick(LOOK_MS);
   await drain();
   assert.equal(driven.calls.argv.length, 0, "read the counts while another session held their claim");
-  memory[PROGRESS_CLAIM_KEY] = { at: 0, by: "another" };
+  memory[LIVE_CLAIM_KEY] = { at: 0, by: "another" };
   driven.advance(LIVE_MS / 1000);
   driven.tick(LIVE_MS);
   await drain();
-  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "progress"]]);
-  const own = driven.calls.claims.filter((entry) => entry.key === PROGRESS_CLAIM_KEY)
+  assert.deepEqual(driven.calls.argv.map((argv) => argv.slice(2)), [["--only", "pacer"]]);
+  const own = driven.calls.claims.filter((entry) => entry.key === LIVE_CLAIM_KEY)
     .map((entry) => (entry.value as { at: number }).at);
   assert.deepEqual(own, [1790000000 + 2 * LIVE_MS / 1000, 0]);
 });
@@ -2234,7 +2194,7 @@ test("a reading from a build that read on its own interval does not slow every s
   assert.deepEqual(driven.calls.every.filter((ms) => ms === 30_000), []);
   // A reading of this build carries an interval it means.
   memory[READING_KEY] = { at: 1790000000, documents: { ...OUTPUT, alerts: {
-    state: "ready", snapshotMs: 6_000, snapshotSeconds: STALE_SECONDS, progressMs: LIVE_MS } } };
+    state: "ready", snapshotMs: 6_000, snapshotSeconds: STALE_SECONDS, liveMs: LIVE_MS } } };
   driven.tick(LOOK_MS);
   await drain();
   assert.equal(driven.calls.every.at(-1), 6_000);
@@ -2242,7 +2202,7 @@ test("a reading from a build that read on its own interval does not slow every s
 
 test("how old the reading may get comes from a reading this session took too", async () => {
   const driven = stub({ stdout: JSON.stringify({ ...OUTPUT, alerts: {
-    state: "ready", snapshotSeconds: 45, progressMs: LIVE_MS } }) });
+    state: "ready", snapshotSeconds: 45, liveMs: LIVE_MS } }) });
   await driven.start();
   await driven.settle();
   await drain();
@@ -2305,7 +2265,7 @@ test("a count read the read command reports failed leaves the counts and the pac
   assert.deepEqual(driven.calls.stored.filter((entry) => entry.key === READING_KEY), []);
   assert.equal(driven.calls.every.at(-1), LIVE_MS);
   const text = renderedText(await driven.render() as never).join("\n");
-  assert.equal(text.includes("290"), true);
+  assert.equal(text.includes("repo-290"), true);
 });
 
 test("an open pane with no run counting does not read counts", async () => {
@@ -2352,7 +2312,7 @@ test("news in a newer reading written while this session counted is raised on th
         return undefined;
       }
       memory[READING_KEY] = { at: 1790000000 + 1, documents: {
-        ...WAITING, progress: (liveReading(0, 0).documents as { progress: unknown }).progress } };
+        ...WAITING, pacer: (liveReading(0, 0).documents as { pacer: unknown }).pacer } };
       return countsAnswer(388);
     } });
   await driven.start();
@@ -2395,7 +2355,7 @@ test("this session's figures are asked for with a new whole reading, not with ne
   await drain();
   const asked = driven.calls.usage;
   assert.equal(asked > 0, true);
-  memory[READING_KEY] = { ...liveReading(1790000000 - 1, 300), progressAt: 1790000000 };
+  memory[READING_KEY] = { ...liveReading(1790000000 - 1, 300), liveAt: 1790000000 };
   driven.tick(LOOK_MS);
   await drain();
   assert.equal(driven.calls.usage, asked, "asked again for new counts alone");
@@ -2458,7 +2418,7 @@ test("a whole read is not written over a newer whole reading another session wro
   const driven = stub({ held: false, memory });
   await driven.start();
   await drain();
-  const newer = { at: 1790000000 + 1, progressAt: 1790000000, documents: OUTPUT };
+  const newer = { at: 1790000000 + 1, liveAt: 1790000000, documents: OUTPUT };
   memory[READING_KEY] = newer;
   await driven.settle();
   await drain();
@@ -2469,7 +2429,7 @@ test("a whole read is not written over a newer whole reading another session wro
 test("a count read is not written over newer counts another session wrote", async () => {
   const memory: Record<string, unknown> = {};
   const newer = { at: 1790000000 + 5,
-                  progress: (liveReading(0, 500).documents as { progress: unknown }).progress };
+                  pacer: (liveReading(0, 500).documents as { pacer: unknown }).pacer };
   const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290), memory,
     answer: (argv) => {
       if (!argv.includes("--only")) {
@@ -2493,26 +2453,32 @@ test("counts another session read are drawn here, and older ones are not", async
   await driven.start();
   await drain();
   memory[COUNTS_KEY] = { at: 1790000000,
-                         progress: (liveReading(0, 350).documents as { progress: unknown }).progress };
+                         pacer: (liveReading(0, 350).documents as { pacer: unknown }).pacer };
   driven.tick(LOOK_MS);
   await drain();
   assert.equal(renderedText(await driven.render() as never).join("\n").includes("350"), true);
   // Counts read before the ones drawn are not drawn over them.
   memory[COUNTS_KEY] = { at: 1790000000 - 0.5,
-                         progress: (liveReading(0, 340).documents as { progress: unknown }).progress };
+                         pacer: (liveReading(0, 340).documents as { pacer: unknown }).pacer };
   const before = driven.calls.invalidated.length;
   driven.tick(LOOK_MS);
   await drain();
   assert.equal(driven.calls.invalidated.length, before);
   assert.equal(renderedText(await driven.render() as never).join("\n").includes("350"), true);
-  // A count read that failed is not drawn as counts.
-  memory[COUNTS_KEY] = { at: 1790000000 + 1, progress: { state: "failed", runs: [] } };
+  // A count read that failed is not drawn as counts: its document names the
+  // failure and carries no slots a person could read as the machine's.
+  memory[COUNTS_KEY] = { at: 1790000000 + 1,
+                         pacer: { state: "failed", slots: [{ slot: 0, busy: true, pid: 9,
+                                                             repo: "repo-failed",
+                                                             startedAt: 1790000000 }] } };
   driven.tick(LOOK_MS);
   await drain();
   // Past any slide: a run row that left would still be drawn while it slides out.
   await driven.render();
   driven.advance(1);
   assert.equal(renderedText(await driven.render() as never).join("\n").includes("350"), true);
+  assert.equal(renderedText(await driven.render() as never).join("\n").includes("repo-failed"),
+               false);
   assert.equal(driven.calls.argv.length, 0);
 });
 
@@ -2537,7 +2503,7 @@ test("a reading from a build that folded its counts into the whole reading is st
   const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290), memory });
   await driven.start();
   await drain();
-  memory[READING_KEY] = { ...liveReading(1790000000 - 1, 360), progressAt: 1790000000 };
+  memory[READING_KEY] = { ...liveReading(1790000000 - 1, 360), liveAt: 1790000000 };
   driven.tick(LOOK_MS);
   await drain();
   assert.equal(renderedText(await driven.render() as never).join("\n").includes("360"), true);
@@ -2905,35 +2871,10 @@ test("the band draws the speech switch beside the fleet's, off until someone tur
   assert.equal(fleet.label, "\u{1F4CB} Open llm-fleet");
 });
 
-/** The word on the band's governance switch, as last drawn. */
-function governanceWord(tree: unknown): unknown {
-  return (buttonAddressing(tree, BAND_GOVERNANCE) as { label?: unknown } | null)?.label;
+/** The word on the band's pacer switch, as last drawn. */
+function pacerWord(tree: unknown): unknown {
+  return (buttonAddressing(tree, BAND_PACER) as { label?: unknown } | null)?.label;
 }
-
-test("a press on the band's governance switch runs the switch and draws where it went", async () => {
-  // Both scopes off is the one state where the press is the safe direction: the
-  // band moves both at once, and anything but both on moves them on.
-  let governance = { state: "ready", governor: false, controller: false, source: "config",
-                     path: "/tmp/switch.json", updated_at: null, by: null, errors: [] };
-  const ran: string[][] = [];
-  const driven = stub({ answer: (argv) => {
-    if (argv[1]?.endsWith("governance.py")) {
-      ran.push(argv.slice(2));
-      governance = { ...governance, governor: true, controller: true };
-      return { exitCode: 0, stdout: JSON.stringify(governance) };
-    }
-    // A machine without pacer, where the governance switch keeps the gear.
-    return { exitCode: 0, stdout: JSON.stringify({ ...OUTPUT, governance,
-                                                    pacer: { state: "disabled", errors: [] } }) };
-  } });
-  await driven.start();
-  await drain();
-  assert.equal(governanceWord(await driven.band()), "⚙ Gov off");
-  await driven.pressBand(BAND_GOVERNANCE);
-  await drain();
-  assert.deepEqual(ran[0], ["--set", "both", "--on"]);
-  assert.equal(governanceWord(await driven.band()), "⚙ Gov on");
-});
 
 test("pacer takes the band's gear; a press switches it and draws pacer's own answer", async () => {
   let pacer: Record<string, unknown> = {
@@ -2953,9 +2894,10 @@ test("pacer takes the band's gear; a press switches it and draws pacer's own ans
   await driven.start();
   await drain();
   const band = await driven.band();
-  assert.equal((buttonAddressing(band, BAND_PACER) as { label?: unknown } | null)?.label,
-               "⚙ Pacer on");
-  assert.equal(buttonAddressing(band, BAND_GOVERNANCE), null);
+  assert.equal(pacerWord(band), "⚙ Pacer on");
+  // The governance switch is retired: pacer's gear is the one switch on the
+  // band, and a key left over from an older build addresses nothing.
+  assert.equal(buttonAddressing(band, "band:governance"), null);
   const before = whole;
   // Switching off lets every heavy run start at once, so the band's first
   // press only arms it, says so, and asks on the gear itself.
@@ -2964,14 +2906,12 @@ test("pacer takes the band's gear; a press switches it and draws pacer's own ans
   assert.deepEqual(ran, []);
   assert.ok(driven.calls.toasts.some((text) => String(text).includes("press Pacer again")),
             driven.calls.toasts.join());
-  assert.equal((buttonAddressing(await driven.band(), BAND_PACER) as { label?: unknown })
-    ?.label, "⚙ Pacer off?");
+  assert.equal(pacerWord(await driven.band()), "⚙ Pacer off?");
   await driven.pressBand(BAND_PACER);
   await drain();
   assert.deepEqual(ran[0], ["--set", "off"]);
   // Pacer's own answer is drawn at once, without waiting for the next whole read.
-  assert.equal((buttonAddressing(await driven.band(), BAND_PACER) as { label?: unknown })
-    ?.label, "⚙ Pacer off");
+  assert.equal(pacerWord(await driven.band()), "⚙ Pacer off");
   assert.equal(whole, before);
   await driven.pressBand(BAND_PACER);
   await drain();
@@ -3378,7 +3318,7 @@ const PRESSED = {
     ],
   },
   alerts: { state: "ready", toast: true, notify: false, toastMs: 7777, copyToastMs: 4321,
-            snapshotMs: 3000, snapshotSeconds: 20, progressMs: 1000, synthesisMs: 30000 },
+            snapshotMs: 3000, snapshotSeconds: 20, liveMs: 1000, synthesisMs: 30000 },
   pane: { repliedLimit: 2, replyMaxChars: 10 },
 };
 const REPLY_KEY = "one:job-2:job-2-session:hash-merge";
@@ -3878,7 +3818,7 @@ test("the reply limit and the copy toast fall back to the packaged values on a r
 test("the pane's clock and its stream step are the reading's, and the packaged ones before it", async () => {
   assert.equal(alertConfigFrom(OUTPUT).clockMs, CLOCK_MS);
   assert.equal(alertConfigFrom(OUTPUT).streamStepMs, STREAM_MS);
-  const paced = { ...OUTPUT, alerts: { ...(OUTPUT as { alerts?: object }).alerts, progressMs: 1000,
+  const paced = { ...OUTPUT, alerts: { ...(OUTPUT as { alerts?: object }).alerts, liveMs: 1000,
                                        clockMs: 500, streamStepMs: 90 } };
   assert.equal(alertConfigFrom(paced).clockMs, 500);
   assert.equal(alertConfigFrom(paced).streamStepMs, 90);
@@ -3977,7 +3917,7 @@ async function lookAfter(driven: Stub, seconds: number): Promise<void> {
 test("the helper is told none as the session starts, then failed, waiting and none as the band moves", async () => {
   // A staleness long enough that no level is said again for its age here.
   const patient = (body: Record<string, unknown>) => ({ ...body, alerts: { state: "ready",
-    progressMs: 1000, tabTint: { enabled: true, staleSeconds: 600 } } });
+    liveMs: 1000, tabTint: { enabled: true, staleSeconds: 600 } } });
   let reading: unknown = patient(OUTPUT);
   const machine = tabMachine(() => reading);
   const driven = stub({ env: ITERM, answer: machine.answer });
@@ -4002,7 +3942,7 @@ test("the helper is told none as the session starts, then failed, waiting and no
 });
 
 test("a tint switched off tells the helper none, and one off from the start tells it nothing", async () => {
-  const off = (enabled: boolean) => ({ ...FAILING, alerts: { state: "ready", progressMs: 1000,
+  const off = (enabled: boolean) => ({ ...FAILING, alerts: { state: "ready", liveMs: 1000,
     tabTint: { enabled } } });
   let reading: unknown = off(true);
   const machine = tabMachine(() => reading);
@@ -4092,7 +4032,7 @@ test("a terminal that draws no tab color is never told anything", async () => {
 });
 
 test("a held level is said again every third of the staleness, which is the reading's", async () => {
-  const reading = { ...FAILING, alerts: { state: "ready", progressMs: 1000,
+  const reading = { ...FAILING, alerts: { state: "ready", liveMs: 1000,
     tabTint: { enabled: true, staleSeconds: 30 } } };
   const machine = tabMachine(() => reading);
   const driven = stub({ env: ITERM, answer: machine.answer });
@@ -4112,7 +4052,7 @@ test("a held level is said again every third of the staleness, which is the read
 
 test("the heartbeat follows the staleness a new reading carries", async () => {
   let stale = 30;
-  const reading = () => ({ ...FAILING, alerts: { state: "ready", progressMs: 1000,
+  const reading = () => ({ ...FAILING, alerts: { state: "ready", liveMs: 1000,
     tabTint: { enabled: true, staleSeconds: stale } } });
   const machine = tabMachine(reading);
   const driven = stub({ env: ITERM, answer: machine.answer });
@@ -4127,7 +4067,7 @@ test("the heartbeat follows the staleness a new reading carries", async () => {
 });
 
 test("a session holding no level says none every third of the staleness, so a dead session's failure is let go", async () => {
-  const reading = { ...OUTPUT, alerts: { state: "ready", progressMs: 1000,
+  const reading = { ...OUTPUT, alerts: { state: "ready", liveMs: 1000,
     tabTint: { enabled: true, staleSeconds: 30 } } };
   const clear = tabMachine(() => reading);
   const survivor = stub({ env: ITERM, answer: clear.answer });
@@ -4140,7 +4080,7 @@ test("a session holding no level says none every third of the staleness, so a de
   await beatAfter(survivor, 10, 10_000);
   assert.deepEqual(clear.tabs, [told("none"), told("none"), told("none")]);
   // With tinting off there is no tab to keep, and no heartbeat.
-  const off = { ...OUTPUT, alerts: { state: "ready", progressMs: 1000,
+  const off = { ...OUTPUT, alerts: { state: "ready", liveMs: 1000,
     tabTint: { enabled: false, staleSeconds: 30 } } };
   const quiet = tabMachine(() => off);
   const untinted = stub({ env: ITERM, answer: quiet.answer });
@@ -4252,7 +4192,7 @@ test("a draft after the session ends starts no key tip timer", async () => {
 });
 
 test("the key tip interval is the reading's refresh.keyTipMs", async () => {
-  const reading = { ...OUTPUT, alerts: { state: "ready", progressMs: 1000, keyTipMs: 4500 } };
+  const reading = { ...OUTPUT, alerts: { state: "ready", liveMs: 1000, keyTipMs: 4500 } };
   const driven = stub({ stdout: JSON.stringify(reading) });
   await driven.start();
   await driven.settle();
@@ -4367,12 +4307,15 @@ test("a band item opens the section its row is drawn in, and an unknown one open
   assert.equal(sectionOfKey("pacer:web-app:1792490400"), "pacer");
   assert.equal(sectionOfKey("job:job-a:blocked:1"), "sessions");
   assert.equal(sectionOfKey("pr:owner/project#9:abc"), "prs");
-  assert.equal(sectionOfKey("run:k:2"), "running");
-  assert.equal(sectionOfKey("trial:k"), "trials");
   assert.equal(sectionOfKey("skill:x"), null);
   assert.equal(sectionOfKey("pacers:x"), null);
+  // A section the pane no longer draws opens nothing, so a key left in a
+  // session's store from an older build is a press that goes nowhere rather
+  // than a jump to a group that is not there.
+  assert.equal(sectionOfKey("run:k:2"), null);
+  assert.equal(sectionOfKey("trial:k"), null);
   // Every section a key opens is one the pane carries, so the jump lands.
-  for (const key of ["pacer:a:1", "job:a", "pr:a", "run:a", "trial:a"]) {
+  for (const key of ["pacer:a:1", "job:a", "pr:a"]) {
     assert.ok(SECTIONS.includes(sectionOfKey(key) as string), key);
   }
 });
@@ -5159,16 +5102,16 @@ test("a section that changes again mid-stream waits its turn, so the sections af
   assert.equal(last.includes("Second title"), true, last);
 });
 
-test("a live run's elapsed time counts on between reads of its counts", async () => {
+test("a busy slot's elapsed time counts on between reads of pacer's status", async () => {
   const driven = stub({ held: false, stored: liveReading(1790000000 - 1, 290) });
   await driven.start();
   await driven.run();
   await drain();
   const now = renderedText(await driven.render() as never).join("\n");
-  assert.equal(now.includes("23s elapsed"), true, now);
+  assert.equal(now.includes("running 23s"), true, now);
   driven.advance(10);
   const later = renderedText(await driven.render() as never).join("\n");
-  assert.equal(later.includes("33s elapsed"), true, later);
+  assert.equal(later.includes("running 33s"), true, later);
   assert.equal(driven.calls.argv.length, 0);
 });
 

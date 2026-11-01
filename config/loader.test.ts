@@ -23,34 +23,6 @@ import { ConfigError, loadConfig, loadSchema } from "./loader.ts";
 const HOME = process.platform === "win32" ? "C:/fixture/runner" : "/fixture/runner";
 const pathOf = (relative: string): string => normalize(`${HOME}/${relative}`);
 
-test("pause markers resolve paths and stop target probing for both sources", () => {
-  for (const [name, target] of [["progress", "directory"], ["trials", "database"]]) {
-    const probed: string[] = [];
-    const result = resolve({ sources: { [name]: {
-      enabled: true, [target]: pathOf("missing"), paused_when_exists: "~/paused",
-    } } }, { probe: (path) => { probed.push(path); return "file"; } });
-    const source = (result.sources as contract.JsonObject)[name] as contract.JsonObject;
-    assert.equal(source.paused_when_exists, pathOf("paused"));
-    assert.equal(source.state, "paused");
-    assert.deepEqual(probed, [pathOf("paused")]);
-  }
-});
-
-test("pause markers are optional nullable paths and reject invalid values", () => {
-  for (const name of ["progress", "trials"]) {
-    for (const marker of [null, undefined]) {
-      const result = resolve({ sources: { [name]: { paused_when_exists: marker } } });
-      const source = (result.sources as contract.JsonObject)[name] as contract.JsonObject;
-      assert.equal(source.paused_when_exists, null);
-      assert.equal(source.state, "disabled");
-    }
-    assert.deepEqual(refusals({ sources: { [name]: { paused_when_exists: 7 } } }),
-      [["E_CONFIG_TYPE", `sources.${name}.paused_when_exists`]]);
-    assert.deepEqual(refusals({ sources: { [name]: { paused_when_exists: "" } } }),
-      [["E_CONFIG_VALUE", `sources.${name}.paused_when_exists`]]);
-  }
-});
-
 function scratch(document: unknown): string {
   const directory = mkdtempSync(join(tmpdir(), "fleet-config-"));
   const file = join(directory, "config.json");
@@ -137,10 +109,10 @@ test("unknown keys are refused at every depth, in one canonical order", () => {
 
 test("an enabled source is refused without the field it needs", () => {
   assert.deepEqual(
-    refusals({ sources: { prs: { enabled: true }, trials: { enabled: true } } }),
+    refusals({ sources: { prs: { enabled: true }, pacer: { enabled: true } } }),
     [
+      ["E_CONFIG_REQUIRED", "sources.pacer.command"],
       ["E_CONFIG_REQUIRED", "sources.prs.repositories"],
-      ["E_CONFIG_REQUIRED", "sources.trials.database"],
     ],
   );
 });
@@ -282,8 +254,8 @@ test("a record section keeps the defaults of the sections it does not mention", 
   const sections = (resolved.pane as contract.JsonObject).sections as contract.JsonObject;
   assert.equal((sections.sessions as contract.JsonObject).collapsed, true);
   assert.equal((sections.worktrees as contract.JsonObject).collapsed, true);
-  assert.equal((sections.trials as contract.JsonObject).collapsed, false);
-  assert.equal(typeof (sections.trials as contract.JsonObject).legend, "string");
+  assert.equal((sections.pacer as contract.JsonObject).collapsed, false);
+  assert.equal(typeof (sections.pacer as contract.JsonObject).legend, "string");
 });
 
 test("the reply bounds and task lines have defaults and floors", () => {

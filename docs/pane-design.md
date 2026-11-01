@@ -27,10 +27,16 @@ in a terminal and a rounded card on the desktop.
 llm-fleet                     3 working  1 waiting  1 failed
 
 +----------------------------------------------------------+
-| v  Trials                                        1 running |
-|   . Test export boundaries                        42 / 80  |
-|     project / feature-a | 2m elapsed | 1 failed            |
-|     =====================                                 |
+| v  Pacer                                      1 of 2 busy |
+|   o Pacer                                                 on |
+|     press to switch off                                    |
+|   o Settings                          2 slots, 4 per run   |
+|     qos utility, nice 10                                   |
+|   o Slot 1                                     my-project  |
+|     running 2m                                             |
+|   . Slot 2                                          free   |
+|   o Outside pacer                  12% cpu, pytest, ollama |
+|     3 processes                                            |
 +----------------------------------------------------------+
 | >  Background sessions                           1 waiting |
 |   o Review adapter behavior                   Waiting for you|
@@ -52,8 +58,8 @@ cannot both be true: a bar is the one mark that shows progress as a proportion,
 and a proportion of an impossible pair means nothing. A row in that state states
 both numbers and lets them be read.
 
-The header counts distinct observed entities in each named category. Do not sum
-the same trial twice because it also appears under Still running. Counts remain
+The header counts distinct observed entities in each named category. Do not
+count the same job twice because it also appears on a session card. Counts remain
 scoped: a PR check failure and a failed test are different denominators. If a
 source fails, say "observed" or "unknown" and show the warning next to the count.
 
@@ -78,6 +84,14 @@ dim line above the rows, in the same widths as the columns. The load section is
 that case: a percentage and a byte count side by side say nothing about which is
 which until they are named.
 
+The load section opens on the machine itself: one row for the processor and one
+for memory, each a bar filled to the share in use and the figure beside it. The
+bar is the reading, and its colour is the reading too: green below seventy
+percent, amber to ninety, red above it. Beside the bar the row states what the
+figure came from, the load average for the processor and the bytes used of the
+total for memory. A platform that states nothing draws no meter and no figure,
+rather than a machine at nought.
+
 Under the last card the pane draws one dim line naming the plugin, its version and
 its license. It sits at the bottom, never in the head: the head reports this
 machine, and a product line there competes with what the pane exists to say. It
@@ -96,7 +110,7 @@ session's own job is left out. A dismissal holds across sessions until the item
 changes, and `/llm-fleet unhide` brings everything back.
 
 ```text
-[ Close fleet ]  2 working  2 waiting  1 failed  Trial failed on repo feat/a: 3 failed . 2 more waiting   [ Dismiss ]
+[ Close fleet ]  2 working  2 waiting  1 failed  Pacer refused a run in my-project . 2 more waiting   [ Dismiss ]
 ```
 
 ## Agent cards
@@ -161,12 +175,14 @@ else, with its total; a series the reader could not complete says "at least" and
 
 ## What needs you, and what happened
 
-A section holding something that needs the person moves above the calm ones: a
-failing check, a job waiting on input, a failed trial, a governor run with
-failures, or a custom row its command called failed or waiting. The move is a
-stable split of the configured order, so sections keep their order within each
-half, and a section moves only when what it holds changed. A folded section moves
-folded, its heading carrying the count. Failing warnings still lead.
+A section holding something that needs the person says so where it sits: a
+failing check, a job waiting on input, a pacer run that was refused or failed, a
+slot still held while another caller waits, or a custom row its command called
+failed or waiting. It keeps its place in the configured order, because a section
+that moved would take the hotkey someone learned with it; the heading's tone and
+count carry the need, and the band above the prompt carries the worst of it. A
+folded section stays folded, its heading carrying the count. Failing warnings
+lead whenever they hold anything.
 
 A pull request row draws a small dot per check at its right, in the check's
 color, capped to the room the row has: failing checks are kept first, then

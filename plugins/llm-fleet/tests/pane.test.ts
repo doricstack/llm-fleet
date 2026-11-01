@@ -49,8 +49,6 @@ const READING = {
     sources: { jobs: "ready", interactive: "empty" },
     interactive: { one: 1 },
   },
-  trials: { state: "empty" },
-  progress: { state: "empty" },
   prs: { state: "empty" },
   skills: { state: "empty" },
   worktrees: { state: "empty" },
@@ -376,54 +374,6 @@ test("the band's switch opens and closes the pane with a press, mid-turn", async
   }
 });
 
-test("the band draws no governance switch for a machine that has none", async ($, on) => {
-  mock.clock(on, { now: AT * 1000 });
-  mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
-  on("session.id", () => ({ value: "another-session" }) as never);
-  for (const surface of SURFACES) {
-    const band = await $.ui.mount({ plugin: "llm-fleet", surface, component: "AbovePrompt",
-                                    props: BAND_PROPS as never });
-    expect(JSON.stringify(await band.drawn())).not.toContain("fleet.band.governance");
-  }
-});
-
-test("the band's governance switch moves both scopes without opening the pane", async ($, on) => {
-  mock.clock(on, { now: AT * 1000 });
-  // A reading whose governance source answered is the only one that draws the
-  // button: the switch is tooling this machine has, not one the product ships.
-  mock.store(on, { [READING_KEY]: { at: AT, documents: {
-    ...READING,
-    governance: { state: "ready", governor: true, controller: false, source: "config",
-                  path: "/switch.json", updated_at: null, by: null, errors: [] },
-  } } });
-  const open: string[] = [];
-  const ran: string[][] = [];
-  on("session.id", () => ({ value: "another-session" }) as never);
-  on("ui.panes", () => ({ value: open.map((id) => ({ id })) }) as never);
-  on("ui.open", (_engine, e) => {
-    open.push((e as { id: string }).id);
-    return { value: { isPlaced: true } } as never;
-  });
-  on("process.run", (_engine, e) => {
-    const argv = (e as { argv?: string[] }).argv ?? [];
-    if (argv.some((word) => word.endsWith("governance.py"))) {
-      ran.push(argv);
-      return { value: { exitCode: 0, stdout: JSON.stringify({ state: "ready" }) } } as never;
-    }
-    return { value: { exitCode: 0, stdout: JSON.stringify(READING), stderr: "" } } as never;
-  });
-  const band = await $.ui.mount({ plugin: "llm-fleet", surface: "terminal",
-                                  component: "AbovePrompt", props: BAND_PROPS as never });
-  const drawn = JSON.stringify(await band.drawn());
-  expect(drawn).toContain("fleet.band.governance");
-  expect(drawn).toContain("Gov mixed");
-  await band.press({ key: "fleet.band.governance" });
-  // A mixed machine comes back on both scopes, which is the direction that
-  // cannot leave a gate away because one scope was already off.
-  expect(ran.some((argv) => argv.join(" ").endsWith("--set both --on"))).toBe(true);
-  expect(open).toEqual([]);
-});
-
 test("the band yields to a survey", async ($, on) => {
   mock.clock(on, { now: AT * 1000 });
   mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
@@ -633,19 +583,12 @@ const RICH = {
     ],
     interactive: { one: 2 },
   },
-  trials: {
-    state: "ready", history: null, changes: [],
-    running: [{ repo: "acme/app", branch: "fix/flaky", tool: "claude", expires_at: AT + 600,
-                session: "s" }],
-    recent: [{ key: "t1", repo: "acme/app", branch: "fix/flaky", change_state: "", at: AT - 900,
-               is_green: false, passed: 40, failed: 2, errors: 0, skipped: 0 }],
-  },
   prs: { state: "ready", prs: [{ repo: "acme/app", number: 42, title: "Speed up the reader",
                                  branch: "speed", head: "abc", is_draft: false, checks: "pass" }] },
   skills: { state: "ready", generated_at: AT - 600, running: null, new: [], items: [],
             counts: { clean: 10, flagged: 2, review: 3, failed: 1, reviewed: 4 },
             report_command: "python3 \"$HOME\"/scan.py report" },
-  worktrees: { state: "ready", cleaned: null, worktrees: [
+  worktrees: { state: "ready", worktrees: [
     { name: "lane-a", path: "/w/lane-a", branch: "feat/a", state: "merged", merged: true,
       archived: false, held: false, change_state: "PUSHED", change_owner: "codex",
       change_updated_at: AT - 7200, cleanup_command: "tool cleanup --worktree /w/lane-a" },
@@ -654,13 +597,13 @@ const RICH = {
   ] },
   pane: {
     state: "ready",
-    order: ["sessions", "trials", "prs", "skills", "worktrees", "warnings"],
-    sections: Object.fromEntries(["sessions", "trials", "prs", "skills", "worktrees", "warnings"]
+    order: ["sessions", "session", "pacer", "prs", "skills", "worktrees", "warnings"],
+    sections: Object.fromEntries(["sessions", "session", "pacer", "prs", "skills", "worktrees", "warnings"]
       .map((name) => [name, { visible: true, collapsed: false, maxRows: 8 }])),
     repliedLimit: 5,
   },
   alerts: { state: "ready", toast: true, notify: false, toastMs: 8000, copyToastMs: 4321,
-            snapshotMs: 3000, snapshotSeconds: 20, progressMs: 1000, synthesisMs: 30000 },
+            snapshotMs: 3000, snapshotSeconds: 20, liveMs: 1000, synthesisMs: 30000 },
 };
 
 /** The hooks a case registers beneath the plugin, as loosely as the kit takes them. */
@@ -1005,7 +948,7 @@ test("a pull request's title is a link to its page on every surface", async ($, 
   }
 });
 
-test("finished jobs, subagent tasks, interactive counts and a retried branch are drawn", async ($, on) => {
+test("finished jobs, subagent tasks and interactive counts are drawn", async ($, on) => {
   mock.clock(on, { now: AT * 1000 });
   mock.store(on, { [READING_KEY]: { at: AT, documents: RICH }, [HIDDEN_KEY]: ["job:job-2:blocked:" + (AT - 300)] });
   answerPresses(on);
@@ -1027,8 +970,6 @@ test("finished jobs, subagent tasks, interactive counts and a retried branch are
     expect(words).toContain("Interactive sessions:");
     expect(words).toContain("One 2");
     expect(words).toContain("1 hidden from the band; /llm-fleet unhide shows them again.");
-    // The branch tried again after a failure is one row, marked.
-    expect(words).toContain("running, last try failed");
     expect(words).toContain("Esc or x closes this pane");
   }
 });

@@ -141,14 +141,15 @@ def vector_plates(vectors: list[dict]) -> str:
 def counts(snapshot: dict) -> list[tuple[str, str]]:
     """One line per source: its state and how many rows it brought back."""
     rows: list[tuple[str, str]] = []
-    for name in ("roster", "trials", "progress", "prs", "skills", "worktrees"):
+    for name in ("roster", "session", "pacer", "prs", "skills", "worktrees", "load"):
         document = snapshot.get(name)
         if not isinstance(document, dict):
             rows.append((name, "no document"))
             continue
         state = str(document.get("state", "unknown"))
         detail = ""
-        for key in ("jobs", "running", "runs", "prs", "items", "worktrees"):
+        for key in ("jobs", "running", "runs", "prs", "items", "worktrees", "slots",
+                    "processes"):
             value = document.get(key)
             if isinstance(value, list):
                 detail = "{0} rows".format(len(value))

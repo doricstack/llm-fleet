@@ -12,7 +12,6 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import shlex
 import shutil
 import stat
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -27,13 +26,6 @@ from config.loader import load_config
 from readers import worktrees
 
 
-STORES = """
-CREATE TABLE repos (repo_id INTEGER PRIMARY KEY, remote_url TEXT, root_oid TEXT);
-CREATE TABLE changes (change_id INTEGER PRIMARY KEY, repo_id INTEGER, branch TEXT,
-                      state TEXT, worktree_path TEXT);
-CREATE TABLE milestones (change_id INTEGER, session TEXT, created_at REAL, to_state TEXT);
-"""
-
 NOW = 1_700_000_000.0
 REMOTE = "https://example.invalid/owner/example-repo.git"
 
@@ -44,8 +36,7 @@ REMOTE = "https://example.invalid/owner/example-repo.git"
 # rather than on anything the reader decided. The probe budget stays above the
 # git bound so a slow call is never reported as the budget. The cases that test
 # a cut-off set their own short bounds.
-HEADROOM = {"gitSeconds": 30, "worktreeProbeSeconds": 120, "liveHoldersSeconds": 30,
-            "trialDatabaseSeconds": 30}
+HEADROOM = {"gitSeconds": 30, "worktreeProbeSeconds": 120, "liveHoldersSeconds": 30}
 
 
 def run(argv, cwd=None):
@@ -94,22 +85,9 @@ class WorktreeCase(unittest.TestCase):
     def environment(self):
         return sandbox.home_environment(self.root)
 
-    def store(self, branch, path, state="TRYING", owner="abcdef12-rest", updated=NOW - 30):
-        database = self.root / "changes.db"
-        with sqlite3.connect(database) as connection:
-            connection.executescript(STORES)
-            connection.execute("INSERT INTO repos VALUES (1, ?, ?)", (REMOTE, self.root_oid))
-            connection.execute("INSERT INTO changes VALUES (1, 1, ?, ?, ?)",
-                               (branch, state, str(path)))
-            connection.execute("INSERT INTO milestones VALUES (1, ?, ?, ?)",
-                               (owner, updated, "TRYING"))
-        return database
-
-    def config(self, database=None, base_ref="main", timeouts=None, **document):
+    def config(self, base_ref="main", timeouts=None, **document):
         sources = {"worktrees": {"enabled": True, "roots": [str(self.roots)],
                                  "baseRef": base_ref}}
-        if database is not None:
-            sources["trials"] = {"enabled": True, "database": str(database)}
         body = {"stateDir": str(self.state), "sources": sources,
                 "timeouts": dict(HEADROOM if timeouts is None else timeouts)}
         body.update(document)
@@ -309,9 +287,12 @@ class ProbeTests(WorktreeCase):
             # Neither "active" (unmerged, no copy kept) nor "merged" with a line
             # to delete it: an unknown archive is no ground for either.
             self.assertEqual(row["state"], "unknown")
+            # git's own words are carried whatever the exit: a build that warns
+            # and one that calls it fatal say the same thing about the history,
+            # and the row is where a person reads which it was.
             self.assertEqual(row["error"],
                              "cannot tell whether " + branch + " is archived: "
-                             "git for-each-ref exited 128")
+                             "git for-each-ref exited 128: fatal: the archive lookup failed")
             self.assertEqual(row["cleanup_command"], "")
             self.assertIsNone(row.get("cleanup_note"))
 
@@ -344,10 +325,11 @@ class ProbeTests(WorktreeCase):
         self.assertIs(row["merged"], False)
         self.assertIsNone(row["archived"])
         self.assertEqual(row["state"], "unknown")
-        self.assertIn("cannot tell whether feat/one is archived: git for-each-ref reported: ",
-                      row["error"])
-        # What git names in its complaint differs by build: the missing parent
-        # here, the damaged commit on the Windows runner. Either is the damage.
+        # What git names in its complaint differs by build, and so does whether
+        # the build warns and exits 0 or calls it fatal: a build that cannot read
+        # the ref exits 128. Both carry git's own words, and either is the damage.
+        self.assertIn("cannot tell whether feat/one is archived: git for-each-ref ", row["error"])
+        self.assertRegex(row["error"], r"git for-each-ref (exited 0|reported|exited 128): \S")
         damaged = written.stdout.strip()
         self.assertTrue("2" * 40 in row["error"] or damaged in row["error"], row["error"])
         self.assertEqual(row["cleanup_command"], "")
@@ -602,72 +584,6 @@ class StoreTests(WorktreeCase):
         self.assertEqual(row["cleanup_command"], "")
         self.assertIn("probe budget", row["error"])
         self.assertEqual([entry["source"] for entry in result["errors"]], ["worktrees:one"])
-
-    def test_a_change_for_this_worktree_names_its_state_and_owner(self):
-        path = self.worktree("one", "feat/one")
-        row = self.row(self.read(config=self.config(database=self.store("feat/one", path))), "one")
-        self.assertEqual(row["change_state"], "TRYING")
-        self.assertEqual(row["change_owner"], "abcdef12-rest")
-        self.assertEqual(row["change_updated_at"], NOW - 30)
-
-    def test_a_change_for_another_worktree_of_the_same_branch_is_not_borrowed(self):
-        self.worktree("one", "feat/one")
-        database = self.store("feat/one", self.roots / "somewhere-else")
-        row = self.row(self.read(config=self.config(database=database)), "one")
-        self.assertEqual(row["change_state"], None)
-        self.assertEqual(row["change_owner"], None)
-
-    def test_two_repositories_under_one_root_keep_their_own_change(self):
-        # The remote and root commit a repository answers are kept for its other
-        # worktrees, so a tree in a second repository must not be handed them.
-        other = self.root / "other-origin"
-        other.mkdir()
-        self.git("init", "-b", "main", cwd=other)
-        self.git("config", "user.email", "reader@example.invalid", cwd=other)
-        self.git("config", "user.name", "Reader", cwd=other)
-        (other / "file.txt").write_text("two\n", encoding="utf-8")
-        self.git("add", "file.txt", cwd=other)
-        self.git("commit", "-m", "first", cwd=other)
-        other_remote = "https://example.invalid/owner/other-repo.git"
-        self.git("remote", "add", "origin", other_remote, cwd=other)
-        other_root = self.git("rev-list", "--max-parents=0", "HEAD",
-                              cwd=other).stdout.strip()
-        self.git("worktree", "add", "-b", "feat/other", str(self.roots / "two"), "main",
-                 cwd=other)
-        self.worktree("one", "feat/one", commit=True)
-        database = self.root / "changes.db"
-        with sqlite3.connect(database) as connection:
-            connection.executescript(STORES)
-            connection.execute("INSERT INTO repos VALUES (1, ?, ?)", (REMOTE, self.root_oid))
-            connection.execute("INSERT INTO repos VALUES (2, ?, ?)", (other_remote, other_root))
-            connection.execute("INSERT INTO changes VALUES (1, 1, ?, ?, ?)",
-                               ("feat/one", "TRYING", str(self.roots / "one")))
-            connection.execute("INSERT INTO changes VALUES (2, 2, ?, ?, ?)",
-                               ("feat/other", "READY", str(self.roots / "two")))
-        result = self.read(config=self.config(database=database))
-        self.assertEqual(self.row(result, "one")["change_state"], "TRYING")
-        self.assertEqual(self.row(result, "two")["change_state"], "READY")
-
-    def test_a_store_that_is_not_there_leaves_the_change_fields_empty(self):
-        self.worktree("one", "feat/one")
-        config = self.config(database=self.root / "absent.db")
-        row = self.row(worktrees.read_worktrees(config, environ=self.environment(), now=NOW), "one")
-        self.assertEqual(row["change_state"], None)
-
-    def test_cleaned_worktrees_inside_the_window_are_counted(self):
-        path = self.worktree("one", "feat/one")
-        database = self.store("feat/one", path)
-        with sqlite3.connect(database) as connection:
-            connection.execute("INSERT INTO milestones VALUES (1, ?, ?, ?)",
-                               ("abcdef12-rest", NOW - 100, "CLEANED"))
-            connection.execute("INSERT INTO milestones VALUES (1, ?, ?, ?)",
-                               ("abcdef12-rest", NOW - 604801, "CLEANED"))
-        config = self.config(database=database)
-        self.assertEqual(worktrees.read_worktrees(config, environ=self.environment(),
-                                                  now=NOW)["cleaned"], 1)
-
-    def test_no_configured_store_reports_no_count_rather_than_zero(self):
-        self.assertEqual(self.read()["cleaned"], None)
 
 
 class CacheTests(WorktreeCase):

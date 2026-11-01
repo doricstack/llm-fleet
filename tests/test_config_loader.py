@@ -651,42 +651,18 @@ class ProviderStateTests(ConfigTestCase):
 class SourceStateTests(ConfigTestCase):
     """Enabled, unconfigured, unavailable, and disabled stay distinct."""
 
-    def test_pause_marker_resolves_home_and_prevents_target_probe(self):
-        for name, target in (("progress", "directory"), ("trials", "database")):
-            probed = []
-            def probe(path):
-                probed.append(path)
-                return "file"
-            source = self.load({"sources": {name: {
-                "enabled": True, target: path_of("missing"), "paused_when_exists": "~/paused"
-            }}}, probe=probe)["sources"][name]
-            self.assertEqual(source["paused_when_exists"], path_of("paused"))
-            self.assertEqual(source["state"], "paused")
-            self.assertEqual(probed, [path_of("paused")])
-
-    def test_pause_marker_is_optional_nullable_and_validated(self):
-        for name in ("progress", "trials"):
-            for settings in ({}, {"paused_when_exists": None}):
-                source = self.load({"sources": {name: settings}})["sources"][name]
-                self.assertIsNone(source.get("paused_when_exists", "missing"))
-                self.assertEqual(source["state"], "disabled")
-            for value, code in ((7, "E_CONFIG_TYPE"), ("", "E_CONFIG_VALUE"),
-                                ("$UNKNOWN/paused", "E_CONFIG_UNRESOLVED_VAR")):
-                self.assert_errors([(code, "sources." + name + ".paused_when_exists")],
-                                   {"sources": {name: {"paused_when_exists": value}}})
-
     def test_enabled_source_without_repositories_is_refused(self) -> None:
         self.assert_errors([("E_CONFIG_REQUIRED", "sources.prs.repositories")],
                            {"sources": {"prs": {"enabled": True}}})
 
     def test_enabled_source_without_a_target_path_is_refused(self) -> None:
-        self.assert_errors([("E_CONFIG_REQUIRED", "sources.trials.database")],
-                           {"sources": {"trials": {"enabled": True}}})
+        self.assert_errors([("E_CONFIG_REQUIRED", "sources.pacer.command")],
+                           {"sources": {"pacer": {"enabled": True}}})
 
     def test_configured_source_targets_become_ready(self) -> None:
         resolved = self.load(
             {"sources": {"prs": {"enabled": True, "repositories": ["owner/project"]},
-                         "progress": {"enabled": True, "directory": path_of("progress")},
+                         "skills": {"enabled": True, "directory": path_of("skills")},
                          "statusline": {"enabled": True,
                                         "payload": path_of("host-payload.json")}}},
             # The kind each target was declared with, so a directory target is
@@ -694,7 +670,7 @@ class SourceStateTests(ConfigTestCase):
             probe=lambda path: "file" if path.endswith(".json") else "directory",
         )
         self.assertEqual(resolved["sources"]["prs"]["state"], "ready")
-        self.assertEqual(resolved["sources"]["progress"]["state"], "ready")
+        self.assertEqual(resolved["sources"]["skills"]["state"], "ready")
         self.assertEqual(resolved["sources"]["statusline"]["state"], "ready")
 
     def test_an_enabled_source_without_its_target_is_refused(self) -> None:
@@ -738,10 +714,10 @@ class SourceStateTests(ConfigTestCase):
 
     def test_wrong_target_kind_is_unavailable(self) -> None:
         resolved = self.load(
-            {"sources": {"progress": {"enabled": True, "directory": path_of("not-a-dir")}}},
+            {"sources": {"skills": {"enabled": True, "directory": path_of("not-a-dir")}}},
             probe=lambda path: "file",
         )
-        self.assertEqual(resolved["sources"]["progress"]["state"], "unavailable")
+        self.assertEqual(resolved["sources"]["skills"]["state"], "unavailable")
 
     def test_one_missing_array_target_makes_the_source_unavailable(self) -> None:
         resolved = self.load(
@@ -838,13 +814,13 @@ class LayoutTests(ConfigTestCase):
     def test_section_order_defaults_to_the_documented_order(self) -> None:
         resolved = self.load()
         self.assertEqual(resolved["pane"]["sectionOrder"],
-                         ["load", "prs", "sessions", "trials", "running", "session", "pacer",
-                          "worktrees", "skills", "warnings", "governance", "keys"])
+                         ["load", "prs", "sessions", "session", "pacer",
+                          "worktrees", "skills", "warnings", "keys"])
 
     def test_section_collapse_defaults_match_the_pane(self) -> None:
         sections = self.load()["pane"]["sections"]
         for name, expected in (("worktrees", True), ("skills", True), ("keys", True),
-                               ("sessions", False), ("running", False)):
+                               ("sessions", False), ("pacer", False)):
             self.assertEqual(sections[name]["collapsed"], expected, name)
 
     def test_unknown_section_is_refused(self) -> None:

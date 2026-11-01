@@ -95,7 +95,8 @@ export function isRefusal(documents: ReaderDocuments | null): boolean {
  * somewhere else, and drawing it as a fleet would report zero of everything the
  * machine never said.
  */
-const READER_DOCUMENTS = ["roster", "trials", "progress", "prs", "skills", "worktrees"] as const;
+const READER_DOCUMENTS = ["roster", "session", "pacer", "prs", "skills", "worktrees",
+                          "load", "custom", "events"] as const;
 
 /**
  * Whether the documents are a reading, rather than a refusal or nothing yet.

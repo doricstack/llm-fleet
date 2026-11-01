@@ -33,7 +33,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -67,15 +66,6 @@ PURE_METHODS = frozenset({"resolve"})
 PURE_DECORATORS = frozenset({"staticmethod", "classmethod", "property", "contextmanager",
                              "contextlib.contextmanager", "lru_cache", "functools.lru_cache",
                              "cache", "functools.cache", "dataclass", "dataclasses.dataclass"})
-
-STORES = """
-CREATE TABLE repos (repo_id INTEGER PRIMARY KEY, remote_url TEXT, root_oid TEXT);
-CREATE TABLE changes (change_id INTEGER PRIMARY KEY, repo_id INTEGER, branch TEXT,
-                      state TEXT, worktree_path TEXT);
-CREATE TABLE leases (change_id INTEGER, tool TEXT, expires_at REAL, session TEXT);
-CREATE TABLE receipts (receipt_id TEXT, change_id INTEGER, evidence TEXT, created_at REAL);
-CREATE TABLE milestones (change_id INTEGER, session TEXT, created_at REAL, to_state TEXT);
-"""
 
 # Answers every command the readers start with an empty list.
 EMPTY_STUB = "print('[]')\n"
@@ -303,8 +293,7 @@ def every_source_ran(test: unittest.TestCase, stdout: str) -> None:
     """Each reader ran its body: none was off, so none returned before its work."""
     no_failed_source(test, stdout)
     document = json.loads(stdout)
-    for name in ("roster", "trials", "progress", "prs", "skills", "worktrees", "session",
-                 "custom", "pacer"):
+    for name in ("roster", "prs", "skills", "worktrees", "session", "custom", "pacer"):
         test.assertIn(name, document)
         test.assertNotEqual(document[name]["state"], "disabled",
                             "{0} was off, so its reader never ran".format(name))
@@ -361,10 +350,7 @@ class StandalonePluginTests(unittest.TestCase):
         """Every source on, each pointed at a stub or an empty store of this test's own."""
         provider = self.root / "homes" / "one"
         provider.mkdir(parents=True)
-        trials = self.root / "trials.sqlite"
-        with sqlite3.connect(trials) as connection:
-            connection.executescript(STORES)
-        for made in ("progress", "skills", "worktrees"):
+        for made in ("skills", "worktrees"):
             (self.root / made).mkdir()
         payload = self.root / "payload.json"
         payload.write_text(json.dumps(PAYLOAD), encoding="utf-8")
@@ -376,8 +362,6 @@ class StandalonePluginTests(unittest.TestCase):
             "commands": {"claude": self.stub("claude.py", EMPTY_STUB),
                          "github": self.stub("gh.py", EMPTY_STUB)},
             "sources": {
-                "trials": {"enabled": True, "database": str(trials)},
-                "progress": {"enabled": True, "directory": str(self.root / "progress")},
                 "prs": {"enabled": True, "repositories": ["owner/project"]},
                 "skills": {"enabled": True, "directory": str(self.root / "skills")},
                 "worktrees": {"enabled": True, "roots": [str(self.root / "worktrees")]},
@@ -404,7 +388,7 @@ class StandalonePluginTests(unittest.TestCase):
         return {
             "snapshot": [
                 Case([*config, "--now", NOW, "--pretty"], check=every_source_ran),
-                Case([*config, "--now", NOW, "--only", "progress"], check=no_failed_source),
+                Case([*config, "--now", NOW, "--only", "pacer"], check=no_failed_source),
                 Case([*config, "--now", NOW, "--refresh-worktrees"], check=no_failed_source),
             ],
             "alerts": [
@@ -446,15 +430,6 @@ class StandalonePluginTests(unittest.TestCase):
             ],
             "session": [
                 Case([*config], codes=(0,), check=json_document),
-            ],
-            # No switch path is configured here, so the read says so and a write
-            # is refused rather than writing a switch nobody named.
-            "governance": [
-                Case([*config], codes=(0,), check=json_document),
-                Case([*config, "--set", "governor", "--off"], codes=(0,),
-                     check=lambda test, out: test.assertEqual(json.loads(out)["state"],
-                                                              "unconfigured")),
-                Case([*config, "--set", "governor"], codes=(2,), check=json_document_any_state),
             ],
             # The status reads only the state folder; the refresh fetches every
             # card, each refused by the closed port, and keeps the failures.

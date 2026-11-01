@@ -1,4 +1,4 @@
-.PHONY: script-public-export script-check-doc-format script-typescript-suite script-host-drift script-render-review script-statusline-demo script-plugin-boundary script-mutation-check script-version script-host-update
+.PHONY: script-public-export script-check-doc-format script-typescript-suite script-host-drift script-render-review script-statusline-demo script-plugin-boundary script-mutation-check script-mutation-gate script-version script-host-update
 
 script-host-update: ## Invoke host-update.py; HOST_UPDATE_CHECK=1 reports drift instead of repairing it
 	$(PYTHON) scripts/host-update.py $(if $(HOST_UPDATE_CHECK),--check,--write) $(foreach dir,$(HOST_CONFIG_DIRS),--config-dir "$(dir)")
@@ -27,6 +27,10 @@ script-statusline-demo: ## Invoke statusline-demo.py, with a recorded payload vi
 
 script-plugin-boundary: ## Invoke plugin-boundary.py on this source tree
 	$(PYTHON) scripts/plugin-boundary.py --plugins "$(ROOT)/plugins"
+
+script-mutation-gate: ## Run the gate: plan, measure what changed, record every slice, judge
+	@set -euo pipefail; test -f scripts/mutation-gate.py || { echo 'Unavailable: the gate that writes mutation receipts is kept with the private checkout; this tree carries the harness, which is `make mutants-measure`.' >&2; exit 2; }
+	$(PYTHON) scripts/mutation-gate.py
 
 script-mutation-check: ## Invoke mutation-check.py on a copy of this tree; pick mutants with MUTANTS
 	$(PYTHON) scripts/mutation-check.py --root "$(ROOT)" --node "$(NODE)" $(foreach id,$(MUTANTS),--only $(id))

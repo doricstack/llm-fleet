@@ -11,10 +11,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_GOVERNANCE, BAND_ITEM, BAND_PACER, BAND_SPEAK,
+import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_ITEM, BAND_PACER, BAND_SPEAK,
          BAND_TOGGLE,
          bandConfigFrom, bandCounts, bandItems,
-         answeredSources, bandTree, fleetLabel, governanceLabel, keptHidden,
+         answeredSources, bandTree, fleetLabel, keptHidden,
          isOwnJob, speakLabel } from "../plugins/llm-fleet/components/band.ts";
 import { renderedText } from "../plugins/llm-fleet/components/layout.ts";
 import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
@@ -33,13 +33,12 @@ function reading(overrides: Record<string, unknown> = {}): ReaderDocuments {
               jobs: [job("aaaa1111", "working"), job("bbbb2222", "blocked", { since: AT - 120 }),
                      job("cccc3333", "blocked", { since: AT - 60 })],
               sources: { jobs: "ready", interactive: "empty" }, interactive: {} },
-    trials: { state: "ready", running: [], history: null, recent: [
-      { key: "t1", repo: "repo", branch: "feat/a", change_state: "TRYING", at: AT - 30,
-        is_green: false, passed: 4, failed: 2, errors: 1, skipped: 0 },
-      { key: "t2", repo: "repo", branch: "feat/b", change_state: "TRYING", at: AT - 30,
-        is_green: true, passed: 9, failed: 0, errors: 0, skipped: 0 },
+    pacer: { state: "ready", slots: [], waiting: [], outside: [], outsideCount: 0, recent: [
+      { at: AT - 30, repo: "example-repo", waitSeconds: 0, runSeconds: 4, exit: 1, slot: 0,
+        mode: "on", reason: null },
+      { at: AT - 20, repo: "example-repo", waitSeconds: 0, runSeconds: 2, exit: 0, slot: 1,
+        mode: "on", reason: null },
     ] },
-    progress: { state: "empty" },
     prs: { state: "ready", prs: [
       { repo: "owner/project", number: 7, title: "Fix it", branch: "fix", head: "abc",
         is_draft: false, checks: "fail" },
@@ -66,13 +65,14 @@ const noop = () => undefined;
 
 test("errors lead the band, then the sessions waiting on a person", () => {
   const items = bandItems(snapshotFrom(reading(), AT), [], "");
-  assert.deepEqual(items.map((item) => item.level),
-                   ["error", "error", "warning", "warning"]);
-  assert.equal(items[0]?.text, "Trial failed on repo feat/a: 3 failed");
-  assert.equal(items[1]?.text, "PR 7 checks failing: Fix it");
-  assert.equal(items[2]?.text, "Job bbbb2222 is waiting for you");
-  // A passing trial, a passing PR and a working session need nobody.
-  assert.equal(items.some((item) => item.text.includes("feat/b")), false);
+  assert.deepEqual(items.map((item) => item.level), ["error", "warning", "warning"]);
+  assert.equal(items[0]?.text, "PR 7 checks failing: Fix it");
+  assert.equal(items[1]?.text, "Job bbbb2222 is waiting for you");
+  // A run that failed inside a slot said so where it ran. The band does not
+  // repeat it: it was a line nobody acted on and everybody dismissed.
+  assert.equal(items.some((item) => item.text.startsWith("Run failed")), false);
+  // A passing run, a passing PR and a working session need nobody.
+  assert.equal(items.some((item) => item.text.includes("slot 1")), false);
   assert.equal(items.some((item) => item.text.includes("Fine")), false);
   assert.equal(items.some((item) => item.text.includes("aaaa1111")), false);
 });
@@ -141,55 +141,39 @@ test("a skill's finding is masked on the band as it is on the pane", () => {
   assert.equal(flagged.includes(SKILL_KEY), false, flagged);
 });
 
-test("a failed trial leaves the band once its change has merged or been cleaned", () => {
-  const trial = (key: string, change_state: string) => ({
-    key, repo: "repo", branch: "feat/" + key, change_state, at: AT - 30, is_green: false,
-    passed: 1, failed: 1, errors: 0, skipped: 0 });
-  const items = bandItems(snapshotFrom(reading({
-    trials: { state: "ready", running: [], history: null,
-              recent: [trial("open", "TRYING"), trial("merged", "MERGED"),
-                       trial("cleaned", "CLEANED")] },
-  }), AT), [], "");
-  assert.deepEqual(items.filter((item) => item.key.startsWith("trial:")).map((item) => item.key),
-                   ["trial:open"]);
-});
-
-test("a pacer run that was refused or failed is an error on the band; a pass is not", () => {
-  const run = (repo: string, exit: number, mode: string, at: number, reason: string | null = null) =>
+test("a pacer run it refused is an error on the band; one that failed on its own is not", () => {
+  const run = (repo: string | null, exit: number, mode: string, at: number,
+               reason: string | null = null) =>
     ({ at, repo, waitSeconds: 0, runSeconds: 1, exit, slot: 0, mode, reason });
   const items = bandItems(snapshotFrom(reading({
     pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [], recent: [
       run("web-app", 75, "refused", AT - 60, "memory pressure"),
+      // A command that failed inside a slot is the pane's row, not a line the
+      // band raises: dismissing it changed nothing, so nothing is raised.
       run("fleet", 2, "on", AT - 120),
       run("fine", 0, "on", AT - 30),
-      // A run pacer let through with pacing off failed on its own terms, not pacer's.
       run("unpaced", 1, "off", AT - 10),
-      // A run the person stopped (a signal pacer passed on) is not a failure.
-      run("stopped", 130, "interrupted", AT - 5)] },
+      run("stopped", 130, "interrupted", AT - 5),
+      run(null, 3, "on", AT - 1)] },
   }), AT), [], "");
   const pacer = items.filter((item) => item.key.startsWith("pacer:"));
   assert.deepEqual(pacer.map((item) => item.text),
-                   ["Pacer refused a run in web-app: memory pressure",
-                    "Run failed in fleet: exit 2"]);
-  assert.deepEqual(pacer.map((item) => item.level), ["error", "error"]);
-  // Each run is its own key, so a dismissed failure stays gone and the next
-  // failure in the same repository is a new item.
-  assert.deepEqual(pacer.map((item) => item.key),
-                   ["pacer:web-app:" + (AT - 60), "pacer:fleet:" + (AT - 120)]);
+                   ["Pacer refused a run in web-app: memory pressure"]);
+  assert.deepEqual(pacer.map((item) => item.level), ["error"]);
+  assert.deepEqual(pacer.map((item) => item.key), ["pacer:web-app:" + (AT - 60)]);
+  // A refusal pacer could not tie to a repository still says where it happened.
+  const unnamed = bandItems(snapshotFrom(reading({
+    pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [],
+             recent: [run(null, 75, "refused", AT - 1)] } }), AT), [], "");
+  assert.deepEqual(unnamed.filter((item) => item.key.startsWith("pacer:")).map((item) => item.text),
+                   ["Pacer refused a run in a repository"]);
   // A reading from before pacer was read has not heard from it, so a pacer
-  // failure dismissed earlier is kept rather than forgotten.
+  // refusal dismissed earlier is kept rather than forgotten.
   const older = snapshotFrom(reading(), AT);
   delete (older as { pacer?: unknown }).pacer;
   assert.equal(answeredSources(older).has("pacer"), false);
   assert.deepEqual(keptHidden(["pacer:web-app:1"], [], [], 10, answeredSources(older)),
                    ["pacer:web-app:1"]);
-  // A run pacer could not tie to a repository still says where it failed.
-  const unnamed = bandItems(snapshotFrom(reading({
-    pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [], recent: [
-      { at: AT - 1, repo: null, waitSeconds: 0, runSeconds: 1, exit: 3, slot: 0, mode: "on",
-        reason: null }] } }), AT), [], "");
-  assert.deepEqual(unnamed.filter((item) => item.key.startsWith("pacer:")).map((item) => item.text),
-                   ["Run failed in a repository: exit 3"]);
   // A pacer that has not reported its runs raises nothing.
   const quiet = bandItems(snapshotFrom(reading({
     pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [] } }), AT), [], "");
@@ -263,18 +247,18 @@ test("a dismissed key from a source that did not answer is kept, though nothing 
 test("a source has answered when it read ready or empty with no error", () => {
   const sources = (overrides: Record<string, unknown>) =>
     [...answeredSources(snapshotFrom(reading(overrides), AT))].sort();
-  assert.deepEqual(sources({ progress: { state: "empty" }, skills: { state: "ready", new: [] },
+  assert.deepEqual(sources({ skills: { state: "ready", new: [] },
                              worktrees: { state: "empty" } }),
-                   ["progress", "prs", "roster", "skills", "trials"]);
+                   ["pacer", "prs", "roster", "skills"]);
   // A roster with one provider failing has not answered for that provider's jobs.
   assert.deepEqual(sources({ roster: { state: "ready", providers: {}, interactive: {},
                                        sources: { jobs: "ready", interactive: "empty" },
                                        jobs: [], errors: [{ source: "jobs:two",
                                                             reason: "exit 3" }] } }),
-                   ["progress", "prs", "skills", "trials"]);
+                   ["pacer", "prs", "skills"]);
   assert.deepEqual(sources({ roster: { state: "failed", errors: [] },
-                             prs: { state: "disabled" }, trials: { state: "unavailable" } }),
-                   ["progress", "skills"]);
+                             prs: { state: "disabled" }, pacer: { state: "unavailable" } }),
+                   ["skills"]);
 });
 
 test("a job is this session's own by its full identifier or by its head", () => {
@@ -316,12 +300,9 @@ test("pacer takes the gear, and its word says whether pacer is on", () => {
     (node.props as { key?: string } | undefined)?.key === key);
   const on = bandTree({ items: [], counts: null, open: false, width: 120,
                         pacer: { enabled: true }, onPacer: () => { pressed += 1; },
-                        governance: { governor: true, controller: true },
-                        onGovernance: noop, onToggle: noop, onDismiss: noop });
+                        onToggle: noop, onDismiss: noop });
   const button = keyed(on, BAND_PACER);
   assert.equal((button?.props as { label?: string }).label, "⚙ Pacer on");
-  // With pacer on the machine the governance gear is not drawn beside it.
-  assert.equal(keyed(on, BAND_GOVERNANCE), undefined);
   (button?.props as { onPress: () => void }).onPress();
   assert.equal(pressed, 1);
   const off = bandTree({ items: [], counts: null, open: false, width: 120,
@@ -334,60 +315,16 @@ test("pacer takes the gear, and its word says whether pacer is on", () => {
                             onToggle: noop, onDismiss: noop });
   assert.equal((keyed(unread, BAND_PACER)?.props as { label?: string }).label,
                "⚙ Pacer not read");
-  // No pacer: the governance gear stands as before.
+  // No pacer: the band carries no gear at all.
   const without = bandTree({ items: [], counts: null, open: false, width: 120, pacer: null,
-                             onPacer: noop, governance: { governor: true, controller: true },
-                             onGovernance: noop, onToggle: noop, onDismiss: noop });
+                             onPacer: noop, onToggle: noop, onDismiss: noop });
   assert.equal(keyed(without, BAND_PACER), undefined);
-  assert.ok(keyed(without, BAND_GOVERNANCE));
   // Narrow, the word drops its name and keeps the icon and the answer.
   const narrow = bandTree({ items: [], counts: null, open: false, width: 30,
                             pacer: { enabled: true }, onPacer: noop,
                             onSpeak: noop, speaking: false,
                             onToggle: noop, onDismiss: noop });
   assert.equal((keyed(narrow, BAND_PACER)?.props as { label?: string }).label, "⚙ on");
-});
-
-test("the governance switch is drawn only for a machine that has one", () => {
-  // A person who does not run the tooling behind the switch never sees a
-  // button that would do nothing, and neither does a band drawn before a
-  // reading: null is no button, and an absent field is the same.
-  const plain = nodesIn(bandTree({ items: [], counts: null, open: false, width: 120,
-                                   onToggle: noop, onDismiss: noop }));
-  assert.equal(plain.some((node) =>
-    (node.props as { key?: string }).key === BAND_GOVERNANCE), false);
-  const off = nodesIn(bandTree({ items: [], counts: null, open: false, width: 120,
-                                 governance: null, onGovernance: () => undefined,
-                                 onToggle: noop, onDismiss: noop }));
-  assert.equal(off.some((node) =>
-    (node.props as { key?: string }).key === BAND_GOVERNANCE), false);
-  // A reading without a press is still no switch: the button would do nothing.
-  const inert = nodesIn(bandTree({ items: [], counts: null, open: false, width: 120,
-                                   governance: { governor: true, controller: true },
-                                   onToggle: noop, onDismiss: noop }));
-  assert.equal(inert.some((node) =>
-    (node.props as { key?: string }).key === BAND_GOVERNANCE), false);
-});
-
-test("the governance switch states both scopes in one word and presses through", () => {
-  const pressed: string[] = [];
-  const tree = bandTree({ items: [], counts: null, open: false, width: 140,
-                          governance: { governor: true, controller: false },
-                          onGovernance: () => { pressed.push("pressed"); },
-                          onToggle: noop, onDismiss: noop });
-  const button = nodesIn(tree).find((node) =>
-    (node.props as { key?: string }).key === BAND_GOVERNANCE);
-  assert.equal((button?.props as { label?: string }).label, "⚙ Gov mixed");
-  (button?.props as { onPress?: () => unknown }).onPress?.();
-  assert.deepEqual(pressed, ["pressed"]);
-  // The three answers, and one it cannot answer: a scope the switch did not
-  // report is "not read" rather than folded into on or off.
-  assert.equal(governanceLabel(true, true), "⚙ Gov on");
-  assert.equal(governanceLabel(false, false), "⚙ Gov off");
-  assert.equal(governanceLabel(true, false), "⚙ Gov mixed");
-  assert.equal(governanceLabel(null, true), "⚙ Gov not read");
-  // A band too narrow for the word keeps the icon and the state.
-  assert.equal(governanceLabel(true, true, undefined, true), "⚙ on");
 });
 
 test("a figure is the press that opens the pane narrowed to what it counted", () => {
@@ -453,9 +390,9 @@ test("the band leads with the worst item and counts the rest after it", () => {
   const tree = bandTree({ items, counts: { working: 1, waiting: 2, failed: 1 }, open: false,
                           width: 160, onToggle: noop, onDismiss: noop });
   const values = renderedText(tree);
-  assert.equal(values.includes("Trial failed on repo feat/a: 3 failed"), true);
-  assert.equal(values.includes(" · 1 more failing, 2 more waiting"), true);
-  const lead = nodesIn(tree).find((node) => node.children[0] === "Trial failed on repo feat/a: 3 failed");
+  assert.equal(values.includes("PR 7 checks failing: Fix it"), true);
+  assert.equal(values.includes(" · 2 more waiting"), true);
+  const lead = nodesIn(tree).find((node) => node.children[0] === "PR 7 checks failing: Fix it");
   assert.equal((lead?.props as { color?: string }).color, "error");
   assert.equal(nodesIn(tree).some((node) =>
     (node.props as { key?: string }).key === BAND_DISMISS), true);
@@ -463,7 +400,7 @@ test("the band leads with the worst item and counts the rest after it", () => {
   const narrow = renderedText(bandTree({ items, counts: { working: 1, waiting: 2, failed: 1 },
                                          open: false, width: 50, onToggle: noop,
                                          onDismiss: noop }));
-  assert.equal(narrow.includes("Trial failed on repo feat/a: 3 failed"), false);
+  assert.equal(narrow.includes("PR 7 checks failing"), false);
   assert.equal(narrow.includes("1 working"), true);
 });
 
@@ -585,7 +522,9 @@ test("the band's line fits its width with the speech switch drawn too", () => {
   const snapshot = snapshotFrom(reading(), AT);
   const items = bandItems(snapshot, [], "");
   const counts = { working: 12, waiting: 3, failed: 2 };
-  for (let width = 80; width <= 160; width += 1) {
+  // Down to the narrowest width the band is drawn at, where the speech switch
+  // gives up its word to keep the line inside the terminal.
+  for (let width = 73; width <= 160; width += 1) {
     for (const speaking of [false, true]) {
       const tree = bandTree({ items, counts, open: false, width, speaking,
                               onToggle: noop, onDismiss: noop, onSpeak: noop });
@@ -604,4 +543,16 @@ test("the band's line fits its width with the speech switch drawn too", () => {
   const wide = bandTree({ items, counts, open: false, width: 160, speaking: true,
                           onToggle: noop, onDismiss: noop, onSpeak: noop });
   assert.equal(pressable(wide, BAND_SPEAK)?.label, "♪ Speak: on");
+  // A band too narrow for the word drops it rather than running off the edge:
+  // the icon and the state are what a person presses for.
+  let shortened = 0;
+  for (let width = 73; width <= 80; width += 1) {
+    const tree = bandTree({ items, counts, open: false, width, speaking: true,
+                            onToggle: noop, onDismiss: noop, onSpeak: noop });
+    if (pressable(tree, BAND_SPEAK)?.label === "♪ on") {
+      shortened += 1;
+    }
+    assert.ok(drawnWidth(tree) <= width, `width ${width}: drew ${drawnWidth(tree)}`);
+  }
+  assert.ok(shortened > 0, "no width between 73 and 80 drew the short speech switch");
 });

@@ -61,8 +61,7 @@ test("this session's figures reach the pane from the document that carried them"
 test("an absent document reads as an empty source, not as a failure", () => {
   const snapshot = snapshotFrom({}, NOW);
   assert.equal(snapshot.roster.state, "empty");
-  assert.equal(snapshot.trials.state, "empty");
-  assert.equal(snapshot.progress.state, "empty");
+  assert.equal(snapshot.pacer?.state, "disabled");
   assert.equal(snapshot.prs.state, "empty");
   assert.equal(snapshot.skills.state, "empty");
   assert.equal(snapshot.worktrees.state, "empty");
@@ -122,17 +121,6 @@ test("a provider map keeps the states it was given and refuses the rest", () => 
   assert.equal(snapshot.roster.providers.shapeless?.state, "unavailable");
 });
 
-test("a run keeps its measured counts and drops a total it cannot trust", () => {
-  const snapshot = snapshotFrom({ progress: { state: "ready", runs: [
-    { key: "a", label: "Suite", done: 42, total: 80, failed: 1, elapsed: 120, eta_minutes: 3 },
-    { key: "b", label: "Other", done: 1, total: "many" },
-  ] } }, NOW);
-  assert.equal(snapshot.progress.runs[0]?.total, 80);
-  assert.equal(snapshot.progress.runs[1]?.total, 0);
-  assert.equal(snapshot.progress.runs[1]?.eta_minutes, null);
-  assert.equal(snapshot.progress.runs[1]?.display, "unnamed run");
-});
-
 test("a pull request without a number keeps it absent and its checks unknown", () => {
   const snapshot = snapshotFrom({ prs: { state: "ready", prs: [
     { repo: "owner/one", title: "t", checks: "weird" },
@@ -181,7 +169,7 @@ test("a worktree whose merge is unknown is carried as unknown and drawn as neith
   assert.deepEqual(trees.map((tree) => tree.merged), [false, true, null, null, null, null, null]);
   assert.deepEqual(trees.map((tree) => tree.state),
                    ["active", "merged", "unknown", "unknown", "unknown", "unknown", "held"]);
-  const values = rendered({ worktrees: { state: "ready", cleaned: null, worktrees: [
+  const values = rendered({ worktrees: { state: "ready", worktrees: [
     { name: "cut", branch: "c", state: "merged", merged: null, cleanup_command: "clean c",
       error: "git merge-base exited 128" },
   ] } });
@@ -212,7 +200,7 @@ test("a worktree whose archive or live holders are unknown is carried and drawn 
   assert.deepEqual(trees.map((tree) => tree.held), [false, false, false, null, null]);
   assert.deepEqual(trees.map((tree) => tree.state),
                    ["preserved", "unknown", "unknown", "unknown", "unknown"]);
-  const values = rendered({ worktrees: { state: "ready", cleaned: null, worktrees: [
+  const values = rendered({ worktrees: { state: "ready", worktrees: [
     { name: "no-lsof", branch: "d", state: "active", merged: false, archived: false, held: null,
       cleanup_command: "clean d",
       error: "live process inspection unavailable: lsof is not on the PATH" },
@@ -225,15 +213,14 @@ test("a worktree whose archive or live holders are unknown is carried and drawn 
 });
 
 test("a worktree that was not rechecked keeps that note and its age", () => {
-  const snapshot = snapshotFrom({ worktrees: { state: "ready", cleaned: 3, worktrees: [
+  const snapshot = snapshotFrom({ worktrees: { state: "ready", worktrees: [
     { name: "lane", branch: "x", state: "active", merged: false, checked_at: NOW - 600,
       recheck_error: "timed out after 2s" },
   ] } }, NOW);
   const tree = snapshot.worktrees.worktrees[0];
   assert.equal(tree?.recheck_error, "timed out after 2s");
   assert.equal(tree?.checked_at, NOW - 600);
-  assert.equal(snapshot.worktrees.cleaned, 3);
-  const values = rendered({ worktrees: { state: "ready", cleaned: null, worktrees: [
+  const values = rendered({ worktrees: { state: "ready", worktrees: [
     { name: "lane", branch: "x", state: "active", merged: false, archived: false, held: false,
       cleanup_command: "clean" },
   ] } });
@@ -446,6 +433,33 @@ test("a process under load reaches the pane only with the figures that read", ()
   assert.equal(snapshotFrom({}, NOW).load.state, "empty");
 });
 
+test("the machine's own figures reach the pane only where they are numbers", () => {
+  const read = snapshotFrom({ load: { state: "ready", sampled_at: NOW, total: 1, processes: [],
+    system: { cpuPercent: 75.4, loadAverage: [1.5, 1.2, 0.9],
+              memoryUsedBytes: 8 * 1024 ** 3, memoryTotalBytes: 16 * 1024 ** 3 } } }, NOW);
+  assert.deepEqual(read.load.system, { cpuPercent: 75.4, loadAverage: [1.5, 1.2, 0.9],
+                                       memoryUsedBytes: 8 * 1024 ** 3,
+                                       memoryTotalBytes: 16 * 1024 ** 3 });
+  // A figure outside the range a meter can draw is not a figure: a share above
+  // a hundred would put the bar past its end, and memory used above its total
+  // is a reading that contradicts itself.
+  const refused = snapshotFrom({ load: { state: "ready", sampled_at: NOW, total: 1,
+    processes: [], system: { cpuPercent: 140, loadAverage: [1, 2], memoryUsedBytes: 20,
+                             memoryTotalBytes: 10 } } }, NOW);
+  assert.equal(refused.load.system, null);
+  // A platform that stated nothing is not a machine at nought.
+  assert.equal(snapshotFrom({ load: { state: "ready", total: 1, processes: [] } }, NOW)
+                 .load.system, null);
+  assert.equal(snapshotFrom({ load: { state: "ready", total: 1, processes: [],
+                                      system: "busy" } }, NOW).load.system, null);
+  // One figure without the other is kept as itself: a platform that states the
+  // CPU share but no memory still has a meter to draw.
+  const partial = snapshotFrom({ load: { state: "ready", total: 1, processes: [],
+    system: { cpuPercent: 12, memoryUsedBytes: 5 } } }, NOW);
+  assert.deepEqual(partial.load.system, { cpuPercent: 12, loadAverage: null,
+                                          memoryUsedBytes: null, memoryTotalBytes: null });
+});
+
 test("a pacer document keeps what was sent and names what was not", () => {
   const read = snapshotFrom({ pacer: {
     state: "ready", enabled: true, switchSource: "file", reason: null, version: 1,
@@ -477,22 +491,3 @@ test("a pacer document keeps what was sent and names what was not", () => {
   assert.equal(snapshotFrom({}, NOW).pacer?.state, "disabled");
 });
 
-test("a governance document is kept as read, and a failed one carries no scope", () => {
-  const read = snapshotFrom({ governance: { state: "ready", governor: false, controller: true,
-                                            source: "config", path: "/switch.json",
-                                            updated_at: "2026-10-19T10:00:00Z",
-                                            by: "someone", errors: [] } }, NOW);
-  assert.deepEqual(read.governance, { state: "ready", governor: false, controller: true,
-                                      source: "config", path: "/switch.json",
-                                      updated_at: "2026-10-19T10:00:00Z", by: "someone",
-                                      errors: [] });
-  // A document that failed is drawn as a failure, not as the tool's own "both
-  // on" default: the pane would be reporting a state it never read.
-  const failed = snapshotFrom({ governance: { state: "failed", errors: [
-    { source: "governance", reason: "switch file is not JSON" }] } }, NOW);
-  assert.equal(failed.governance?.state, "failed");
-  assert.equal(failed.governance?.governor, null);
-  assert.equal(failed.governance?.controller, null);
-  // A reading from before the switch was read is disabled, never ready.
-  assert.equal(snapshotFrom({}, NOW).governance?.state, "disabled");
-});

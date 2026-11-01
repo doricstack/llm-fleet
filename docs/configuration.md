@@ -10,7 +10,7 @@
 | ID | Context | Statement or required action |
 | --- | --- | --- |
 | DOC6-38 | Implemented in this pass | The loading contract, `schemaVersion`, `stateDir`, `providers`, every `sources` group, and `commands` resolve today. |
-| DOC6-39 | Implemented in this pass | So do the pane, band, key, theme, alert, speech, refresh, cache, timeout, limit, history, progress, and mod groups. |
+| DOC6-39 | Implemented in this pass | So do the pane, band, key, theme, alert, speech, refresh, cache, timeout, limit, history, and mod groups. |
 | DOC6-40 | Implemented in this pass | A field outside the schema is refused as an unknown key rather than ignored, so a typed key cannot silently do nothing. |
 | DOC6-65 | Implemented in this pass | Every key in the tables below is in the schema, so this document and that file now describe the same configuration. |
 | DOC6-75 | Implemented in this pass | A setting nothing read is retired from the schema rather than kept as a promise: `commands.python`, the `controller` and `labels` groups, two band reserves, two theme maps and `theme.running`, the speech sample folder, three timeouts, the worktree worker count, a progress staleness, and the `statusline` group. A document that still sets one is refused by name as an unknown key. |
@@ -47,7 +47,6 @@
 | ID | Context | Statement or required action |
 | --- | --- | --- |
 | DOC6-41 | Resolution output | Resolution is pure apart from one injected path probe, so a result can be asserted without a machine that has provider homes. |
-| DOC6-85 | Pause markers | `paused_when_exists` accepts `~` or `~/` expanded from `HOME` (also a backslash separator on Windows), declared environment variables, absolute paths, or paths relative to the configuration file. A disabled source stays disabled. Required target settings remain required; an existing marker is checked before probing those targets. Removing the marker resumes the next read. |
 | DOC6-42 | Resolution output | `sources.jobs.providers` and `sources.interactive.providers` list ready identifiers only. |
 | DOC6-43 | Resolution output | A refusal carries every error as a code and a field path, sorted by path then code. Message text is not part of the contract. |
 
@@ -56,7 +55,6 @@
 | State | Meaning |
 | --- | --- |
 | `disabled` | The configuration switched the source off. No work is attempted, and no path is probed. |
-| `paused` | An enabled progress or trials source has an existing pause marker. No source data is read; cached rows are replaced by a paused line. |
 | `unconfigured` | The source is enabled, but no provider home is ready to read. |
 | `unavailable` | The source is enabled and configured, but its target is missing or is the wrong kind. |
 | `ready` | The source is enabled, configured, and present. |
@@ -76,7 +74,7 @@
 | DOC6-47 | Recorded decisions | An absent file at the default location uses the declared defaults. |
 | DOC6-48 | Recorded decisions | A file named by the selector that is absent, unreadable, or not a regular file is an error, never a silent fall back to defaults. |
 | DOC6-49 | Recorded decisions | Legacy environment overrides are recorded in the schema and never read: their precedence is undecided, so setting one changes nothing. |
-| DOC6-50 | Recorded decisions | A value may reference `HOME` and the declared XDG variables. Tilde expansion is allowed only for `paused_when_exists`; other fields refuse it. Shell expressions, undeclared names, and unset variables are refused. |
+| DOC6-50 | Recorded decisions | A value may reference `HOME` and the declared XDG variables. Tilde expansion applies only to a field the schema marks `expandHome`, and no field declares it, so a path that begins with `~` is refused. Shell expressions, undeclared names, and unset variables are refused. |
 | DOC6-51 | Recorded decisions | Paths resolve lexically against the config file's directory. Nothing is required to exist, and no symlink is followed. |
 | DOC6-52 | Recorded decisions | `commands.cleanup` and `commands.skillReport` entries are literal argv; no variable expansion is applied to them. |
 | DOC6-53 | Recorded decisions | An enabled source missing a required field is refused at load time, before any reader runs. |
@@ -123,15 +121,6 @@
 | `sources.prs.repositories` | string array | Two personal repository defaults; `FLEET_REPOS` override | `[]`; enabled with no repositories is a config error. `@me` adds every repository holding an open pull request the signed-in account authored, found by search and read for that author's pull requests only |
 | `sources.prs.limit` | positive integer | 30 open pull requests per repository | 30; the cap on rows one repository may contribute |
 | `sources.prs.checkRunLimit` | integer, 0 to 100 | Not present | 12; the checks a pull request row lists one by one in `check_runs`. Past it the failing checks are kept first, then the pending ones, and `check_runs_more` counts the rest |
-| `sources.trials.enabled` | boolean | Reads controller store when present | `false`; optional adapter |
-| `sources.trials.database` | path or null | Local controller database; `FLEET_CHANGE_DB` override | `null`; required when trials enabled |
-| `sources.trials.paused_when_exists` | path or null | Optional pause marker | `null`; absent means never paused. Checked on every read before opening the database, including lease lookups. |
-| `sources.trials.stages` | string array | Not present | `NEW,PLANNED,TRIALED,PUSHED,MERGED,PUBLISHED,VERIFIED,CLEANUP_ELIGIBLE,CLEANED`: the controller's stage path. A change not at the last stage that moved within `history.trialsSeconds` is drawn in flight with a bar of its place on the path; a state the path does not name keeps its row without a bar |
-| `sources.trials.offSwitch` | path or null | Not present | `null`: the older marker, whose presence switches the change controller off. Read only when no governance switch path is configured; with one, the controller's boolean in that document decides |
-| `sources.progress.enabled` | boolean | Reads shared governor files | `false` |
-| `sources.progress.directory` | path or null | Personal tooling state path; `FLEET_PROGRESS_DIR` override | `null`; required when progress enabled |
-| `sources.progress.offSwitch` | path or null | Not present | `null`: the older marker for the governor, on the same terms as `sources.trials.offSwitch`; the governance document's governor boolean decides when one is configured |
-| `sources.progress.paused_when_exists` | path or null | Optional pause marker | `null`; absent means never paused. Checked on every read before inspecting the run directory. |
 | `sources.worktrees.enabled` | boolean | Cached rows, fresh probe on section opening | `false` |
 | `sources.worktrees.roots` | path array | One personal worktree root; `FLEET_WORKTREES_DIR` override | `[]`; required when enabled |
 | `sources.worktrees.baseRef` | non-empty string | A personal branch name, hardcoded in the preserved-branch helper | `origin/main`; the reference a worktree branch is compared with |
@@ -141,11 +130,8 @@
 | `sources.load.top` | integer, 1 to 50 | None | `6`; how many processes are drawn from the top of the CPU list and how many from the top of the memory list, once each |
 | `sources.load.command` | argv array or null | The platform's own listing (`ps` on macOS and Linux) | `null`; a command printing pid, CPU percent, resident kilobytes, elapsed time and command per line, in place of the platform's own |
 | `sources.agents.enabled` | boolean | None; a background session row carried no figures of its own | `true`; each roster session's transcript and task list are read for its card, and no ready provider means unconfigured |
-| `sources.governance.enabled` | boolean | Not present | `false`; draws the machine's governor and controller switch, and the band button that moves both |
-| `sources.governance.switchPath` | path or null | Not present | `null`; the switch document the tooling writes. A machine with no path reads `unconfigured` and draws nothing |
-| `sources.governance.switchCommand` | argv array or null | Not present | `null`; the command a press runs, given the word `on` or `off` and then the scope. With none, the section is read-only |
 | `sources.pacer.enabled` | boolean | Not present | `false`; read the machine's run slots through pacer. Switched on, it needs `sources.pacer.command`, and is refused by name without one |
-| `sources.pacer.command` | argv array or null | Not present | `null`; pacer's own command. The read runs it with `status --json` and draws what it prints: the switch, each slot and the repository holding it, and, from the pacer version that records them, the callers waiting for a slot (`waiting`) and the runs that finished (`recent`). A field pacer did not send is drawn as not reported, never as nobody. The band's gear runs it with `on` or `off` and reads the status again. A command that is not on the PATH is unavailable; one that exits nonzero, overruns `timeouts.commandSeconds`, prints more than `limits.jobStateBytes` or prints anything but that object is failed and names why |
+| `sources.pacer.command` | argv array or null | Not present | `null`; pacer's own command. The read runs it with `status --json` and draws what it prints: the switch and its source, the machine's settings (slots, workers per run, qos, nice), each slot and the repository holding it with the time it started, the callers waiting for a slot (`waiting`), the runs that finished (`recent`), and the processes running outside the slots (`outside`). A run pacer refused is raised on the band; one that failed inside a slot is the pane's row alone. A field pacer did not send is drawn as not reported, never as nobody. The band's gear runs it with `on` or `off` and reads the status again. A command that is not on the PATH is unavailable; one that exits nonzero, overruns `timeouts.commandSeconds`, prints more than `limits.jobStateBytes` or prints anything but that object is failed and names why, and a refusal it states is drawn as that refusal |
 | `sources.statusline.enabled` | boolean | Separate renderer installed through host settings | `false`; switches the session's own figures on, which the pane reads from the payload the renderer last wrote |
 | `sources.statusline.payload` | path | None; the renderer had nowhere to record what the host handed it | `null`; read rather than written by this repository. A path holding `{session}` is filled with this session's identifier, so one renderer serving many sessions writes a file each and a pane reads its own; with no identifier that path reads `unavailable` rather than another session's figures. A source with none of this, `sessionCosts` or `codexSessions` reads `unavailable` |
 | `sources.statusline.sessionCosts` | path or null | None | `null`: the folder where the status line keeps one priced-spend file per routed session (`<provider>-session-<identifier>.json`). Read for a session whose model is not Claude, whose cost the host's own table does not describe; the file's `usage.cost` is drawn and marked as priced from the transcript |
@@ -171,17 +157,17 @@
 | ID | Context | Statement or required action |
 | --- | --- | --- |
 | DOC6-55 | Sections, layout, and keys | Every group from here down is in the schema, with the defaults this document proposes. |
-| DOC6-56 | Sections, layout, and keys | `pane.sections` is a record per section, so a document can set one section without restating the other seven. |
-| DOC6-66 | Sections, layout, and keys | `pane.sectionOrder` accepts any subset of the twelve section identifiers, rejects one that is not declared, and rejects a repeat. |
+| DOC6-56 | Sections, layout, and keys | `pane.sections` is a record per section, so a document can set one section without restating the other eight. |
+| DOC6-66 | Sections, layout, and keys | `pane.sectionOrder` accepts any subset of the nine section identifiers, rejects one that is not declared, and rejects a repeat. |
 | DOC6-67 | Sections, layout, and keys | `keys.close`, `keys.collapse`, and `keys.expand` must differ from one another and may not be a digit, because the pane folds its sections with the digits. |
 | DOC6-68 | Sections, layout, and keys | A color is a declared token, and an alert tint is three bytes from 0 to 255. |
-| DOC6-70 | Sections, layout, and keys | The pane draws the order and the folds `pane.sectionOrder` and `pane.sections` resolve to, which the read command prints as a `pane` document with the reading: a plugin has no file of its own to read, so this is how an edited file reaches it. An empty `sectionOrder` is a pane with no sections rather than all ten. A document that is not a resolved configuration, or that names a section whose choice is not two booleans, is refused whole and the packaged default stands. A press outranks the configuration, is kept on the host's session state so a hot reload survives it, and in the plugin's store so the next session opens with the folds the person left; a session's own folds outrank the stored ones, and a store that refuses the save is said once in a toast. A press writes only the sections it named, over what the session and the store hold, so one load of a session never writes its whole picture over another's press; the store has no compare-and-set, so two sessions saving in the same moment can leave the earlier fold for the next session. `/worktrees` and `/keys` open the pane on that one section with every other folded, and a second run closes it; `/worktrees` also has the next look probe every worktree now (`--refresh-worktrees`). The key tip after the hint line rotates through `keys.tips` every `refresh.keyTipMs` while a draft is typed, and `/keys tips off` or `on` keeps the person's own word in the store; either that word or `keys.tipsEnabled` off is off. |
+| DOC6-70 | Sections, layout, and keys | The pane draws the order and the folds `pane.sectionOrder` and `pane.sections` resolve to, which the read command prints as a `pane` document with the reading: a plugin has no file of its own to read, so this is how an edited file reaches it. An empty `sectionOrder` is a pane with no sections rather than all nine. A document that is not a resolved configuration, or that names a section whose choice is not two booleans, is refused whole and the packaged default stands. A press outranks the configuration, is kept on the host's session state so a hot reload survives it, and in the plugin's store so the next session opens with the folds the person left; a session's own folds outrank the stored ones, and a store that refuses the save is said once in a toast. A press writes only the sections it named, over what the session and the store hold, so one load of a session never writes its whole picture over another's press; the store has no compare-and-set, so two sessions saving in the same moment can leave the earlier fold for the next session. `/worktrees` and `/keys` open the pane on that one section with every other folded, and a second run closes it; `/worktrees` also has the next look probe every worktree now (`--refresh-worktrees`). The key tip after the hint line rotates through `keys.tips` every `refresh.keyTipMs` while a draft is typed, and `/keys tips off` or `on` keeps the person's own word in the store; either that word or `keys.tipsEnabled` off is off. |
 
 | Proposed key | Type | Existing value | Proposed default / absence |
 | --- | --- | --- | --- |
-| `pane.sectionOrder` | section ID array | `sessions,session,trials,prs,warnings,worktrees,skills,running,load,keys,governance` | `load,prs,sessions,trials,running,session,pacer,worktrees,skills,warnings,governance,keys`: the machine's load first, then pull requests and the rest by how much each needs a person, with pacer's run slots directly below this session, with the machine's switches just above the keys; reject duplicates and unknown IDs |
+| `pane.sectionOrder` | section ID array | `sessions,session,pacer,prs,warnings,worktrees,skills,load,keys` | `load,prs,sessions,session,pacer,worktrees,skills,warnings,keys`: the machine's load first, then pull requests and the rest by how much each needs a person, with pacer's run slots directly below this session; reject duplicates and unknown IDs |
 | `pane.sections.<id>.title` | non-empty string | Section names as the pane draws them | Packaged names; a section the document renames carries the new name on its heading |
-| `pane.sections.<id>.visible` | boolean | All ten rendered | `true`; hidden source failures still reach header |
+| `pane.sections.<id>.visible` | boolean | All nine rendered | `true`; hidden source failures still reach header |
 | `pane.sections.<id>.collapsed` | boolean | Worktrees, skills, keys collapsed | Same per-section defaults |
 | `pane.sections.<id>.legend` | string | Fixed explanations of state and automatic behavior | Packaged neutral legends; no claims about unconfigured cleanup |
 | `pane.sections.<id>.hideWhenEmpty` | boolean | Not present | `false`, and `true` for warnings: the section is left out while it has no rows and its source is not failed, unavailable or stale |
@@ -232,7 +218,7 @@ A command that is not on the PATH reads as unavailable; one that exits nonzero, 
 ```json
 {
   "pane": {
-    "sectionOrder": ["prs", "custom:deploys", "sessions", "trials", "running", "session",
+    "sectionOrder": ["prs", "custom:deploys", "sessions", "session", "pacer",
                      "worktrees", "skills", "warnings", "keys"],
     "custom": {
       "deploys": {
@@ -289,7 +275,7 @@ A command that is not on the PATH reads as unavailable; one that exits nonzero, 
 | Proposed key | Type | Existing value / proposed default |
 | --- | --- | --- |
 | `refresh.snapshotMs` | milliseconds | 3000: how often each session looks at the reading every session shares; the machine is read only when that reading is older than `cache.snapshotSeconds` |
-| `refresh.progressMs` | milliseconds | 1000: how old a live governor run's counts may get while a pane shows them |
+| `refresh.liveMs` | milliseconds | 1000: how old pacer's slots may get while an open pane shows one busy, a caller waiting, or heavy work running outside them; the look then reads that one source (`--only pacer`) on its own and keeps it under its own key |
 | `refresh.clockMs` | milliseconds | 1000: how often an open pane is drawn with nothing new, so its ages and run times count up between readings |
 | `refresh.streamStepMs` | milliseconds | 150: how far apart the sections a new reading changed land on the pane; the first lands at once and the rest follow it down |
 | `refresh.keyTipMs` | milliseconds | 30000, only with prompt text |
@@ -298,9 +284,7 @@ A command that is not on the PATH reads as unavailable; one that exits nonzero, 
 | `timeouts.commandSeconds` | seconds | 8 |
 | `timeouts.worktreeProbeSeconds`, `timeouts.liveHoldersSeconds` | seconds | 8, 5 |
 | `timeouts.gitSeconds` | seconds | 2 |
-| `timeouts.trialDatabaseSeconds`, `timeouts.leaseDatabaseSeconds` | seconds | 5, 1 |
 | `timeouts.synthesisMs`, `timeouts.tabCommandMs` | milliseconds | 30000, 5000 |
-| `history.trialsSeconds`, `history.cleanedSeconds` | seconds | 43200, 604800 |
 | `history.finishedJobSeconds`, `history.finishedJobLimit` | seconds, integer | 86400, 8 |
 | `history.spendWindowHours`, `history.spendBucketMinutes` | hours 1 to 168, minutes 1 to 1440 | 24, 60; the stretch the roster's `spend_series` and each agent's `timeline` cover, and the minutes one spend bucket holds. The series is the window rounded up to whole buckets |
 | `history.timelineIdleMinutes`, `history.timelineSegmentLimit` | positive integers | 5, 48; a gap between two transcript records longer than the first ends a working segment, and past the second the oldest segments are merged into one working segment |
@@ -324,8 +308,6 @@ A command that is not on the PATH reads as unavailable; one that exits nonzero, 
 | `limits.skillItems`, `history.skillNoticeDays` | positive integers | 10, 7 |
 | `limits.skillScanBytes` | positive integer | 16777216; a scan summary larger than this, or one that is not JSON, is named in the warnings rather than drawn as a scan that found nothing |
 | `refresh.skillStaleSeconds` | seconds | 900 |
-| `progress.etaMinimumOutcomes` | positive integer | 20 |
-| `progress.runCeilingSeconds`, `progress.waitStaleSeconds` | seconds | 21600, 75 |
 
 | ID | Context | Statement or required action |
 | --- | --- | --- |

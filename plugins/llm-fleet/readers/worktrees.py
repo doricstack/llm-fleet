@@ -14,11 +14,9 @@ is a stale row and not a fresh one.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 from pathlib import Path
-import sqlite3
 import subprocess
 import time
 from typing import Any, Mapping
@@ -300,95 +298,6 @@ def repo_facts(config: Mapping[str, Any], root: Path,
             "archive": hashlib.sha256(refs.encode("utf-8")).hexdigest()}
 
 
-def change_facts(config: Mapping[str, Any], path: Path, branch: str,
-                 environment: Mapping[str, str],
-                 known: dict[str, str] | None = None) -> dict[str, Any]:
-    """What the controller store knows about this worktree, when it can answer.
-
-    The worktree path is part of the match, so a change belonging to another
-    worktree of the same branch is never reported as this one's.
-
-    `known` carries the remote and root commit this repository's worktrees
-    answered before. A remote is one value for the whole repository. A root
-    commit is one value per branch history, so the first tree's answer is kept
-    for the rest: a worktree whose branch carries an unrelated history of its
-    own would miss the change store rather than be given another branch's, which
-    is the direction that cannot claim someone else's change.
-    """
-    source = config["sources"]["trials"]
-    if not source["enabled"] or not source["database"]:
-        return {}
-    database = Path(source["database"])
-    if not database.is_file():
-        return {}
-    if known is not None and known.get("remote") and known.get("root"):
-        remote, root = known["remote"], known["root"]
-    else:
-        seconds = float(config["timeouts"]["gitSeconds"])
-        try:
-            code, remote, _ = git(["config", "--get", "remote.origin.url"], path, seconds,
-                                  environment)
-            if code != 0 or not remote:
-                return {}
-            code, roots, _ = git(["rev-list", "--max-parents=0", "HEAD"], path, seconds,
-                                 environment)
-            if code != 0 or not roots:
-                return {}
-        except ReaderFailure as failure:
-            return {"error": str(failure)}
-        root = sorted(roots.splitlines())[-1]
-        if known is not None:
-            known["remote"], known["root"] = remote, root
-    timeout = float(config["timeouts"]["trialDatabaseSeconds"])
-    try:
-        with sqlite3.connect("file:{0}?mode=ro".format(database), uri=True,
-                             timeout=timeout) as connection:
-            connection.row_factory = sqlite3.Row
-            found = connection.execute(
-                "SELECT * FROM repos WHERE remote_url=? AND root_oid=?",
-                (remote, root)).fetchone()
-            if found is None:
-                return {}
-            change = connection.execute(
-                "SELECT * FROM changes WHERE branch=? AND worktree_path=? "
-                "ORDER BY rowid DESC LIMIT 1", (branch, str(path))).fetchone()
-            if change is None:
-                return {}
-            owner = None
-            updated = None
-            identifier = change["change_id"] if "change_id" in change.keys() else None
-            if identifier is not None:
-                milestone = connection.execute(
-                    "SELECT session, created_at FROM milestones WHERE change_id=? "
-                    "ORDER BY created_at DESC LIMIT 1", (identifier,)).fetchone()
-                if milestone is not None:
-                    owner, updated = milestone["session"], milestone["created_at"]
-    except (sqlite3.Error, OSError) as caught:
-        return {"error": "change store unavailable: {0}".format(caught)}
-    return {"state": change["state"], "owner": owner, "updated_at": updated}
-
-
-def cleaned_count(config: Mapping[str, Any], now: float) -> int | None:
-    """How many worktrees were cleaned inside the retention window, or None."""
-    source = config["sources"]["trials"]
-    if not source["enabled"] or not source["database"]:
-        return None
-    database = Path(source["database"])
-    if not database.is_file():
-        return None
-    window = float(config["history"]["cleanedSeconds"])
-    timeout = float(config["timeouts"]["trialDatabaseSeconds"])
-    try:
-        with sqlite3.connect("file:{0}?mode=ro".format(database), uri=True,
-                             timeout=timeout) as connection:
-            row = connection.execute(
-                "SELECT COUNT(*) FROM milestones WHERE to_state=? AND created_at >= ? "
-                "AND created_at <= ?", ("CLEANED", now - window, now)).fetchone()
-    except (sqlite3.Error, OSError):
-        return None
-    return int(row[0]) if row else 0
-
-
 # The platform the cleanup command is offered for, read at the call so a test
 # can stand in for another one.
 PLATFORM = os.name
@@ -439,8 +348,7 @@ def cleanup_command(config: Mapping[str, Any], path: Path, branch: str,
 def probe_worktree(config: Mapping[str, Any], path: Path,
                    environment: Mapping[str, str],
                    folders: list[tuple[str, str]] | None = None,
-                   proved: Mapping[str, Any] | None = None,
-                   change_cache: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:
+                   proved: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Everything one worktree can be asked, with what could not be proved named.
 
     `merged` is True, False or None. None is unknown: a detached checkout, a
@@ -532,9 +440,14 @@ def probe_worktree(config: Mapping[str, Any], path: Path,
         # it lists a ref whose commits it could not read as one holding the branch.
         archived: bool | None = bool(refs) if code == 0 and not warned else None
         if archived is None:
+            # What git said is carried whether the build warns and exits 0 or
+            # calls the damage fatal and exits 128, since the reader's answer is
+            # the same unknown and the words are the only thing that says why.
             why = ("git for-each-ref exited {0}".format(code) if code != 0
-                   else "git for-each-ref reported: " + first_line(warned))
-            notes.append("cannot tell whether {0} is archived: {1}".format(body["branch"], why))
+                   else "git for-each-ref reported")
+            said = first_line(warned)
+            notes.append("cannot tell whether {0} is archived: {1}{2}"
+                         .format(body["branch"], why, ": " + said if said else ""))
     # A holder is answered from the paths read once for the sweep, which hold
     # the file every process has open as well as its working folder, so the row
     # that offers to remove a worktree is as sure as the one beside it.
@@ -546,13 +459,6 @@ def probe_worktree(config: Mapping[str, Any], path: Path,
     elif holders:
         notes.append("held by " + ", ".join(holders[:3]))
     key = str(body.get("project_root") or path)
-    known = change_cache.setdefault(key, {}) if change_cache is not None else None
-    facts = change_facts(config, path, body["branch"], environment, known)
-    body["change_state"] = facts.get("state")
-    body["change_owner"] = facts.get("owner")
-    body["change_updated_at"] = facts.get("updated_at")
-    if facts.get("error"):
-        notes.append(printable(facts["error"]))
     if notes:
         body["error"] = "; ".join(notes)
     if body["held"] is None:
@@ -648,8 +554,7 @@ def read_worktrees(config: Mapping[str, Any], *, environ: Mapping[str, str] | No
     source = config["sources"]["worktrees"]
     clock = float(now) if now is not None else time.time()
     errors: list[dict[str, str]] = []
-    result: dict[str, Any] = {"state": "disabled", "worktrees": [], "cleaned": None,
-                              "errors": errors}
+    result: dict[str, Any] = {"state": "disabled", "worktrees": [], "errors": errors}
     if not source["enabled"]:
         return result
     environment = child_environment(config["runtime"]["childEnvironment"],
@@ -664,7 +569,6 @@ def read_worktrees(config: Mapping[str, Any], *, environ: Mapping[str, str] | No
              and 0 <= clock - float(cached["at"]) < ttl)
     if fresh and not refresh:
         result["worktrees"] = cached.get("worktrees", [])
-        result["cleaned"] = cached.get("cleaned")
         result["state"] = "ready" if result["worktrees"] else "empty"
         for entry in cached.get("errors", []):
             if isinstance(entry, Mapping):
@@ -713,7 +617,6 @@ def read_worktrees(config: Mapping[str, Any], *, environ: Mapping[str, str] | No
         rows: list[dict[str, Any]] = []
         probes: dict[str, dict[str, str]] = {}
         repos: dict[str, dict[str, str] | None] = {}
-        change_repos: dict[str, dict[str, str]] = {}
         # A worktree folder that is a link is where somebody may be working, and
         # a tool reports its target. Those spellings are handed to the pass, so
         # a process there is not dropped before its row is asked.
@@ -731,7 +634,7 @@ def read_worktrees(config: Mapping[str, Any], *, environ: Mapping[str, str] | No
             proved = _proved_row(config, previous.get(key), here, standing.get(key), repos,
                                  environment)
             try:
-                row = probe_worktree(config, path, environment, folders, proved, change_repos)
+                row = probe_worktree(config, path, environment, folders, proved)
             except ReaderFailure as failure:
                 rows.append(_keep_previous(previous.get(key), key, printable(path.name),
                                            str(failure), clock))
@@ -750,13 +653,11 @@ def read_worktrees(config: Mapping[str, Any], *, environ: Mapping[str, str] | No
                 if facts is not None:
                     probes[key] = facts
         result["worktrees"] = rows
-        result["cleaned"] = cleaned_count(config, clock)
         result["state"] = "ready" if rows else "empty"
         if cache_path is not None:
             try:
                 write_private_json(cache_path, {"at": clock, "worktrees": rows,
-                                                "cleaned": result["cleaned"], "errors": errors,
-                                                "probes": probes})
+                                                "errors": errors, "probes": probes})
             except OSError:
                 errors.append({"source": "worktrees", "reason": "cache was not written"})
         return result

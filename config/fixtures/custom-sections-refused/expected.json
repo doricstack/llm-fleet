@@ -22,7 +22,7 @@
     },
     {
       "code": "E_CONFIG_VALUE",
-      "path": "pane.sections.trials.maxRows"
+      "path": "pane.sections.skills.maxRows"
     }
   ]
 }

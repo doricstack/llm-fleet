@@ -66,7 +66,7 @@ class SnapshotCase(unittest.TestCase):
         self.assertNotIn("Traceback", completed.stderr)
         self.assertEqual(completed.returncode, 0, completed.stderr[-400:])
         document = json.loads(completed.stdout)
-        for name in ("generated_at", "roster", "trials", "progress", "prs", "skills", "worktrees",
+        for name in ("generated_at", "roster", "prs", "skills", "worktrees",
                      "load"):
             self.assertIn(name, document)
         self.assertEqual(document["generated_at"], 1_700_000_000.0)
@@ -74,17 +74,17 @@ class SnapshotCase(unittest.TestCase):
     def test_every_document_is_present_when_everything_is_off(self):
         result = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0)
         self.assertEqual(sorted(result), ["alerts", "band", "custom", "events", "generated_at",
-                                          "governance", "load", "pacer", "pane", "progress", "prs", "roster",
-                                          "session", "skills", "trials", "worktrees"])
+                                          "load", "pacer", "pane", "prs", "roster",
+                                          "session", "skills", "worktrees"])
         # Nothing was read, so the digest holds nothing and says which sources
         # it could not see.
         self.assertEqual(result["events"], {
             "state": "empty", "events": [], "errors": [],
-            "sources": {"trials": "disabled", "prs": "disabled", "roster": "unavailable"}})
+            "sources": {"prs": "disabled", "roster": "unavailable"}})
         # The job roster is on by default, so with no provider home configured it
         # is unavailable rather than switched off; the rest are off by default.
         self.assertEqual(result["roster"]["state"], "unavailable")
-        for name in ("trials", "progress", "prs", "skills", "worktrees", "load", "pacer", "custom"):
+        for name in ("prs", "skills", "worktrees", "load", "pacer", "custom"):
             self.assertEqual(result[name]["state"], "disabled", name)
             self.assertEqual(result[name]["errors"], [], name)
 
@@ -98,8 +98,8 @@ class SnapshotCase(unittest.TestCase):
         # Pull requests lead, and the rest follow by how much they need a
         # person; the warnings come last and keep out of sight while empty.
         self.assertEqual(pane["order"],
-                         ["load", "prs", "sessions", "trials", "running", "session", "pacer",
-                          "worktrees", "skills", "warnings", "governance", "keys"])
+                         ["load", "prs", "sessions", "session", "pacer",
+                          "worktrees", "skills", "warnings", "keys"])
         self.assertEqual(pane["sections"]["warnings"]["hideWhenEmpty"], True)
         self.assertEqual(pane["sections"]["prs"]["hideWhenEmpty"], False)
         worktrees = pane["sections"]["worktrees"]
@@ -169,7 +169,7 @@ class SnapshotCase(unittest.TestCase):
         alerts = snapshot.read_snapshot(config, now=1_700_000_000.0)["alerts"]
         self.assertEqual(alerts, {"state": "ready", "toast": False, "notify": False,
                                   "toastMs": 1500, "snapshotMs": 45000, "synthesisMs": 9000,
-                                  "snapshotSeconds": 20, "progressMs": 1000,
+                                  "snapshotSeconds": 20, "liveMs": 1000,
                                   "copyToastMs": 6000,
                                   "tabTint": {"enabled": True, "staleSeconds": 120},
                                   "tabCommandMs": 5000, "keyTipMs": 30000,
@@ -180,12 +180,12 @@ class SnapshotCase(unittest.TestCase):
         # is read when that reading is older than its cache allows.
         self.assertEqual((defaults["toast"], defaults["notify"], defaults["toastMs"],
                           defaults["snapshotMs"], defaults["synthesisMs"],
-                          defaults["snapshotSeconds"], defaults["progressMs"]),
+                          defaults["snapshotSeconds"], defaults["liveMs"]),
                          (True, True, 8000, 3000, 30000, 20, 1000))
         tuned = snapshot.read_snapshot(self.config({"cache": {"snapshotSeconds": 45},
-                                                    "refresh": {"progressMs": 2500}}),
+                                                    "refresh": {"liveMs": 2500}}),
                                        now=1_700_000_000.0)["alerts"]
-        self.assertEqual((tuned["snapshotSeconds"], tuned["progressMs"]), (45, 2500))
+        self.assertEqual((tuned["snapshotSeconds"], tuned["liveMs"]), (45, 2500))
         # How often an open pane is drawn so its ages count, and how far apart a
         # new reading's changed sections land, reach the plugin only this way.
         paced = snapshot.read_snapshot(self.config({"refresh": {"clockMs": 500,
@@ -236,7 +236,7 @@ class SnapshotCase(unittest.TestCase):
             raise AssertionError("a reader ran during the settings read")
 
         snapshot.READERS.clear()
-        snapshot.READERS.update({"worktrees": refuses, "trials": refuses})
+        snapshot.READERS.update({"worktrees": refuses, "pacer": refuses})
         try:
             config = self.config({"timeouts": {"helperMs": 4000, "worktreeHelperMs": 90000}})
             read = snapshot.read_snapshot(config, now=1_700_000_000.0, settings=True)
@@ -274,7 +274,7 @@ class SnapshotCase(unittest.TestCase):
             return {"state": "empty"}
 
         snapshot.READERS.clear()
-        snapshot.READERS.update({"worktrees": worktrees, "trials": other})
+        snapshot.READERS.update({"worktrees": worktrees, "pacer": other})
         try:
             snapshot.read_snapshot(self.config({}), now=1_700_000_000.0)
             self.assertEqual(seen, {"worktrees": {"refresh": False}, "other": {"refresh": False}})
@@ -303,7 +303,7 @@ class SnapshotCase(unittest.TestCase):
         self.assertEqual((tuned["hiddenLimit"], tuned["waitingJobSeconds"]), (7, 600))
         # A read of one source alone is merged into a whole reading and carries
         # no configuration, as the pane's and the alerts' do not.
-        alone = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0, only=["progress"])
+        alone = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0, only=["pacer"])
         self.assertNotIn("band", alone)
 
     def test_an_empty_section_order_travels_as_the_empty_order_it_is(self):
@@ -320,8 +320,8 @@ class SnapshotCase(unittest.TestCase):
                           "legend": None, "hideWhenEmpty": False, "maxRows": None})
 
     def test_a_section_s_row_limit_travels_with_the_reading(self):
-        pane = snapshot.pane_document(self.config({"pane": {"sections": {"trials": {"maxRows": 3}}}}))
-        self.assertEqual(pane["sections"]["trials"]["maxRows"], 3)
+        pane = snapshot.pane_document(self.config({"pane": {"sections": {"skills": {"maxRows": 3}}}}))
+        self.assertEqual(pane["sections"]["skills"]["maxRows"], 3)
         # Every other section keeps the declared default.
         self.assertEqual(pane["sections"]["prs"]["maxRows"], 8)
         self.assertEqual(pane["sections"]["warnings"]["maxRows"], 8)
@@ -378,7 +378,7 @@ class SnapshotCase(unittest.TestCase):
             return {"state": "ready"}
 
         snapshot.READERS.clear()
-        snapshot.READERS.update({"roster": plain, "trials": clocked, "skills": located})
+        snapshot.READERS.update({"roster": plain, "pacer": clocked, "skills": located})
         try:
             result = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0)
         finally:
@@ -386,7 +386,7 @@ class SnapshotCase(unittest.TestCase):
             snapshot.READERS.update(original)
         self.assertEqual(seen, [{}, {"now": 1_700_000_000.0},
                                 {"now": 1_700_000_000.0, "home": "None"}])
-        for name in ("roster", "trials", "skills"):
+        for name in ("roster", "pacer", "skills"):
             self.assertEqual(result[name]["state"], "ready", name)
         # A home the caller named is the one the reader receives, so the path a
         # row displays is shortened against what the caller asked for rather than
@@ -409,54 +409,40 @@ class SnapshotCase(unittest.TestCase):
         original = dict(snapshot.READERS)
 
         def explode(config, **kwargs):
-            raise RuntimeError("the store moved")
+            raise RuntimeError("the status moved")
 
-        snapshot.READERS["trials"] = explode
+        snapshot.READERS["pacer"] = explode
         try:
             result = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0)
         finally:
             snapshot.READERS.clear()
             snapshot.READERS.update(original)
-        self.assertEqual(result["trials"]["state"], "failed")
-        self.assertEqual(result["trials"]["running"], [])
-        self.assertEqual(result["trials"]["errors"],
-                         [{"source": "trials", "reason": "RuntimeError: the store moved"}])
+        self.assertEqual(result["pacer"]["state"], "failed")
+        self.assertEqual(result["pacer"]["slots"], [])
+        self.assertEqual(result["pacer"]["errors"],
+                         [{"source": "pacer", "reason": "RuntimeError: the status moved"}])
         # The other documents are untouched by one reader failing.
         self.assertEqual(result["prs"]["state"], "disabled")
 
     def test_a_failing_document_still_carries_the_keys_a_view_model_reads(self):
-        for name in ("roster", "trials", "progress", "prs", "skills", "worktrees", "custom"):
+        for name in ("roster", "prs", "skills", "worktrees", "custom"):
             body = snapshot.failed(name, "for this test")
             self.assertEqual(body["state"], "failed", name)
             self.assertEqual(body["errors"], [{"source": name, "reason": "for this test"}], name)
         self.assertEqual(snapshot.failed("roster", "x")["interactive"], {})
         self.assertEqual(snapshot.failed("skills", "x")["running"], None)
-        self.assertIsNone(snapshot.failed("worktrees", "x")["cleaned"])
         # A custom document holds its sections by name, so a failed one holds none.
         self.assertEqual(snapshot.failed("custom", "x")["sections"], {})
 
-    def test_a_real_bad_store_fails_the_source_without_taking_the_document_away(self):
-        broken = self.root / "changes.db"
-        broken.write_text("this is not a database", encoding="utf-8")
-        config = self.config({"sources": {"trials": {"enabled": True, "database": str(broken)}}})
+    def test_a_real_bad_command_fails_the_source_without_taking_the_document_away(self):
+        broken = self.root / "pacer-broken"
+        broken.write_text("not a program", encoding="utf-8")
+        config = self.config({"sources": {"pacer": {"enabled": True,
+                                                    "command": [str(broken)]}}})
         result = snapshot.read_snapshot(config, now=1_700_000_000.0)
-        self.assertEqual(result["trials"]["state"], "failed")
-        self.assertEqual(len(result["trials"]["errors"]), 1)
+        self.assertEqual(result["pacer"]["state"], "failed")
+        self.assertEqual(len(result["pacer"]["errors"]), 1)
         self.assertEqual(result["prs"]["state"], "disabled")
-
-    def test_a_readable_machine_reports_rows(self):
-        database = self.root / "changes.db"
-        with sqlite3.connect(database) as connection:
-            connection.executescript(STORES)
-            connection.execute("INSERT INTO repos VALUES (1, ?, ?)",
-                               ("https://example.invalid/owner/example-repo.git", "abc"))
-            connection.execute("INSERT INTO changes VALUES (1, 1, 'feat/one', 'TRYING', NULL)")
-            connection.execute("INSERT INTO leases VALUES (1, 'codex', ?, 'abcdef12-rest')",
-                               (1_700_000_100.0,))
-        config = self.config({"sources": {"trials": {"enabled": True, "database": str(database)}}})
-        result = snapshot.read_snapshot(config, now=1_700_000_000.0)
-        self.assertEqual(result["trials"]["state"], "ready")
-        self.assertEqual([lease["branch"] for lease in result["trials"]["running"]], ["feat/one"])
 
     def test_the_command_prints_one_object_and_succeeds(self):
         self.config({"providers": []})
@@ -467,10 +453,10 @@ class SnapshotCase(unittest.TestCase):
         self.assertEqual(document["generated_at"], 1_700_000_000.0)
 
     def test_a_read_of_one_source_runs_that_reader_alone(self):
-        # The pane asks for the governor's counts every few seconds while a run
-        # is live. A read that ran every reader for that would ask the pull
-        # request host and every worktree each time, so the other readers are
-        # not run at all: a reader that would raise is never reached.
+        # The pane asks for pacer's slots every second while the machine is
+        # busy. A read that ran every reader for that would ask the pull request
+        # host and every worktree each time, so the other readers are not run at
+        # all: a reader that would raise is never reached.
         original = dict(snapshot.READERS)
         called: list[str] = []
 
@@ -478,31 +464,31 @@ class SnapshotCase(unittest.TestCase):
             raise AssertionError("a reader nobody asked for was run")
 
         for name in snapshot.READERS:
-            if name != "progress":
+            if name != "pacer":
                 snapshot.READERS[name] = explode
-        real = original["progress"]
+        real = original["pacer"]
 
-        def progress(config, **kwargs):
-            called.append("progress")
+        def pacer(config, **kwargs):
+            called.append("pacer")
             return real(config, **kwargs)
 
-        snapshot.READERS["progress"] = progress
+        snapshot.READERS["pacer"] = pacer
         try:
             result = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0,
-                                            only=["progress"])
+                                            only=["pacer"])
         finally:
             snapshot.READERS.clear()
             snapshot.READERS.update(original)
-        self.assertEqual(sorted(result), ["generated_at", "progress"])
-        self.assertEqual(called, ["progress"])
+        self.assertEqual(sorted(result), ["generated_at", "pacer"])
+        self.assertEqual(called, ["pacer"])
         self.assertEqual(result["generated_at"], 1_700_000_000.0)
 
     def test_the_command_reads_one_source_when_asked(self):
         self.config({"providers": []})
         code, output = self.run_command("--config", str(self.config_file), "--now", "1700000000",
-                                        "--only", "progress")
+                                        "--only", "pacer")
         self.assertEqual(code, 0)
-        self.assertEqual(sorted(json.loads(output)), ["generated_at", "progress"])
+        self.assertEqual(sorted(json.loads(output)), ["generated_at", "pacer"])
 
     def test_a_source_nobody_reads_is_refused_rather_than_read_as_nothing(self):
         # An empty document under a misspelled name would draw as a source with

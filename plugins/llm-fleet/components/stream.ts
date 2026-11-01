@@ -14,8 +14,8 @@
  */
 
 /** The sources the pane draws as sections, in the order it draws them. */
-export const STREAM_ORDER = ["session", "progress", "trials", "prs", "roster", "worktrees",
-                             "skills", "custom"] as const;
+export const STREAM_ORDER = ["session", "pacer", "prs", "roster", "worktrees", "skills",
+                             "load", "custom"] as const;
 
 type Documents = Record<string, unknown>;
 

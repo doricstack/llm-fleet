@@ -313,7 +313,13 @@ class SourceCountTests(unittest.TestCase):
     def test_no_custom_document_adds_no_custom_line(self) -> None:
         rows = dict(RENDER.counts({}))
         self.assertFalse([name for name in rows if name.startswith("custom")])
-        self.assertEqual(len(rows), 6)
+        # Every source the pane draws a section from, and no retired one: the
+        # page says which sections the machine answered, so a source the plugin
+        # no longer reads has no line to be missing one.
+        self.assertEqual(sorted(rows), ["load", "pacer", "prs", "roster", "session",
+                                        "skills", "worktrees"])
+        self.assertNotIn("trials", rows)
+        self.assertNotIn("progress", rows)
 
 
 if __name__ == "__main__":

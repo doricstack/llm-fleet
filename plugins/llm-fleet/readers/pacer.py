@@ -46,6 +46,7 @@ SWITCH_SOURCES = frozenset({"missing", "file", "corrupt", "env"})
 MAX_SLOTS = 64
 MAX_RUNS = 50
 MAX_WAITING = 50
+MAX_OUTSIDE = 64
 # The most of a refused switch's own words read before they are cut.
 SAID_BYTES = 4096
 
@@ -60,13 +61,25 @@ def _empty(state: str, reason: str | None = None) -> dict[str, Any]:
     """A document with nothing read, and the reason when there is one to give."""
     errors = [{"source": SOURCE, "reason": reason}] if reason else []
     return {"state": state, "enabled": None, "switchSource": None, "reason": None,
-            "version": None, "slotCount": None, "workersPerRun": None, "slots": [],
-            "waiting": None, "recent": None, "errors": errors}
+            "version": None, "slotCount": None, "workersPerRun": None, "qos": None,
+            "nice": None, "slots": [], "waiting": None, "recent": None, "outside": None,
+            "outsideCount": None, "outsideCpu": None, "outsideRssKb": None, "errors": errors}
 
 
 def _count(value: Any) -> int | None:
     """A non-negative whole number, or None for anything else."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _whole(value: Any) -> int | None:
+    """A whole number, a negative one included, or None for anything else.
+
+    Pacer's nice value is signed: a negative one raises priority, and reading it
+    as a count would drop it.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
 
@@ -153,10 +166,35 @@ def _recent(value: Any, limit: int) -> list[dict[str, Any]] | None:
     return runs
 
 
+def _outside(value: Any, limit: int) -> list[dict[str, Any]] | None:
+    """The heavy work running outside pacer's slots, or None when pacer did not say.
+
+    Pacer reads these from the process table, so an entry it could not fill is
+    left unnamed here rather than filled in: a process with no pattern is still
+    a process, and its load is what the row is for.
+    """
+    if not isinstance(value, list):
+        return None
+    processes = []
+    for entry in value[:MAX_OUTSIDE]:
+        if not isinstance(entry, Mapping):
+            continue
+        processes.append({"pid": _count(entry.get("pid")),
+                          "pattern": cut(entry.get("pattern"), limit),
+                          "cpu": _seconds(entry.get("cpu")),
+                          "rssKb": _count(entry.get("rss_kb"))})
+    return processes
+
+
 def parse_status(document: Any, limit: int) -> dict[str, Any]:
     """Pacer's status as the pane reads it, or a failed document naming what is wrong."""
     if not isinstance(document, Mapping):
         return _empty("failed", "the status is not an object")
+    # A refused status is one object holding `error`, so its own words are the
+    # reason: read as a status it would say only that the switch is missing.
+    refused = document.get("error")
+    if isinstance(refused, str) and refused.strip():
+        return _empty("failed", cut(refused, limit))
     enabled = document.get("enabled")
     if not isinstance(enabled, bool):
         return _empty("failed", "the status has no enabled switch")
@@ -183,9 +221,15 @@ def parse_status(document: Any, limit: int) -> dict[str, Any]:
         "version": _count(version),
         "slotCount": count,
         "workersPerRun": _count(settings.get("workers_per_run")),
+        "qos": cut(settings.get("qos"), 24),
+        "nice": _whole(settings.get("nice")),
         "slots": sorted(slots, key=lambda slot: slot["slot"]),
         "waiting": _waiting(document.get("waiting"), limit),
         "recent": _recent(document.get("recent"), limit),
+        "outside": _outside(document.get("outside"), limit),
+        "outsideCount": _count(document.get("outside_count")),
+        "outsideCpu": _seconds(document.get("outside_cpu")),
+        "outsideRssKb": _count(document.get("outside_rss_kb")),
         "errors": [],
     }
 

@@ -16,19 +16,19 @@ function reading(overrides: Documents = {}): Documents {
   return {
     alerts: { snapshotMs: 3000 },
     session: { cost: 1 },
-    progress: { runs: [] },
-    trials: { recent: 3 },
+    pacer: { slots: [] },
     prs: { open: 2 },
     roster: { jobs: 4 },
     worktrees: { count: 30 },
     skills: { flagged: 1 },
+    load: { processes: [] },
     ...overrides,
   };
 }
 
 test("the sources are streamed in the order the pane draws its sections", () => {
   assert.deepEqual([...STREAM_ORDER],
-                   ["session", "progress", "trials", "prs", "roster", "worktrees", "skills",
+                   ["session", "pacer", "prs", "roster", "worktrees", "skills", "load",
                     "custom"]);
 });
 
@@ -42,10 +42,10 @@ test("the first reading lands whole: there is nothing on the pane to stream over
 
 test("one step lands the first changed source and leaves the rest as they were drawn", () => {
   const shown = reading();
-  const target = reading({ prs: { open: 3 }, worktrees: { count: 31 }, trials: { recent: 4 } });
-  assert.deepEqual(pendingSources(shown, target), ["trials", "prs", "worktrees"]);
+  const target = reading({ prs: { open: 3 }, worktrees: { count: 31 }, pacer: { slots: [1] } });
+  assert.deepEqual(pendingSources(shown, target), ["pacer", "prs", "worktrees"]);
   const step = stepStream(shown, target);
-  assert.deepEqual(step.documents.trials, { recent: 4 });
+  assert.deepEqual(step.documents.pacer, { slots: [1] });
   assert.deepEqual(step.documents.prs, { open: 2 });
   assert.deepEqual(step.documents.worktrees, { count: 30 });
   assert.deepEqual(step.pending, ["prs", "worktrees"]);
@@ -121,15 +121,15 @@ test("no reading at all is nothing to draw", () => {
 
 test("a stream that names its next section lands that one, and only one that changed", () => {
   const shown = reading();
-  const target = reading({ trials: { recent: 4 }, prs: { open: 3 } });
-  // Named, prs lands ahead of trials, which stays as drawn and still pending.
+  const target = reading({ pacer: { slots: [1] }, prs: { open: 3 } });
+  // Named, prs lands ahead of pacer, which stays as drawn and still pending.
   const named = stepStream(shown, target, "prs");
   assert.deepEqual(named.documents.prs, { open: 3 });
-  assert.deepEqual(named.documents.trials, shown.trials);
-  assert.deepEqual(named.pending, ["trials"]);
+  assert.deepEqual(named.documents.pacer, shown.pacer);
+  assert.deepEqual(named.pending, ["pacer"]);
   // A section named that did not change lands nothing, and nothing else moves.
   const unchanged = stepStream(shown, target, "roster");
-  assert.deepEqual(unchanged.documents.trials, shown.trials);
+  assert.deepEqual(unchanged.documents.pacer, shown.pacer);
   assert.deepEqual(unchanged.documents.prs, shown.prs);
-  assert.deepEqual(unchanged.pending, ["trials", "prs"]);
+  assert.deepEqual(unchanged.pending, ["pacer", "prs"]);
 });

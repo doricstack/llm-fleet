@@ -10,23 +10,20 @@
  */
 
 import type {
-  AgentFigures, FanEntry, Job, ModelSpend, RateAccount, JobReply, Lease, Load, LoadProcess, Progress, PullRequest, PullRequests, ReaderState, Roster, Run, SkillItem, Skills,
-  SessionFigures, Snapshot, SourceState, Trial, TrialBucket, TrialHistory, Trials, Worktree,
-  Worktrees, Change, Custom, CustomRow, CustomSection, CheckRun, DigestEvent, Events, SpendSeries,
-  TimelineSegment, Governance, Pacer, PacerRun, PacerSlot, PacerWaiter } from "./state.ts";
+  AgentFigures, FanEntry, Job, ModelSpend, RateAccount, JobReply, Load, LoadProcess, LoadSystem, PullRequest, PullRequests, ReaderState, Roster, SkillItem, Skills,
+  SessionFigures, Snapshot, SourceState, Worktree,
+  Worktrees, Custom, CustomRow, CustomSection, CheckRun, DigestEvent, Events, SpendSeries,
+  TimelineSegment, Pacer, PacerOutside, PacerRun, PacerSlot, PacerWaiter } from "./state.ts";
 
 export type ReaderDocuments = {
   roster?: unknown;
-  trials?: unknown;
   session?: unknown;
-  progress?: unknown;
   prs?: unknown;
   skills?: unknown;
   worktrees?: unknown;
   load?: unknown;
   custom?: unknown;
   events?: unknown;
-  governance?: unknown;
   pacer?: unknown;
 };
 
@@ -491,108 +488,6 @@ function rosterFrom(document: unknown): Roster {
   };
 }
 
-function trialsFrom(document: unknown): Trials {
-  const running: Lease[] = list(isObject(document) ? document.running : [])
-    .filter(isObject)
-    .map((entry) => ({
-      repo: text(entry.repo),
-      branch: text(entry.branch),
-      tool: text(entry.tool),
-      expires_at: count(entry.expires_at),
-      session: text(entry.session),
-    }));
-  const recent: Trial[] = list(isObject(document) ? document.recent : [])
-    .filter(isObject)
-    .map((entry) => ({
-      key: text(entry.key),
-      repo: text(entry.repo),
-      branch: text(entry.branch),
-      change_state: text(entry.change_state),
-      at: count(entry.at),
-      is_green: entry.is_green === true,
-      passed: count(entry.passed),
-      failed: count(entry.failed),
-      errors: count(entry.errors),
-      skipped: count(entry.skipped),
-    }));
-  const changes: Change[] = list(isObject(document) ? document.changes : [])
-    .filter(isObject)
-    .map((entry) => ({
-      repo: text(entry.repo),
-      branch: text(entry.branch),
-      state: text(entry.state),
-      stage: maybeCount(entry.stage),
-      stages: count(entry.stages),
-      moved_at: maybeCount(entry.moved_at),
-      held_by: maybeText(entry.held_by),
-    }));
-  return { state: stateOf(document, "empty"), running, recent, changes,
-           history: historyFrom(isObject(document) ? document.history : null),
-           switch: switchOf(document),
-           errors: errorsOf(document) };
-}
-
-/**
- * The trials window, when the reading carries one this pane can draw.
- *
- * Null for anything a strip cannot be drawn from: a missing block, one whose
- * cells are not a list, or a bucket that is not two counts. A bucket read as
- * zero would be an hour reported as quiet, which is the claim a strip makes
- * most loudly, and this is the layer that refuses to make it on a guess.
- */
-function historyFrom(value: unknown): TrialHistory | null {
-  if (!isObject(value) || !Array.isArray(value.cells)) {
-    return null;
-  }
-  const cells: TrialBucket[] = [];
-  for (const cell of value.cells) {
-    if (!isObject(cell) || !Number.isFinite(cell.outcomes) || !Number.isFinite(cell.failed)) {
-      return null;
-    }
-    cells.push({ outcomes: count(cell.outcomes), failed: count(cell.failed) });
-  }
-  return {
-    label: text(value.label) || "Recent trials",
-    hours: count(value.hours),
-    cells,
-    outcomes: count(value.outcomes),
-    failed: count(value.failed),
-  };
-}
-
-/** The machine switch a document reports, when it reports one. */
-function switchOf(document: unknown): "on" | "off" | null {
-  const value = isObject(document) ? document.switch : undefined;
-  return value === "on" || value === "off" ? value : null;
-}
-
-function progressFrom(document: unknown): Progress {
-  const runs: Run[] = list(isObject(document) ? document.runs : [])
-    .filter(isObject)
-    .map((entry) => ({
-      key: text(entry.key),
-      repo: text(entry.repo),
-      branch: maybeText(entry.branch),
-      label: text(entry.label),
-      display: text(entry.display, "unnamed run"),
-      done: count(entry.done),
-      total: count(entry.total),
-      failed: count(entry.failed),
-      first_failure: text(entry.first_failure),
-      elapsed: count(entry.elapsed),
-      eta_minutes: maybeCount(entry.eta_minutes),
-      phase: text(entry.phase),
-      kind: maybeText(entry.kind),
-      command_class: text(entry.command_class),
-      queue_position: maybeCount(entry.queue_position),
-      queue_total: maybeCount(entry.queue_total),
-      wait_total: maybeCount(entry.wait_total),
-      wait_left: maybeCount(entry.wait_left),
-    }));
-  return { state: stateOf(document, "empty"), runs, switch: switchOf(document),
-           errors: errorsOf(document) };
-}
-
 function pullRequestsFrom(document: unknown): PullRequests {
   const prs: PullRequest[] = list(isObject(document) ? document.prs : [])
     .filter(isObject)
@@ -702,9 +597,44 @@ function worktreesFrom(document: unknown): Worktrees {
   return {
     state: stateOf(document, "empty"),
     worktrees,
-    cleaned: maybeCount(source.cleaned),
     errors: errorsOf(document),
   };
+}
+
+/**
+ * The machine's own figures, read as untrusted input like every other document.
+ *
+ * Each figure is kept only as a number a meter can draw: a percentage inside
+ * nought to a hundred, a non-negative byte count, and the three run-queue
+ * averages when all three are there. A document naming figures that are none of
+ * those draws no meter rather than a bar at an invented place.
+ */
+function loadSystemFrom(value: unknown): LoadSystem | null {
+  if (!isObject(value)) {
+    return null;
+  }
+  const percent = sourcePercent(value.cpuPercent);
+  const averages = list(value.loadAverage).map(maybeCount);
+  const used = wholeCount(value.memoryUsedBytes);
+  const total = wholeCount(value.memoryTotalBytes);
+  const average = averages.length === 3 && averages.every((entry) => entry !== null && entry >= 0)
+    ? averages as number[] : null;
+  const memory = used !== null && total !== null && total > 0 && used <= total ? { used, total } : null;
+  if (percent === null && average === null && memory === null) {
+    return null;
+  }
+  return {
+    cpuPercent: percent,
+    loadAverage: average,
+    memoryUsedBytes: memory === null ? null : memory.used,
+    memoryTotalBytes: memory === null ? null : memory.total,
+  };
+}
+
+/** A percentage a meter can draw, or null for anything else. */
+function sourcePercent(value: unknown): number | null {
+  const percent = maybeCount(value);
+  return percent === null || percent < 0 || percent > 100 ? null : percent;
 }
 
 /**
@@ -746,6 +676,7 @@ function loadFrom(document: unknown): Load {
     state: stateOf(document, "empty"),
     sampled_at: maybeCount(source.sampled_at),
     total: wholeCount(source.total) ?? 0,
+    system: loadSystemFrom(source.system),
     processes,
     errors: errorsOf(document),
   };
@@ -756,28 +687,7 @@ function flag(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
-/**
- * The governor and controller switch, read as untrusted input.
- *
- * A scope is kept only when the reader published a boolean for it, so a
- * document that failed carries neither and the pane draws the error rather
- * than the tool's own "both on" default.
- */
-function governanceFrom(document: unknown): Governance {
-  const source = isObject(document) ? document : {};
-  return {
-    state: stateOf(document, "disabled"),
-    governor: flag(source.governor),
-    controller: flag(source.controller),
-    source: maybeText(source.source),
-    path: maybeText(source.path),
-    updated_at: maybeText(source.updated_at),
-    by: maybeText(source.by),
-    errors: errorsOf(document),
-  };
-}
-
-/** A number of seconds at or above nought, or null. */
+/** A non-negative number the reader published, kept only when it is one. */
 function seconds(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
@@ -818,6 +728,15 @@ function keptOrNull<T>(value: unknown, keep: (entry: unknown) => T | null): T[] 
   return value.map(keep).filter((entry): entry is T => entry !== null);
 }
 
+/** One process pacer found running outside its slots, checked field by field. */
+function pacerOutside(value: unknown): PacerOutside | null {
+  if (!isObject(value)) {
+    return null;
+  }
+  return { pid: wholeCount(value.pid), pattern: maybeText(value.pattern),
+           cpu: seconds(value.cpu), rssKb: wholeCount(value.rssKb) };
+}
+
 /**
  * Pacer's run slots, read as untrusted input.
  *
@@ -835,9 +754,16 @@ function pacerFrom(document: unknown): Pacer {
     version: wholeCount(source.version),
     slotCount: wholeCount(source.slotCount),
     workersPerRun: wholeCount(source.workersPerRun),
+    qos: maybeText(source.qos),
+    // A nice value is signed: a negative one raises priority and is read as it was sent.
+    nice: typeof source.nice === "number" && Number.isInteger(source.nice) ? source.nice : null,
     slots: list(source.slots).map(pacerSlot).filter((slot): slot is PacerSlot => slot !== null),
     waiting: keptOrNull(source.waiting, pacerWaiter),
     recent: keptOrNull(source.recent, pacerRun),
+    outside: keptOrNull(source.outside, pacerOutside),
+    outsideCount: wholeCount(source.outsideCount),
+    outsideCpu: seconds(source.outsideCpu),
+    outsideRssKb: wholeCount(source.outsideRssKb),
     errors: errorsOf(document),
   };
 }
@@ -944,15 +870,12 @@ export function snapshotFrom(documents: ReaderDocuments, generatedAt: number): S
   return {
     generated_at: readingClock(documents, generatedAt),
     roster: rosterFrom(documents.roster),
-    trials: trialsFrom(documents.trials),
     session: sessionFrom(documents.session),
-    progress: progressFrom(documents.progress),
     prs: pullRequestsFrom(documents.prs),
     skills: skillsFrom(documents.skills),
     worktrees: worktreesFrom(documents.worktrees),
     load: loadFrom(documents.load),
     custom: customFrom(documents.custom),
-    governance: governanceFrom(documents.governance),
     pacer: pacerFrom(documents.pacer),
     ...(documents.events === undefined || documents.events === null ? {}
       : { events: eventsFrom(documents.events) }),

@@ -63,11 +63,11 @@ Three options live in `/config` under the plugin, because they are needed before
 - **Configuration file**: a full path to your configuration when it is not in the default place.
 - **Desktop notifications**: on by default; adds a desktop notification to the in-session toast.
 
-Everything else is in the configuration file. Each section can be shown or hidden (`pane.sections.<name>.visible`), folded at the start (`collapsed`), and capped at a row count (`maxRows`), and the order is the one you set. Sessions, background jobs, agent cards and this session's own cost, context and limits are on from the start. Pull requests, worktrees, trials, progress, skill scans and a recorded statusline payload are sources you switch on, and the doctor names the key each one needs. Speech is off until you set `speech.enabled` and a speech command. A key the schema does not know is refused by name rather than ignored. The full list of settings, with defaults, is in [the configuration reference](https://github.com/doricstack/llm-fleet/blob/main/docs/configuration.md).
+Everything else is in the configuration file. Each section can be shown or hidden (`pane.sections.<name>.visible`), folded at the start (`collapsed`), and capped at a row count (`maxRows`), and the order is the one you set. Sessions, background jobs, agent cards and this session's own cost, context and limits are on from the start. Pull requests, worktrees, pacer, skill scans and a recorded statusline payload are sources you switch on, and the doctor names the key each one needs. Speech is off until you set `speech.enabled` and a speech command. A key the schema does not know is refused by name rather than ignored. The full list of settings, with defaults, is in [the configuration reference](https://github.com/doricstack/llm-fleet/blob/main/docs/configuration.md).
 
 ## What it reads
 
-To follow an external system's off switch, set `sources.progress.paused_when_exists` or `sources.trials.paused_when_exists` to its marker path. Both are optional and default to `null` (never paused). An existing marker replaces that source's rows with one paused line and prevents data reads; removing it resumes reads on the next refresh. `~/` expands from `HOME`, relative paths resolve beside the configuration file, and absolute paths follow the running platform. A disabled source stays disabled.
+A path in the configuration may be written with `~/`, which expands from `HOME`; a relative path resolves beside the configuration file, and an absolute path follows the running platform. A disabled source stays disabled.
 
 The plugin reads the session roster through the `claude` command, transcripts and task lists under the homes you configure, and, when you switch it on, pull requests through the `gh` command. The outside commands the readers start (`claude`, `gh`, `git`, `ps`, `lsof`, the speech command and your own sections' commands) run with your Anthropic variables and the common provider API key variables removed from their environment, and the configuration can add to that list but never shorten it.
 
@@ -100,13 +100,14 @@ Every program runs as your user, from the list below, with its arguments built b
 
 | Program | Why |
 | --- | --- |
-| Your Python interpreter (the plugin option, `python3` by default) on the plugin's own scripts: `readers/snapshot.py`, `readers/alerts.py`, `readers/tab.py`, `readers/doctor.py`, `readers/setup.py`, `readers/governance.py`, `readers/pacer.py` and `readers/rates.py` | The reading behind the pane, alerts and speech, the terminal tab's color, the two first-run commands, the governance and pacer switches, and the daily rate-card refresh, started detached after a read when a card is older than a day. The statusline scripts (`readers/host.py`, `readers/session.py`, `readers/transcript.py`) run only when your statusline starts them. |
+| Your Python interpreter (the plugin option, `python3` by default) on the plugin's own scripts: `readers/snapshot.py`, `readers/alerts.py`, `readers/tab.py`, `readers/doctor.py`, `readers/setup.py`, `readers/pacer.py` and `readers/rates.py` | The reading behind the pane, alerts and speech, the terminal tab's color, the two first-run commands, pacer's switch, and the daily rate-card refresh, started detached after a read when a card is older than a day. The statusline scripts (`readers/host.py`, `readers/session.py`, `readers/transcript.py`) run only when your statusline starts them. |
 | `tmux show-options -gqv allow-passthrough` and `tmux display-message -p #{client_tty}` | Inside tmux only: whether the tab can be colored, and which terminal to color. |
 | `claude` | The session roster. |
 | `ps` | The machine's load, and which terminal a session runs in. |
+| `top -l 2 -n 0 -s 1` on macOS, or `wmic` (with PowerShell behind it) on Windows, or a plain read of `/proc/stat`, `/proc/loadavg` and `/proc/meminfo` on Linux | The processor and memory shares the Load section draws as meters. Nothing is run where the platform states nothing. |
 | `git` and `lsof` | A worktree's branch and state, and which process holds it, when the worktrees source is on. |
 | `gh` | Pull requests, when that source is on. |
-| Commands your configuration names | The speech command, your custom sections, the governance switch, pacer (asked for its status, and given on or off when you press its switch), and the cleanup, skill report and process-list commands. None runs until you configure it. |
+| Commands your configuration names | The speech command, your custom sections, pacer (asked for its status, and given on or off when you press its switch), and the cleanup, skill report and process-list commands. None runs until you configure it. |
 
 The outside commands run with your Anthropic variables and the common provider API key variables removed from their environment, and the configuration can add to that list but never shorten it.
 

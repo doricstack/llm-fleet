@@ -48,7 +48,9 @@
 | `scripts/host-update.py` | Check every Claude home's installed copy against this tree's version and repair it through the host's own update; a home the tree never installed is absent, not stale | Present |
 | `tests/test_host_update.py` | Install-check contract: a stale home is refused with both versions, a repair is proved by reading the record again, and a repair that changes nothing fails | Present |
 | `scripts/render-review.py` | Read the machine and write a pane review page | Present |
-| `scripts/mutation-check.py` | Apply each mutant declared in `mutation/mutants.json` to a copy of the tree, run its suite, and fail on any survivor not declared equivalent | Present |
+| `scripts/mutation-check.py` | Apply each mutant declared in `mutation/mutants.json` to a copy of the tree, run its suite, and fail on any survivor not declared equivalent; the harness the gate measures through | Present |
+| `scripts/mutation-gate.py` | This repository's mutation gate: one slice per mutated source file, bound to the file, its suites and the declaration; plan, measure what changed, record every slice in the shared receipt store, and judge the verdict the pull-request guard reads | Present |
+| `.mutation-gate.json` | The contract the gate and the pull-request guard read: the receipt store, the base ref, the commands that may measure, and the scope a changed file has to fall in | Present |
 | `tests/test_mutation_check.py` | Harness contract: the checkout is never edited, a red suite stops the run, a mutant whose text moved is an error | Present |
 | `scripts/plugin-boundary.py` | Refuse a plugin module the host cannot evaluate: one importing from outside the plugin folder, or reaching for a node global; a script name or a Python interpreter outside the entry table; and, read from each Python module's syntax tree, an import of anything but the standard library and the plugin's own packages, a change to the import path outside `readers/plugin_root.py`, a climb of more than one level from `__file__`, or a `..` segment | Present |
 | `tests/paths.py` | The one place the suites put the plugin root on the import path | Present |
@@ -118,7 +120,8 @@
 | `make plugin-boundary` | Refuse a plugin module that imports outside its own folder |
 | `make plugin-validate HOST_CLI='<command>'` | Validate the manifest, hooks, and types contract through the host; unavailable without a command |
 | `make install-check HOST_CLI='<command>'` | Validate the repository as the marketplace the install line names, through the host; unavailable without a command |
-| `make mutants` | Run the declared mutants against their suites; pick some with `MUTANTS='<id> <id>'` |
+| `make mutants` | Measure what changed through the receipt store and judge it; a slice proved green under the same bytes is reused, and a survivor fails |
+| `make mutants-measure MUTANTS='<id> <id>'` | The harness alone, for one mutant or a few, with no receipt written |
 | `make install`, `make link` | Fail with unavailable status until runtime extraction |
 | `make typecheck TYPECHECK='<command>'` | Run an explicitly configured checker; fail if unset |
 
@@ -140,7 +143,7 @@
 | TEST-13 | Plugin folder boundary | Keep every module the host evaluates inside the plugin folder and free of node globals, and let `make plugin-boundary` refuse one that breaks either rule: the host compiles the folder without node, so a shared directory beside the plugin or a module reading `process.argv` reads as working source here and loads as nothing there. A Python module under the folder imports from the plugin root (`config.loader`, `readers.<name>`) and never climbs above it, because an install copies the folder alone; a reader started by path reaches that root only through `readers/plugin_root.py`, and the plugin starts a script only through `components/entries.ts`. |
 | TEST-18 | Plugin state contract | Declare every `$.state` key in `plugins/llm-fleet/types/index.d.ts`, the contract `plugin.json` names as "types", in the change that first reads or writes it, and spell it once, as a const reference holding the literal plugin name and key `as const`, which every call names: the host refuses a plugin that uses an undeclared key, and a name spelled in one place cannot drift in another. `tests/test_plugin_contract.py` holds the rule in CI, which has no host CLI, and `make plugin-validate HOST_CLI='<command>'` runs the host's own check where one is installed. |
 | TEST-19 | Directory submission | Keep the hooks module readable by the directory, which `claude plugin validate` does not reproduce: never declare, destructure or take as a parameter a name the module binds for `on`, `$`, an event or `next`; read no object's kind by reflection; and add a line to the README's programs table in the change that adds a script or a fixed program. `tests/test_directory_rules.py` holds it in CI; the shared plugin directory rule governs the rest. |
-| TEST-17 | Mutation evidence | State a mutation result only from `make mutants`: declare each mutant in `mutation/mutants.json` with the suite that must notice it, and declare a survivor equivalent only with the reason it cannot be observed. |
+| TEST-17 | Mutation evidence | State a mutation result only from `make mutants`: declare each mutant in `mutation/mutants.json` with the suite that must notice it, and declare a survivor equivalent only with the reason it cannot be observed. The gate measures one slice per mutated file through the shared receipt store and writes the verdict the pull-request guard reads; a run of the harness alone is `make mutants-measure` and never a result to state. |
 | TEST-6 | Reporting checks | Report actual failures and skips. |
 | TEST-7 | Passing scaffold suite | Make no claim about runtime behavior that has not moved here. |
 | TEST-8 | Configuration changes | Cover the success path, each refusal class, and every source state; keep the fixture corpus in step with the schema. |
