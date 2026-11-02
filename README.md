@@ -49,7 +49,7 @@ Your prompt
 
 ## What the pane shows
 
-![The llm-fleet pane, drawn from a sample machine](https://github.com/doricstack/llm-fleet/releases/download/v0.4.19/pane-demo-0.4.19.gif)
+![The llm-fleet pane, drawn from a sample machine](https://github.com/doricstack/llm-fleet/releases/download/v0.4.20/pane-demo-0.4.20.gif)
 
 The figures at the top are the controls: press one and the pane narrows to those rows.
 

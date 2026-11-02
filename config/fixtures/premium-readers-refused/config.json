@@ -8,7 +8,6 @@
     "spendWindowHours": 169,
     "spendBucketMinutes": 0,
     "timelineIdleMinutes": 0,
-    "timelineSegmentLimit": 0,
-    "eventLimit": "50"
+    "timelineSegmentLimit": 0
   }
 }

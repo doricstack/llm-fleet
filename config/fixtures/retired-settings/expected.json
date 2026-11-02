@@ -18,6 +18,10 @@
     },
     {
       "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "history.eventLimit"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
       "path": "labels"
     },
     {

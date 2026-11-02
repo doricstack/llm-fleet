@@ -7,7 +7,7 @@
  * invented, and the same entity is never counted twice under two headings.
  */
 
-import type { Control, Digest, Group, Pane, PickerItem, Row, RowLine, GroupState, Slot,
+import type { Control, Group, Pane, PickerItem, Row, RowLine, GroupState, Slot,
               Spark } from "./layout.ts";
 import { ageText, durationText, fit } from "./layout.ts";
 import { stateColor } from "./cards.ts";
@@ -123,11 +123,6 @@ export type PaneActions = {
   clearAnswered?: () => void;
   /** Clear a reply's record that does not read, so the question can take a reply. */
   clearUnreadable?: (job: Job) => void;
-  /**
-   * Switch pacer on or off. Switching it off is called once to arm the press
-   * and again to make it; `confirmingPacer` says it is armed.
-   */
-  pacer?: (wanted: boolean) => void;
 };
 
 /**
@@ -211,15 +206,6 @@ export type PaneOptions = {
   /** Whether the surface draws a text field, so a reply is typed rather than copied. */
   fields?: boolean;
   /**
-   * When the person last looked, for the "since you left" digest: the newest
-   * event the digest drew when the pane last closed, in epoch seconds. Null is
-   * never, and the digest shows the newest events as a first look. Absent is a
-   * caller that has not found out yet, and no digest is drawn: drawing every
-   * event until the store answered would flash a first look at someone who has
-   * looked before.
-   */
-  lastSeen?: number | null;
-  /**
    * The state a press on one of the headline figures narrowed the pane to.
    *
    * Absent or null is the whole fleet. A narrowed pane draws the same figures
@@ -229,8 +215,6 @@ export type PaneOptions = {
   focus?: Focus | null;
   /** The rows a person pressed open, by the key the row carries. */
   details?: Record<string, true>;
-  /** Whether pacer's switch-off is waiting for the press that confirms it. */
-  confirmingPacer?: boolean;
 };
 
 /** The three states a headline figure narrows the pane to. */
@@ -2102,10 +2086,8 @@ function keyRow(key: string, does: string): Row {
 
 /** The key a pacer row is addressed by. */
 export const PACER_PREFIX = "pacer.";
-/** How many of pacer's recent runs the section draws. */
+/** How many of pacer's recent runs the section draws, which are its failures. */
 const PACER_RUNS = 3;
-/** The address of pacer's switch row, which the entry keeps armed across one press. */
-export const PACER_SWITCH = PACER_PREFIX + "switch";
 
 /**
  * Pacer's live configuration, as its own status reports it.
@@ -2170,38 +2152,6 @@ function pacerOutsideRow(document: Pacer): Row | null {
            slot: [{ text: counted + (counted === 1 ? " process" : " processes") }] };
 }
 
-/** Pacer's own switch, as a row a person can press. */
-function pacerSwitchRow(document: Pacer, options: PaneOptions): Row {
-  const on = document.enabled;
-  const key = PACER_SWITCH;
-  const word = on === true ? "on" : on === false ? "off" : "not read";
-  const slot: Slot[] = [{ text: word, ...(on === true ? { color: "success" as const }
-    : on === false ? { color: "warning" as const } : { dim: true }) }];
-  // A switch the environment set holds for one shell only: the file a press
-  // writes is not what decided it, so no press is offered.
-  if (document.switchSource === "env") {
-    const why = document.reason === null ? ", set in the environment"
-      : ": " + shown(document.reason).text;
-    return { key, title: "Pacer", slot,
-             meta: [{ text: (on ? "on" : "off") + " for this shell" + why, dim: true }] };
-  }
-  const armed = options.confirmingPacer === true && on === true;
-  const does = armed ? "press again to switch off"
-    : on === true ? "press to switch off" : "press to switch on";
-  // An off a press cannot undo says why: the switch a person owns is one of
-  // two, and the machine's own off wins over this one.
-  const why = on === false && document.reason !== null ? ", " + shown(document.reason).text : "";
-  const row: Row = { key, title: "Pacer", slot,
-                     meta: [{ text: does + why, ...(armed ? { color: "warning" as const }
-                                                          : { dim: true }) }] };
-  const act = options.actions?.pacer;
-  if (act !== undefined && on !== null) {
-    row.press = { key, label: on ? "Turn pacer off" : "Turn pacer on",
-                  onPress: () => act(on ? false : true) };
-  }
-  return row;
-}
-
 /**
  * What a run's folder name says to a person.
  *
@@ -2240,10 +2190,10 @@ function pacerSlotRow(slot: PacerSlot, now: number): Row {
 
 /** One finished run: passed, refused, stopped by a signal, or the exit it failed with. */
 function pacerRunRow(run: PacerRun, index: number, now: number): Row {
+  // Only what went wrong reaches this row: a refusal, or the exit it came back
+  // with. A pass and a run the person stopped are not drawn at all.
   const refused = run.mode === "refused";
-  const stopped = run.mode === "interrupted";
-  const passed = (run.exit === 0 && !refused) || stopped;
-  const word = refused ? "refused" : stopped ? "stopped" : passed ? "passed" : "exit " + run.exit;
+  const word = refused ? "refused" : "exit " + run.exit;
   const said: string[] = [];
   if (run.reason !== null) {
     said.push(shown(run.reason).text);
@@ -2259,9 +2209,9 @@ function pacerRunRow(run: PacerRun, index: number, now: number): Row {
   return {
     key: PACER_PREFIX + "run:" + index + ":" + run.at,
     title: runLabel(run.repo) ?? "a run",
-    ...(passed ? { dim: true } : { state: "failed" }),
+    state: "failed",
     meta: [{ text: said.join(", "), dim: true }],
-    slot: [{ text: word, ...(passed ? { dim: true } : { color: "error" as const }) }],
+    slot: [{ text: word, color: "error" }],
   };
 }
 
@@ -2281,9 +2231,20 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
   if (state !== "ready") {
     return sectionGroup("pacer", [], state, [], options);
   }
-  const rows: Row[] = [pacerSwitchRow(document, options)];
+  // The switch itself lives in the band, beside the other machine-wide
+  // controls. A section that repeats it offers two places to press for one
+  // decision, so this section states what pacer reports and nothing more.
+  const rows: Row[] = [];
   const settings = pacerSettingsRow(document);
   if (settings !== null) {
+    // An off the environment holds says why: no press here or on the band's
+    // gear can undo it, and the gear alone does not carry the reason. A switch
+    // reading that is merely missing is not that, and says nothing here.
+    if (document.enabled === false && document.switchSource === "env"
+        && document.reason !== null) {
+      const why = { text: "off: " + shown(document.reason).text, dim: true };
+      settings.meta = [...(settings.meta ?? []), why];
+    }
     rows.push(settings);
   }
   rows.push(...document.slots.map((slot) => pacerSlotRow(slot, options.now)));
@@ -2299,7 +2260,14 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
                          + "waiting " + durationText(options.now - longest.since), dim: true }],
                 slot: [{ text: waiting.length + (waiting.length === 1 ? " caller" : " callers") }] });
   }
-  const runs = [...(document.recent ?? [])].sort((first, second) => second.at - first.at)
+  // A run that passed says nothing a person has to act on, and pacer's recent
+  // list is mostly passes. The section keeps what went wrong: a refusal, or a
+  // run that came back with anything but zero. A run the person stopped is
+  // neither: it was ended on purpose, and it is not drawn as a failure.
+  const runs = [...(document.recent ?? [])]
+    .filter((run) => run.mode === "refused"
+      || (run.exit !== 0 && run.mode !== "interrupted"))
+    .sort((first, second) => second.at - first.at)
     .slice(0, PACER_RUNS);
   rows.push(...runs.map((run, index) => pacerRunRow(run, index, options.now)));
   const summary: Slot[] = [];
@@ -2527,95 +2495,11 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
       },
     }),
     footer: { text: FOOTER_TEXT, dim: true },
-    digest: digestFrom(snapshot, options),
     ...(picker.length ? { picker } : {}),
     groups,
     width: options.width,
     narrowAt: options.narrowAt,
   };
-}
-
-/** The most events the digest lists; the rest are counted. */
-export const DIGEST_LINES = 5;
-
-/** What each kind of event is called on the digest, in the tone it is drawn in. */
-const EVENT_WORDS: Record<string, { word: string; color: Slot["color"] }> = {
-  "pr-opened": { word: "PR opened", color: "suggestion" },
-  "job-waiting": { word: "Waiting on you", color: "warning" },
-  "job-finished": { word: "Finished", color: "subtle" },
-};
-
-/**
- * What happened since the person last looked, from the reading's events.
- *
- * The events newer than the last look, newest first, at most five lines and the
- * rest counted. Nothing new from sources that were all read draws nothing at
- * all. A document that could not be
- * read says so in the error color and never reads as a quiet stretch, and a
- * source the events could not see is named under what they did see, so a digest
- * of two pull requests is not taken for everything that happened.
- *
- * When every event the reading holds is newer than the last look, the reader's
- * own limit may have left older ones out, so the count says "or more".
- */
-export function digestFrom(snapshot: Snapshot, options: PaneOptions): Digest | null {
-  const document = snapshot.events;
-  if (options.lastSeen === undefined || document === undefined) {
-    return null;
-  }
-  const lastSeen = options.lastSeen;
-  const title = "Since you left";
-  if (document.state === "failed" || document.state === "unavailable"
-      || document.state === "unconfigured") {
-    const reason = document.errors[0]?.reason;
-    return { title, tone: "error", heading: [], through: null,
-             lines: [[{ text: "Could not read what happened while you were away"
-                              + (reason ? ": " + shown(reason).text : "") + ".",
-                        color: document.state === "failed" ? "error" : "warning" }]] };
-  }
-  const fresh = document.events.filter((entry) => lastSeen === null || entry.at > lastSeen)
-    .sort((left, right) => right.at - left.at);
-  const unseen = Object.entries(document.sources)
-    .filter(([, state]) => state === "failed" || state === "unavailable")
-    .map(([name]) => name);
-  const blind: Slot[][] = unseen.length
-    ? [[{ text: unseen.join(", ") + " could not be read, so what they hold is not here",
-          color: "warning" }]]
-    : [];
-  if (!fresh.length) {
-    // Nothing new from what was seen is not nothing new: a source the events
-    // could not see keeps its line, and nothing drawn as new moves the look.
-    return blind.length
-      ? { title, tone: "claude", heading: [{ text: "Nothing new from what could be read",
-                                            color: "text" }],
-          lines: blind, through: null }
-      : null;
-  }
-  const lines: Slot[][] = fresh.slice(0, DIGEST_LINES).map((entry) => {
-    const named = EVENT_WORDS[entry.kind] ?? { word: entry.kind, color: "subtle" as const };
-    const parts: Slot[] = [{ text: named.word, color: named.color },
-                           { text: shown(entry.title).text || "untitled" }];
-    // A pull request's reference is the one a person reads, `owner/name#7`; a
-    // job's identifier is an address, not a word.
-    if (entry.ref && entry.kind === "pr-opened") {
-      parts.push({ text: " · " + shown(entry.ref).text, dim: true });
-    }
-    parts.push({ text: " · " + ageText(Math.max(0, options.now - entry.at)), dim: true });
-    return parts;
-  });
-  const left = fresh.length - DIGEST_LINES;
-  if (left > 0) {
-    const capped = lastSeen !== null && fresh.length === document.events.length;
-    lines.push([{ text: "+" + left + (capped ? " or more" : " more"), dim: true }]);
-  }
-  lines.push(...blind);
-  const heading: Slot[] = [
-    { text: fresh.length + " new", color: "text" },
-    { text: lastSeen === null ? " · first look, newest first"
-        : " · since your last look " + ageText(Math.max(0, options.now - lastSeen)), dim: true },
-  ];
-  return { title, tone: "claude", heading, lines,
-           through: Math.max(...fresh.map((entry) => entry.at)) };
 }
 
 /** Every error any reader reported, in one list, for the warnings group. */

@@ -174,9 +174,7 @@ function paneTree(documents: ReaderDocuments, width: number, now: number, genera
   // it would look after a press; without one, what is printed here is what the
   // pane would actually draw, rather than the packaged default standing in for
   // a choice somebody made.
-  // A page keeps no last look, so its digest is the one a first look draws:
-  // the newest events the reading holds.
-  const base = { ...paneOptions(width, now, paneConfigFrom(documents)), lastSeen: null };
+  const base = paneOptions(width, now, paneConfigFrom(documents));
   const options = sections === undefined
     ? base
     : { ...base, sections: { ...base.sections, ...sections } };

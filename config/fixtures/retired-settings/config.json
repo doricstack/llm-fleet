@@ -8,6 +8,7 @@
     "statuslinePalette": {"accent": "cyan"},
     "running": "accent"
   },
+  "history": {"eventLimit": 50},
   "speech": {"backend": "kokoro", "samplesDirectory": "/fixture/samples"},
   "timeouts": {"lockSeconds": 12, "probeGraceSeconds": 1, "audioCleanupMs": 5000},
   "limits": {"worktreeWorkers": 8},

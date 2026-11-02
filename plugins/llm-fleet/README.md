@@ -90,7 +90,7 @@ Every hook either answers its own command or drawing and returns, or passes the 
 | `session.start` | Registers `/llm-fleet`, `/speak`, `/worktrees` and `/keys`, and reads this session's identity. |
 | `command.run` | Answers those four commands and nothing else. |
 | `ui.render` | Draws the pane, the band above the prompt and the key tip under it. |
-| `ui.close` | Records that the pane shut and, for Escape, marks the digest it showed as seen. |
+| `ui.close` | Records that the pane shut, so the next command opens it rather than closing a pane that is already gone. |
 | `prompt.submit` | Records this session as the one you are typing in, so alerts reach you here, and lands any write a paint left waiting. It hands the prompt on unchanged and never reads, edits or drops its text. |
 | `session.end` | Stops the timers this session started. |
 

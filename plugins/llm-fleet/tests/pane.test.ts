@@ -430,7 +430,9 @@ const VOICES = {
  */
 test("/speak picks a voice, says hello in it, and keeps the pick", async ($, on) => {
   mock.clock(on, { now: AT * 1000 });
-  mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
+  // Speech is on, since a pick chooses a voice and never the switch itself:
+  // the store holds the time of the press that turned it on.
+  mock.store(on, { [READING_KEY]: { at: AT, documents: READING }, "speech.on": AT });
   on("session.id", () => ({ value: "another-session" }) as never);
   const runs: string[][] = [];
   on("process.run", (_engine, e) => {

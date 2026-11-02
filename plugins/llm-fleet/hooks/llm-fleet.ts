@@ -62,12 +62,12 @@ import type { ReaderDocuments } from "../components/snapshot.ts";
 import type { Engine, Register } from "./engine.ts";
 import type { Job, Pacer } from "../components/state.ts";
 import type { PaneConfig } from "../components/options.ts";
-import type { FleetDigestSeen, FleetFold } from "../types/index.d.ts";
+import type { FleetFold } from "../types/index.d.ts";
 import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.ts";
 import { recolor, THEME } from "../components/palette.ts";
 import { CLOSE, DETAILS_PREFIX, FOCUS_CLEAR, FOCUS_PREFIX, HIDE_PREFIX,
          REPLY_PENDING_SECONDS, replyKey, replyText, SHOW_ALL_PREFIX, TOGGLE_ALL,
-         TOGGLE_PREFIX, unreadableKey, PACER_SWITCH,
+         TOGGLE_PREFIX, unreadableKey,
          type Focus, type PaneActions, type PaneOptions, type RepliesPaused }
   from "../components/pane.ts";
 import { mask } from "../components/mask.ts";
@@ -263,22 +263,6 @@ export const SPEECH_POLL_MS = 1_500;
 export const FOLDS_KEY = "folds";
 /** Where the person's own word on the key tips is kept: false is off, anything else is no word. */
 export const TIPS_KEY = "key-tips";
-/**
- * The last look for the "since you left" digest: `{ at }`, the newest event a
- * digest drew when its pane closed. It is kept twice.
- *
- * The first is the session's own, held by the host in its state: it outlives a hot reload,
- * every load of the session shares it, and a write is made only at the version
- * it read, so two loads closing at once never move it back. It is exact.
- *
- * The second, `SEEN_KEY`, is the look every session shares, in the store, so a new session
- * does not show what was seen in another. The store has no compare-and-set, so
- * two sessions closing in the same moment can leave the earlier of their looks
- * there; then another session's next digest shows a few events again. A session
- * always starts from the later of the two, so its own look is never moved back.
- */
-export const SEEN_KEY = "digest-seen";
-const SEEN_HELD = { plugin: "llm-fleet", key: "digestSeen" } as const;
 /** Where the tab color is written, inside the plugin. */
 export const TAB_HELPER = ENTRIES.tab;
 /** What the read command takes to probe every worktree now rather than answer from its cache. */
@@ -548,17 +532,6 @@ type State = {
   foldWrites: Promise<unknown>;
   /** The read of the folds a session opens with, which adds writes of its own when it lands. */
   foldRestore: Promise<unknown>;
-  /**
-   * The person's last look, for the digest: undefined until the store answers,
-   * null when it holds none, and the newest event a closed pane's digest drew.
-   */
-  lastSeen: number | null | undefined;
-  /** Whether the last look has been asked of the store since the pane last closed. */
-  seenAsked: boolean;
-  /** The newest event the digest has drawn since the pane opened; null while it drew none. */
-  digestThrough: number | null;
-  /** This session's last write of its own look, so its writes land in the order made. */
-  seenWrite: Promise<unknown>;
   /** The writes a paint asked for, made at the next tick rather than inside it. */
   afterPaint: (() => void)[];
   /** The tick those writes wait on; null while none waits. */
@@ -1623,7 +1596,7 @@ function queueFold($: Engine, state: State, over: FleetFold, under: FleetFold): 
  */
 function writesLanded($: Engine, state: State): Promise<void> {
   const chains = (): Promise<unknown>[] =>
-    [state.foldRestore, state.foldWrites, state.foldSaves, state.seenWrite];
+    [state.foldRestore, state.foldWrites, state.foldSaves];
   return new Promise<void>((resolve) => {
     let bound: { cancel(): void } | null = null;
     let over = false;
@@ -1761,124 +1734,6 @@ function saveFolds($: Engine, state: State, over: Fold, under: Fold): void {
       return $.ui.toast("fleet: section folds kept for this session; could not save them.",
                         { timeoutMs: state.alerts.toastMs }).catch(() => undefined);
     });
-}
-
-/** A last look the store handed back: `{ at }` with a finite time, or nothing usable. */
-function seenFrom(value: unknown): number | null {
-  const at = typeof value === "object" && value !== null ? (value as { at?: unknown }).at : undefined;
-  return typeof at === "number" && Number.isFinite(at) ? at : null;
-}
-
-/**
- * Ask for the person's last look, once per opening of the pane.
- *
- * Asked again after each close, since another session may have moved the
- * shared look while this pane was shut. The latest of the session's own look,
- * the shared one, and what this load holds stands. Until they answer the digest
- * draws nothing: a first look drawn for the moment the host took would show
- * someone every event they have seen.
- */
-function restoreSeen($: Engine, state: State): void {
-  if (state.seenAsked) {
-    return;
-  }
-  state.seenAsked = true;
-  void Promise.all([
-    $.state.get(SEEN_HELD).then((read) => seenFrom(read.value), () => null),
-    $.store.get(SEEN_KEY).then(seenFrom, () => null),
-  ]).then(([own, shared]) => {
-    const looks = [state.lastSeen ?? null, own, shared].filter((at): at is number => at !== null);
-    const latest = looks.length ? Math.max(...looks) : null;
-    if (latest === state.lastSeen) {
-      return;
-    }
-    state.lastSeen = latest;
-    // Only a reading that carries events draws a digest, so only then can the
-    // look change what is on the pane.
-    const documents = state.held !== null && "documents" in state.held
-      ? state.held.documents as { events?: unknown } | null : null;
-    if (documents?.events !== undefined && documents.events !== null) {
-      $.ui.invalidate("ui.render");
-    }
-  });
-}
-
-/**
- * The pane closed: the newest event its digest drew is now seen.
- *
- * This is the one moment the last look moves. A digest still on screen has not
- * been read yet, and moving the look while it is would make a pane left open
- * all afternoon lose what happened after lunch. Only what was drawn moves it, so
- * a pane closed before the digest landed, or on a digest that could not read
- * its events, moves nothing. This load's writes are chained so a later close
- * never lands before an earlier one. A close the band found while it drew is
- * written at the next tick, since the host refuses a write a paint makes; this
- * load draws from the look it holds meanwhile.
- */
-function markSeen($: Engine, state: State, fromPaint = false): void {
-  const through = state.digestThrough;
-  // Asked again on the next open, for what another session moved meanwhile.
-  state.seenAsked = false;
-  if (through === null) {
-    return;
-  }
-  state.digestThrough = null;
-  const at = state.lastSeen === undefined || state.lastSeen === null ? through
-    : Math.max(state.lastSeen, through);
-  state.lastSeen = at;
-  const write = (): void => {
-    state.seenWrite = state.seenWrite
-      .then(() => keepSeen($, at))
-      .catch(() => undefined);
-  };
-  if (fromPaint) {
-    afterPaint($, state, write);
-  } else {
-    write();
-  }
-}
-
-/**
- * Keep `at` as the session's own look and as the shared one, never moving
- * either back.
- *
- * The session's own is written only at the version it was read at: another
- * load of the session that wrote first refuses the write, and the look is read
- * again. Each refusal is another load's write that landed, and a session closes
- * its pane a bounded number of times, so this ends; a refusal that names the
- * version it read is no race, and is not tried again. A host that will not hold
- * the look still has the shared one written, since that is what the next
- * session starts from. A store that cannot say what it holds is not written:
- * blind, a write could move back a look another session moved further.
- */
-async function keepSeen($: Engine, at: number): Promise<void> {
-  try {
-    for (;;) {
-      const read = await $.state.get(SEEN_HELD);
-      const held = seenFrom(read.value);
-      if (held !== null && held >= at) {
-        break;
-      }
-      const seen: FleetDigestSeen = { at };
-      const written = await $.state.set(SEEN_HELD, seen, { ifVersion: read.version });
-      if (written.isSet || written.version === read.version) {
-        break;
-      }
-    }
-  } catch {
-    // The host would not hold it: this load still holds it, and the shared look
-    // below is what any other load or session starts from.
-  }
-  let shared: number | null;
-  try {
-    shared = seenFrom(await $.store.get(SEEN_KEY));
-  } catch {
-    return;
-  }
-  if (shared === null || shared < at) {
-    const seen: FleetDigestSeen = { at };
-    await $.store.set(SEEN_KEY, seen);
-  }
 }
 
 /**
@@ -2325,7 +2180,6 @@ function paneActions($: Engine, state: State, surface: string): PaneActions {
     resend: (job) => { void resendReply($, state, job).catch(() => undefined); },
     clearAnswered: () => { void clearAnswered($, state).catch(() => undefined); },
     clearUnreadable: (job) => { void clearUnreadable($, state, job).catch(() => undefined); },
-    pacer: (wanted) => { void movePacer($, state, wanted).catch(() => undefined); },
   };
 }
 
@@ -2361,17 +2215,17 @@ async function pacerArmed($: Engine, state: State): Promise<boolean> {
 }
 
 /**
- * Move pacer, from the pane's switch row or the band's gear.
+ * Move pacer, from the band's gear.
  *
  * Switching pacer off lets every heavy run on the machine start at once, so it
  * takes a second press; switching it on does not. The way it goes is read from
- * the reading in hand, not from the drawn row, which another session may have
+ * the reading in hand, not from the drawn band, which another session may have
  * moved since this one painted. A switch the environment holds off is not
  * pacer's to move, so the press says so and runs nothing.
  */
-async function movePacer($: Engine, state: State, wanted: boolean, fromBand = false) {
+async function movePacer($: Engine, state: State, wanted: boolean) {
   const pacer = heldPacer(state);
-  if (pacer === null || pacer.enabled === null || pacer.enabled === wanted) {
+  if (pacer === null || pacer.enabled === null) {
     state.confirmingPacer = false;
     return;
   }
@@ -2386,10 +2240,8 @@ async function movePacer($: Engine, state: State, wanted: boolean, fromBand = fa
     state.confirmingPacer = true;
     state.pacerArmedAt = await $.clock.now();
     $.ui.invalidate("ui.render");
-    if (fromBand) {
-      await say($, "fleet: press Pacer again to switch it off; every heavy run then starts at once",
-                state.alerts.copyToastMs).catch(() => undefined);
-    }
+    await say($, "fleet: press Pacer again to switch it off; every heavy run then starts at once",
+              state.alerts.copyToastMs).catch(() => undefined);
     return;
   }
   state.confirmingPacer = false;
@@ -2402,7 +2254,7 @@ async function movePacerFromBand($: Engine, state: State) {
   if (pacer === null) {
     return;
   }
-  await movePacer($, state, pacer.enabled !== true, true);
+  await movePacer($, state, pacer.enabled !== true);
 }
 
 /**
@@ -3060,7 +2912,6 @@ async function openOn($: Engine, state: State, section: string): Promise<{ text:
   const drawn = foldDrawn(state.pressed, startFolded(0, now, pane), names);
   if (wasOpen && drawn[section] === false) {
     state.open = false;
-    markSeen($, state);
     // A probe asked for by the run that opened it is not wanted once it is shut.
     state.freshAsked = false;
     await $.ui.close({ id: PANE });
@@ -3170,8 +3021,7 @@ export const register: Register = (on, options) => {
                          tipMs: 0, foldSaves: Promise.resolve(), foldToast: false,
                          foldsLoaded: false, foldsDirty: false, foldsPending: {}, foldWrites: Promise.resolve(),
                          foldRestore: Promise.resolve(),
-                         lastSeen: undefined, seenAsked: false, digestThrough: null,
-                         seenWrite: Promise.resolve(), afterPaint: [], afterPaintTick: null };
+                         afterPaint: [], afterPaintTick: null };
   on("session.start", async ($, event, next) => {
     // One command at a time, and a refusal costs one command rather than the
     // session. A name can already belong to the person, whose own /speak wins
@@ -3285,11 +3135,6 @@ export const register: Register = (on, options) => {
   on("ui.close", async ($, event, next) => {
     if (event.id === PANE) {
       state.open = false;
-      // What the pane drew was read before it shut, exactly as for a close the
-      // band noticed; without this an Escape would leave the digest unseen.
-      // Not from a paint: this hook writes outside one, so the look is written
-      // now rather than left for the next paint that may never come.
-      markSeen($, state);
     }
     return next(event);
   });
@@ -3395,7 +3240,6 @@ export const register: Register = (on, options) => {
     // closes still asks the host, because closing is placed nowhere.
     if (asked === "close") {
       state.open = false;
-      markSeen($, state);
       await $.ui.close({ id: PANE });
       $.ui.invalidate("ui.render");
       return { text: `llm-fleet pane closed (${MARK}).` };
@@ -3406,7 +3250,6 @@ export const register: Register = (on, options) => {
     // answered empty.
     if (state.open) {
       state.open = false;
-      markSeen($, state);
       await $.ui.close({ id: PANE });
       $.ui.invalidate("ui.render");
       return { text: `llm-fleet pane closed (${MARK}).` };
@@ -3442,7 +3285,6 @@ export const register: Register = (on, options) => {
     const closer = (element: string): void => {
       if (element === CLOSE) {
         state.open = false;
-        markSeen($, state);
         void $.ui.close({ id: PANE })
           .then(() => $.ui.invalidate("ui.render"))
           .catch(() => undefined);
@@ -3496,8 +3338,6 @@ export const register: Register = (on, options) => {
     restoreFold($, state);
     restoreShownAll($, state);
     restorePutAway($, state);
-    // The digest's last look, asked for once per opening and drawn once it lands.
-    restoreSeen($, state);
     const drawnFolds = foldDrawn(state.pressed, configured, names);
     // Drawn while open, so the ages on it count between readings.
     keepTime($, state);
@@ -3508,14 +3348,7 @@ export const register: Register = (on, options) => {
     return surfaceTree({ documents: withSession(shown, state.engineSession) as never,
                          width, now, surface: e.surface,
                          takenAt: state.held.at,
-                         transform: (drawn: Pane) => {
-                           // What the digest drew is what closing the pane marks seen.
-                           const through = drawn.digest?.through ?? null;
-                           if (through !== null) {
-                             state.digestThrough = Math.max(state.digestThrough ?? through, through);
-                           }
-                           return moved($, state, drawn, now * 1000);
-                         },
+                         transform: (drawn: Pane) => moved($, state, drawn, now * 1000),
                          onPress: (element: string) => {
                            // The host runs this in the plugin's environment when
                            // a button is pressed, which is how the pane hears
@@ -3528,9 +3361,11 @@ export const register: Register = (on, options) => {
                              return;
                            }
                            // Pacer's armed switch-off is put down by any press
-                           // but its own: the second press has to follow the
+                           // in the pane: the second press has to follow the
                            // first, not an afternoon of reading between them.
-                           if (state.confirmingPacer && element !== PACER_SWITCH) {
+                           // The switch itself is the band's gear, and that
+                           // press never reaches here.
+                           if (state.confirmingPacer) {
                              state.confirmingPacer = false;
                              $.ui.invalidate("ui.render");
                            }
@@ -3625,7 +3460,6 @@ export const register: Register = (on, options) => {
                            putAway: state.putAway,
                            focus: state.focus,
                            details: state.details,
-                           confirmingPacer: state.confirmingPacer,
                            actions: paneActions($, state, e.surface),
                            replied: state.replied,
                            replyPendingSeconds: paneNumberFrom(state.held.documents, "replyPendingSeconds",
@@ -3633,8 +3467,7 @@ export const register: Register = (on, options) => {
                            cleared: state.cleared,
                            paused: state.paused,
                            hidden: hiddenCount(state, state.held.documents, state.held.at),
-                           fields: drawsFields(e.surface),
-                           lastSeen: state.lastSeen }) },
+                           fields: drawsFields(e.surface) }) },
                        primitives);
   });
 
@@ -3652,12 +3485,6 @@ export const register: Register = (on, options) => {
     const open = await $.ui.panes()
       .then((panes) => panes.some((pane) => pane.id === PANE))
       .catch(() => state.open);
-    // Escape closes the pane without a word to the plugin, so a pane found shut
-    // that was open at the last answer was closed by the person: what its
-    // digest drew is seen.
-    if (state.open && !open) {
-      markSeen($, state, true);
-    }
     state.open = open;
     // The band is on screen for the whole session, so it is what keeps the
     // reading fresh while the pane is shut: the same interval, the same read.
@@ -3718,9 +3545,6 @@ export const register: Register = (on, options) => {
         // a press that trusted the paint would close a pane already closed.
         const flip = (isOpen: boolean) => {
           state.open = !isOpen;
-          if (isOpen) {
-            markSeen($, state);
-          }
           $.ui.invalidate("ui.render");
           return isOpen ? $.ui.close({ id: PANE })
             : $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });

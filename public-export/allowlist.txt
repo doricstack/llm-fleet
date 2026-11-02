@@ -117,7 +117,6 @@ plugins/llm-fleet/readers/rates.py
 plugins/llm-fleet/readers/pacer.py
 plugins/llm-fleet/readers/rate_cards.py
 plugins/llm-fleet/readers/custom.py
-plugins/llm-fleet/readers/events.py
 tests/test_impact_override.py
 tests/test_test_report.py
 tests/test_test_select.py
@@ -156,7 +155,6 @@ tests/test_reader_doctor.py
 tests/test_reader_setup.py
 tests/test_reader_alerts.py
 tests/test_reader_custom.py
-tests/test_reader_events.py
 .github/workflows/ci.yml
 components/speech.test.ts
 plugins/llm-fleet/components/speech.ts

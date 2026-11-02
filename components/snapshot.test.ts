@@ -394,24 +394,6 @@ test("an agent's timeline is read as times, and a segment that is not one refuse
   }
 });
 
-test("the digest's events are read with their times, and a document that is not one has failed", () => {
-  const ready = snapshotFrom({ events: { state: "ready", sources: { prs: "ready", trials: "failed" },
-    events: [{ at: iso(60), kind: "pr-opened", title: "Add", ref: "o/p#1" },
-             { at: "soon", kind: "pr-opened", title: "Bad", ref: "o/p#2" },
-             { at: iso(90), kind: 4, title: "Bad", ref: "o/p#3" }] } }, NOW);
-  assert.deepEqual(ready.events?.events, [{ at: NOW - 60, kind: "pr-opened", title: "Add", ref: "o/p#1" }]);
-  assert.deepEqual(ready.events?.sources, { prs: "ready", trials: "failed" });
-  assert.equal(ready.events?.state, "ready");
-  const failed = snapshotFrom({ events: { state: "failed", events: [],
-                                          errors: [{ source: "events", reason: "boom" }] } }, NOW);
-  assert.equal(failed.events?.state, "failed");
-  assert.deepEqual(failed.events?.errors, [{ source: "events", reason: "boom" }]);
-  // A ready document whose events are not a list is not a quiet stretch.
-  assert.equal(snapshotFrom({ events: { state: "ready", events: "none" } }, NOW).events?.state, "failed");
-  // A reading from before events were read carries none.
-  assert.equal(snapshotFrom({ roster: { state: "empty" } }, NOW).events, undefined);
-});
-
 test("a process under load reaches the pane only with the figures that read", () => {
   const snapshot = snapshotFrom({ load: { state: "ready", sampled_at: NOW, total: 3, processes: [
     { pid: 101, command: "python3 worker.py", cpu_percent: 12.5, memory_bytes: 2048 * 1024,

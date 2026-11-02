@@ -241,21 +241,6 @@ export type Timeline = {
  */
 export type Spark = { values: number[]; label: Slot[]; keep?: number };
 
-/**
- * What happened while the person was away, drawn under the pane's controls.
- *
- * `through` is the newest event it drew, which the entry keeps as the person's
- * last look when the pane closes; null when it drew no event, as when the
- * events could not be read.
- */
-export type Digest = {
-  title: string;
-  tone: Color;
-  heading: Slot[];
-  lines: Slot[][];
-  through: number | null;
-};
-
 export type GroupState = "ready" | "empty" | "disabled" | "failed" | "stale" | "unavailable" | "paused";
 
 export type Group = {
@@ -400,8 +385,6 @@ export type Pane = {
    * why only some of its rows are under them.
    */
   focus?: { text: string; clear: Control };
-  /** What happened since the person last looked, when there is anything to say. */
-  digest?: Digest | null;
   /**
    * The line under the last card: what this is, its version and its license.
    *
@@ -1251,23 +1234,6 @@ function sparkLabel(spark: Spark, width: number): Slot[] {
   return [...kept, ...fitSlots(rest, Math.max(share, keptWidth) - keptWidth)];
 }
 
-/**
- * The digest: a heading in its tone and a line per event, each cut to the
- * pane's width, indented under the heading as a section's rows are.
- */
-function digestBlock(digest: Digest, width: number): Node {
-  const title = fit(digest.title, Math.max(8, width - 4));
-  const heading = fitSlots(digest.heading, Math.max(0, width - title.length - 3));
-  return box({ key: "digest", flexDirection: "column", gap: 0, marginTop: 1, paddingX: 1 }, [
-    box({ flexDirection: "row", gap: 1 }, [
-      box({ flexDirection: "row", gap: 0, flexShrink: 0 }, tagTexts(title, digest.tone)),
-      ...(heading.length ? [line(heading)] : []),
-    ]),
-    ...digest.lines.map((slots) => box({ marginLeft: 2, flexDirection: "row" },
-                                       [line(fitSlots(slots, Math.max(0, width - 4)))])),
-  ]);
-}
-
 /** Below this a tile cannot hold a figure and its label, so tiles stack. */
 const TILE_MINIMUM = 12;
 
@@ -1566,11 +1532,6 @@ export function renderPane(pane: Pane, surface = "terminal"): Tree {
               { plain: true, dimColor: true, hover: { color: "claude" } },
               [text({ dimColor: true, italic: true }, pane.focus.clear.label)]),
     ]));
-  }
-  // What happened while the person was away heads the sections, since it is
-  // the first thing a person coming back wants, and it is gone when nothing is.
-  if (pane.digest) {
-    parts.push(digestBlock(pane.digest, pane.width));
   }
   // One empty row between the head and the first card, and no more.
   parts.push(box({ flexDirection: "column", gap: 0, marginBottom: 1 }, []));

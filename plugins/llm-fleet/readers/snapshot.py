@@ -30,7 +30,6 @@ if __package__ in (None, ""):
 
 from config.loader import ConfigError, load_config
 from readers.custom import read_custom
-from readers.events import read_events
 from readers.load import read_load
 from readers.pacer import read_pacer
 from readers.prs import read_prs
@@ -56,7 +55,7 @@ def failed(document: str, reason: str) -> dict[str, Any]:
     """The document a reader would have produced had it been able to report this."""
     state_keys = {"roster": "jobs", "prs": "prs",
                   "skills": "items", "worktrees": "worktrees", "load": "processes",
-                  "session": "parameters", "custom": "sections", "events": "events",
+                  "session": "parameters", "custom": "sections",
                   "pacer": "slots"}
     body: dict[str, Any] = {"state": "failed", state_keys[document]: [],
                             "errors": [{"source": document, "reason": reason}]}
@@ -278,15 +277,6 @@ def read_snapshot(config: Mapping[str, Any], *, now: float | None = None,
                     {"source": "jobs", "reason": "job states were not kept"})
         except Exception as caught:  # a reader may never take a source off the pane
             snapshot[name] = failed(name, "{0}: {1}".format(type(caught).__name__, caught))
-    if only is None:
-        # The digest's events are drawn from the documents just read, so only a
-        # whole reading carries them: a part merged into a held reading would
-        # hand the digest one source's events as if they were every source's.
-        try:
-            snapshot["events"] = read_events(snapshot, config)
-        except Exception as caught:  # the digest may never take the reading down
-            snapshot["events"] = failed("events",
-                                        "{0}: {1}".format(type(caught).__name__, caught))
     return snapshot
 
 

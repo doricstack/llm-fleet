@@ -12,7 +12,7 @@
 import type {
   AgentFigures, FanEntry, Job, ModelSpend, RateAccount, JobReply, Load, LoadProcess, LoadSystem, PullRequest, PullRequests, ReaderState, Roster, SkillItem, Skills,
   SessionFigures, Snapshot, SourceState, Worktree,
-  Worktrees, Custom, CustomRow, CustomSection, CheckRun, DigestEvent, Events, SpendSeries,
+  Worktrees, Custom, CustomRow, CustomSection, CheckRun, SpendSeries,
   TimelineSegment, Pacer, PacerOutside, PacerRun, PacerSlot, PacerWaiter } from "./state.ts";
 
 export type ReaderDocuments = {
@@ -23,7 +23,6 @@ export type ReaderDocuments = {
   worktrees?: unknown;
   load?: unknown;
   custom?: unknown;
-  events?: unknown;
   pacer?: unknown;
 };
 
@@ -351,43 +350,6 @@ function checkRunsOf(value: unknown[]): CheckRun[] {
   return value.filter((entry): entry is Record<string, unknown> =>
     isObject(entry) && typeof entry.name === "string" && typeof entry.state === "string")
     .map((entry) => ({ name: entry.name as string, state: entry.state as string }));
-}
-
-/**
- * The digest's events, newest first as the reader wrote them.
- *
- * An event whose time does not read, or whose words are not text, is dropped:
- * the digest is a list of what happened, and an event placed at a guessed time
- * would land on the wrong side of the last look. A ready document whose events
- * are not a list is not a quiet stretch either, and reads as failed.
- */
-function eventsFrom(document: unknown): Events | undefined {
-  if (document === undefined || document === null) {
-    return undefined;
-  }
-  let state = stateOf(document, "failed");
-  const body = isObject(document) ? document : {};
-  if (state === "ready" && !Array.isArray(body.events)) {
-    state = "failed";
-  }
-  const events: DigestEvent[] = [];
-  for (const entry of list(body.events)) {
-    const at = isObject(entry) ? isoSeconds(entry.at) : null;
-    if (!isObject(entry) || at === null || typeof entry.kind !== "string"
-        || typeof entry.title !== "string" || typeof entry.ref !== "string") {
-      continue;
-    }
-    events.push({ at, kind: entry.kind, title: entry.title, ref: entry.ref });
-  }
-  const sources: Record<string, string> = {};
-  if (isObject(body.sources)) {
-    for (const [name, value] of Object.entries(body.sources)) {
-      if (typeof value === "string") {
-        sources[name] = value;
-      }
-    }
-  }
-  return { state, events, sources, errors: errorsOf(document) };
 }
 
 /** A moment the job's state file recorded, kept only when it is a finite number. */
@@ -877,7 +839,5 @@ export function snapshotFrom(documents: ReaderDocuments, generatedAt: number): S
     load: loadFrom(documents.load),
     custom: customFrom(documents.custom),
     pacer: pacerFrom(documents.pacer),
-    ...(documents.events === undefined || documents.events === null ? {}
-      : { events: eventsFrom(documents.events) }),
   };
 }

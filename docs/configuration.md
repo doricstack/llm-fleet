@@ -287,7 +287,6 @@ A command that is not on the PATH reads as unavailable; one that exits nonzero, 
 | `history.finishedJobSeconds`, `history.finishedJobLimit` | seconds, integer | 86400, 8 |
 | `history.spendWindowHours`, `history.spendBucketMinutes` | hours 1 to 168, minutes 1 to 1440 | 24, 60; the stretch the roster's `spend_series` and each agent's `timeline` cover, and the minutes one spend bucket holds. The series is the window rounded up to whole buckets |
 | `history.timelineIdleMinutes`, `history.timelineSegmentLimit` | positive integers | 5, 48; a gap between two transcript records longer than the first ends a working segment, and past the second the oldest segments are merged into one working segment |
-| `history.eventLimit` | positive integer | 50; the events the reading's `events` document keeps, newest first |
 | `band.waitingJobSeconds` | seconds | 86400 since blocking, not session start |
 | `alerts.claimRetentionSeconds`, `alerts.focusSeconds` | seconds | 172800, 1800 |
 | `alerts.toastMs`, `alerts.copyToastMs` | milliseconds | 8000, 6000 |

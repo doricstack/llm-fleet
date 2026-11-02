@@ -161,20 +161,6 @@ export type TimelineSegment = { start: number; end: number; state: string };
 /** One check run on a pull request, as the reader states it: pass, fail or pending. */
 export type CheckRun = { name: string; state: string };
 
-/** Something that happened, for the "since you left" digest, in epoch seconds. */
-export type DigestEvent = { at: number; kind: string; title: string; ref: string };
-
-/**
- * The events a whole reading holds, newest first, and the state each document
- * they came from was read in, so a digest can say what it could not see.
- */
-export type Events = {
-  state: ReaderState;
-  events: DigestEvent[];
-  sources: Record<string, string>;
-  errors: ReaderError[];
-};
-
 /**
  * This session's own figures, as the renderer last recorded them.
  *
@@ -473,6 +459,4 @@ export type Snapshot = {
   custom: Custom;
   /** Pacer's run slots; absent from a reading taken before they were read. */
   pacer?: Pacer;
-  /** The digest's events; absent from a reading taken before they were read, or a part of one. */
-  events?: Events;
 };

@@ -1435,21 +1435,6 @@ test("a timeline line is counted in the room a section reserves", () => {
   assert.equal(visible(tree).length, 2);
 });
 
-test("the digest heads the pane under its controls, every line cut to the width", () => {
-  const long = "x".repeat(200);
-  const tree = renderPane(pane({ width: 60, digest: {
-    title: "Since you left", tone: "claude", heading: [{ text: "2 new", dim: true }],
-    lines: [[{ text: "Trial failed", color: "error" }, { text: long }], [{ text: "+3 more", dim: true }]],
-    through: 10 } }));
-  const values = renderedText(tree);
-  assert.equal(values.includes("Since you left"), true);
-  assert.equal(values.includes("+3 more"), true);
-  assert.equal(values.some((value) => value.includes(long)), false);
-  // It comes before the first section.
-  assert.ok(values.indexOf("Since you left") < values.indexOf("Background sessions"));
-  assert.equal(renderedText(renderPane(pane())).includes("Since you left"), false);
-});
-
 test("a heading's figures are cut to its line, never wrapped under it", () => {
   // The room was budgeted from the title's unshown length and missed the cell
   // between the two halves of the line, so a summary was a cell too wide and the

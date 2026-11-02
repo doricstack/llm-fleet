@@ -20,12 +20,6 @@
 export type FleetFold = Record<string, boolean>;
 
 /**
- * The person's last look, for the "since you left" digest: the newest event a
- * digest drew when its pane closed, in epoch seconds. It only moves forward.
- */
-export type FleetDigestSeen = { at: number };
-
-/**
  * Every key the plugin keeps in its `$.store`, and what each holds.
  *
  * The store is keyed by free text the host does not check, so this is where a
@@ -53,8 +47,6 @@ export interface FleetStore {
   "folds": FleetFold;
   /** The person's own word on the key tips: false is off. */
   "key-tips": unknown;
-  /** The digest's last look every session shares: the latest a closed pane's digest drew, as near as a store without compare-and-set keeps it. */
-  "digest-seen": FleetDigestSeen;
   /** The voice one session picked, under that session's identifier. */
   [sessionVoice: `voice:${string}`]: unknown;
 }
@@ -68,8 +60,6 @@ declare module "claude-code" {
       shownAll: FleetFold;
       /** The sections a person put away; read by `restorePutAway` on the first paint and written on each picker press. */
       hidden: FleetFold;
-      /** This session's own digest look: read on each opening, written at the version read when the pane closes. */
-      digestSeen: FleetDigestSeen;
     };
   }
 }

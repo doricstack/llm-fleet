@@ -221,22 +221,22 @@ function pacerPane(reading: Pacer, extra: Partial<PaneOptions> = {}) {
                 pacer: { visible: true, collapsed: false } }, ...extra }));
 }
 
-test("the pacer section sits where the order puts it and draws its switch and slots", () => {
+test("the pacer section sits where the order puts it and draws its settings and slots", () => {
   const built = pacerPane(pacerReading());
   assert.deepEqual(built.groups.map((entry) => entry.title), ["This session", "Pacer"]);
   const section = group(built, "Pacer");
+  // The switch itself is the band's gear, so no row here repeats it.
   assert.deepEqual(section.rows.map((row) => row.title),
-                   ["Pacer", "Settings", "Slot 1", "Slot 2", "Slot 3", "Slot 4"]);
-  assert.deepEqual(section.rows[0]?.slot.map((slot) => slot.text), ["on"]);
+                   ["Settings", "Slot 1", "Slot 2", "Slot 3", "Slot 4"]);
   // Pacer's live settings travel with each read, so a change made while the
   // pane is open is drawn on the next one.
-  assert.deepEqual(section.rows[1]?.meta.map((slot) => slot.text), ["4 slots, 6 per run"]);
+  assert.deepEqual(section.rows[0]?.meta.map((slot) => slot.text), ["4 slots, 6 per run"]);
   // A held slot names the repository and how long it has run; a free one says free.
-  assert.deepEqual(section.rows[2]?.slot.map((slot) => slot.text), ["llm-fleet-private"]);
-  assert.deepEqual(section.rows[2]?.meta.map((slot) => slot.text), ["running 10m"]);
-  assert.equal(section.rows[2]?.state, "working");
-  assert.deepEqual(section.rows[3]?.slot.map((slot) => slot.text), ["free"]);
-  assert.equal(section.rows[3]?.state, undefined);
+  assert.deepEqual(section.rows[1]?.slot.map((slot) => slot.text), ["llm-fleet-private"]);
+  assert.deepEqual(section.rows[1]?.meta.map((slot) => slot.text), ["running 10m"]);
+  assert.equal(section.rows[1]?.state, "working");
+  assert.deepEqual(section.rows[2]?.slot.map((slot) => slot.text), ["free"]);
+  assert.equal(section.rows[2]?.state, undefined);
   assert.deepEqual(section.summary?.map((slot) => slot.text), ["1 of 4 busy"]);
 });
 
@@ -245,18 +245,18 @@ test("a busy slot's elapsed time counts on between reads", () => {
   // was read: a slot that has run ten minutes reads twenty once ten more have
   // passed, without another read of pacer's status.
   const ten = group(pacerPane(pacerReading()), "Pacer");
-  assert.deepEqual(ten.rows[2]?.meta.map((slot) => slot.text), ["running 10m"]);
+  assert.deepEqual(ten.rows[1]?.meta.map((slot) => slot.text), ["running 10m"]);
   const later = group(pacerPane(pacerReading(), { now: NOW + 600 }), "Pacer");
-  assert.deepEqual(later.rows[2]?.meta.map((slot) => slot.text), ["running 20m"]);
-  assert.equal(later.rows[2]?.state, "working");
+  assert.deepEqual(later.rows[1]?.meta.map((slot) => slot.text), ["running 20m"]);
+  assert.equal(later.rows[1]?.state, "working");
 });
 
 test("a busy slot whose holder pacer could not name is busy, never free", () => {
   const section = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: true, pid: null, repo: null, startedAt: null }] })), "Pacer");
-  assert.deepEqual(section.rows[2]?.slot.map((slot) => slot.text), ["held"]);
-  assert.deepEqual(section.rows[2]?.meta.map((slot) => slot.text), ["holder not named"]);
-  assert.equal(section.rows[2]?.state, "working");
+  assert.deepEqual(section.rows[1]?.slot.map((slot) => slot.text), ["held"]);
+  assert.deepEqual(section.rows[1]?.meta.map((slot) => slot.text), ["holder not named"]);
+  assert.equal(section.rows[1]?.state, "working");
 });
 
 test("waiters pacer did not report draw nothing, and reported ones are counted", () => {
@@ -276,7 +276,7 @@ test("waiters pacer did not report draw nothing, and reported ones are counted",
   assert.deepEqual(two.summary?.map((slot) => slot.text), ["1 of 4 busy", "  2 waiting"]);
 });
 
-test("recent runs draw newest first, with a refusal and a failure each said plainly", () => {
+test("recent runs keep what went wrong, newest first, and drop the passes", () => {
   const section = group(pacerPane(pacerReading({ recent: [
     { at: NOW - 60, repo: "shared-tools", waitSeconds: 12, runSeconds: 300, exit: 0, slot: 2,
       mode: "on", reason: null },
@@ -287,57 +287,44 @@ test("recent runs draw newest first, with a refusal and a failure each said plai
     { at: NOW - 240, repo: "old", waitSeconds: 0, runSeconds: 5, exit: 0, slot: 0,
       mode: "on", reason: null }] })), "Pacer");
   const runs = section.rows.filter((row) => row.key?.startsWith("pacer.run:"));
-  assert.deepEqual(runs.map((row) => row.title), ["shared-tools", "web-app", "fleet"]);
+  // A run that passed costs a person nothing to read and bury the ones that did.
+  assert.deepEqual(runs.map((row) => row.title), ["web-app", "fleet"]);
   assert.deepEqual(runs.map((row) => row.slot.map((slot) => slot.text).join("")),
-                   ["passed", "refused", "exit 1"]);
-  assert.deepEqual(runs.map((row) => row.state), [undefined, "failed", "failed"]);
-  assert.deepEqual(runs[0]?.meta.map((slot) => slot.text), ["waited 12s, ran 5m, 1m ago"]);
-  assert.deepEqual(runs[1]?.meta.map((slot) => slot.text), ["memory pressure, 2m ago"]);
-  assert.equal(runs[0]?.dim, true);
+                   ["refused", "exit 1"]);
+  assert.deepEqual(runs.map((row) => row.state), ["failed", "failed"]);
+  assert.deepEqual(runs[0]?.meta.map((slot) => slot.text), ["memory pressure, 2m ago"]);
+  assert.deepEqual(runs[1]?.meta.map((slot) => slot.text), ["waited 3s, ran 40s, 3m ago"]);
 });
 
-test("a run the person stopped reads as stopped, dim, never as a failure", () => {
+test("a run the person stopped is not drawn as a failure", () => {
   const section = group(pacerPane(pacerReading({ recent: [
     { at: NOW - 60, repo: "fleet", waitSeconds: 0, runSeconds: null, exit: 130, slot: null,
       mode: "interrupted", reason: null }] })), "Pacer");
   const runs = section.rows.filter((row) => row.key?.startsWith("pacer.run:"));
-  assert.deepEqual(runs.map((row) => row.slot.map((slot) => slot.text).join("")), ["stopped"]);
-  assert.equal(runs[0]?.state, undefined);
-  assert.equal(runs[0]?.dim, true);
+  // Ended on purpose, so it is neither a pass nor something that went wrong.
+  assert.deepEqual(runs, []);
 });
 
-test("pacer switched off says so, and its switch row presses to turn it back on", () => {
-  const pressed: boolean[] = [];
-  const actions = { copy: () => undefined, refuse: () => undefined, reply: () => undefined,
-                    pacer: (on: boolean) => { pressed.push(on); } };
-  const off = group(pacerPane(pacerReading({ enabled: false, switchSource: "file" }),
-                              { actions }), "Pacer");
-  assert.deepEqual(off.rows[0]?.slot.map((slot) => slot.text), ["off"]);
-  assert.deepEqual(off.rows[0]?.meta.map((slot) => slot.text), ["press to switch on"]);
+test("pacer switched off says so once, and carries the reason when it was not the person", () => {
+  const off = group(pacerPane(pacerReading({ enabled: false, switchSource: "file" })), "Pacer");
   assert.deepEqual(off.summary?.map((slot) => slot.text), ["off"]);
-  off.rows[0]?.press?.onPress();
-  assert.deepEqual(pressed, [true]);
-  // Turning pacer off lets every heavy run start at once, so it asks again first.
-  const on = group(pacerPane(pacerReading(), { actions }), "Pacer");
-  assert.deepEqual(on.rows[0]?.meta.map((slot) => slot.text), ["press to switch off"]);
-  const armed = group(pacerPane(pacerReading(), { actions, confirmingPacer: true }), "Pacer");
-  assert.deepEqual(armed.rows[0]?.meta.map((slot) => slot.text), ["press again to switch off"]);
-  armed.rows[0]?.press?.onPress();
-  assert.deepEqual(pressed, [true, false]);
-});
-
-test("a switch read from the environment says so, since a press there moves nothing", () => {
-  // The variable's name is pacer's own setting, so the row says what pacer said.
-  const section = group(pacerPane(pacerReading({ enabled: false, switchSource: "env",
-                                                 reason: "PACE_GATE=0 in the environment" })),
-                        "Pacer");
-  assert.deepEqual(section.rows[0]?.meta.map((slot) => slot.text),
-                   ["off for this shell: PACE_GATE=0 in the environment"]);
-  assert.equal(section.rows[0]?.press, undefined);
-  const unsaid = group(pacerPane(pacerReading({ enabled: false, switchSource: "env",
-                                                reason: null })), "Pacer");
-  assert.deepEqual(unsaid.rows[0]?.meta.map((slot) => slot.text),
-                   ["off for this shell, set in the environment"]);
+  // No row offers the switch: the band's gear is the one place to press it.
+  assert.equal(off.rows.some((row) => row.press !== undefined), false);
+  // An off the environment holds carries its reason, since the gear alone does
+  // not say it and no press can undo it.
+  const environment = group(pacerPane(pacerReading({ enabled: false, switchSource: "env",
+                                                     reason: "PACE_GATE=0 in the environment" })),
+                            "Pacer");
+  assert.deepEqual(environment.rows[0]?.meta.map((slot) => slot.text),
+                   ["4 slots, 6 per run", "off: PACE_GATE=0 in the environment"]);
+  assert.equal(environment.rows.some((row) => row.press !== undefined), false);
+  // A switch file that is merely missing is not an off anyone chose.
+  const missing = group(pacerPane(pacerReading({ enabled: false, switchSource: "missing",
+                                                 reason: "no switch file" })), "Pacer");
+  assert.deepEqual(missing.rows[0]?.meta.map((slot) => slot.text), ["4 slots, 6 per run"]);
+  // Turned on, the settings row says only what pacer reports.
+  const on = group(pacerPane(pacerReading()), "Pacer");
+  assert.deepEqual(on.rows[0]?.meta.map((slot) => slot.text), ["4 slots, 6 per run"]);
 });
 
 test("a machine without pacer draws no section, and a failed read draws the failure", () => {
@@ -1873,102 +1860,6 @@ test("a pull request read before checks were listed draws no dots and keeps its 
   assert.deepEqual(green?.slot, [{ text: "checks passed", color: "success" }]);
 });
 
-/** An event the digest reads, `ago` seconds before NOW. */
-function event(kind: string, title: string, ago: number, ref = "owner/project#1") {
-  return { at: NOW - ago, kind, title, ref };
-}
-
-function events(list: ReturnType<typeof event>[], state = "ready"): Snapshot["events"] {
-  return { state, events: list, sources: { trials: "ready", prs: "ready", roster: "ready" },
-           errors: [] } as never;
-}
-
-test("the digest shows only what happened since the last look, newest first", () => {
-  const list = [event("job-waiting", "repo feat/a", 60), event("pr-opened", "Add it", 600),
-                event("job-finished", "Old job", 7200)];
-  const pane = paneFrom(snapshot({ events: events(list) }), options({ lastSeen: NOW - 3600 }));
-  const digest = pane.digest;
-  assert.ok(digest, "no digest for two new events");
-  assert.equal(digest.lines.length, 2);
-  const words = digest.lines.map((line) => line.map((slot) => slot.text).join(""));
-  assert.match(words[0] ?? "", /Waiting on you.*repo feat\/a/);
-  assert.match(words[1] ?? "", /PR opened.*Add it/);
-  assert.equal(words.some((value) => value.includes("Old job")), false);
-  assert.equal(digest.through, NOW - 60);
-  assert.equal(digest.heading.map((slot) => slot.text).join("").includes("2 new"), true);
-});
-
-test("the digest draws at most five lines and counts the rest", () => {
-  const list = Array.from({ length: 8 }, (_, index) => event("pr-opened", "PR " + index, 60 + index));
-  const pane = paneFrom(snapshot({ events: events([...list, event("pr-opened", "seen", 9000)]) }),
-                        options({ lastSeen: NOW - 3600 }));
-  const lines = pane.digest?.lines ?? [];
-  assert.equal(lines.length, 6);
-  assert.equal(lines.at(-1)?.map((slot) => slot.text).join("").trim(), "+3 more");
-  // Every event the reading holds is newer than the look only when the oldest
-  // one is: then the reading's own limit may have left some out.
-  const capped = paneFrom(snapshot({ events: events(list) }), options({ lastSeen: NOW - 3600 }));
-  assert.equal(capped.digest?.lines.at(-1)?.map((slot) => slot.text).join("").trim(), "+3 or more");
-});
-
-test("nothing new draws no digest, and a pane told no last look draws none", () => {
-  const list = [event("pr-opened", "Old", 7200)];
-  assert.equal(paneFrom(snapshot({ events: events(list) }), options({ lastSeen: NOW - 60 })).digest ?? null,
-               null);
-  assert.equal(paneFrom(snapshot({ events: events([], "empty") }), options({ lastSeen: NOW - 60 }))
-    .digest ?? null, null);
-  assert.equal(paneFrom(snapshot({ events: events(list) }), options()).digest ?? null, null);
-  // A reading from before events were read carries no document, and draws none.
-  assert.equal(paneFrom(snapshot(), options({ lastSeen: NOW - 60 })).digest ?? null, null);
-});
-
-test("a first look shows the newest events and says it is the first", () => {
-  const pane = paneFrom(snapshot({ events: events([event("job-waiting", "Needs you", 30)]) }),
-                        options({ lastSeen: null }));
-  assert.equal(pane.digest?.lines.length, 1);
-  assert.match(pane.digest?.heading.map((slot) => slot.text).join("") ?? "", /first look/);
-});
-
-test("a digest whose events could not be read says so, and never that nothing is new", () => {
-  const failed = { state: "failed", events: [], sources: {},
-                   errors: [{ source: "events", reason: "TypeError: boom" }] };
-  const pane = paneFrom(snapshot({ events: failed as never }), options({ lastSeen: NOW - 60 }));
-  assert.ok(pane.digest, "a failed digest drew nothing");
-  const said = pane.digest.lines.flat().map((slot) => slot.text).join("");
-  assert.match(said, /could not read/i);
-  assert.equal(pane.digest.lines.flat().some((slot) => slot.color === "error"), true);
-  assert.equal(pane.digest.through, null);
-  assert.equal(/nothing new/i.test(said), false);
-});
-
-test("a digest names a source it could not see beside what it did", () => {
-  const blind = { ...events([event("pr-opened", "Add it", 60)]),
-                  sources: { trials: "failed", prs: "ready", roster: "ready" } } as never;
-  const said = (paneFrom(snapshot({ events: blind }), options({ lastSeen: NOW - 600 })).digest?.lines ?? [])
-    .flat().map((slot) => slot.text).join("|");
-  assert.match(said, /trials could not be read/);
-});
-
-test("a source the events could not see is named even when nothing they saw is new", () => {
-  const blindAndQuiet = (list: ReturnType<typeof event>[], state: string) =>
-    ({ ...events(list, state), sources: { trials: "failed", prs: "ready", roster: "ready" } }) as never;
-  for (const [label, document] of [
-    ["an empty reading", blindAndQuiet([], "empty")],
-    ["only events from before the look", blindAndQuiet([event("pr-opened", "Old", 7200)], "ready")],
-  ] as const) {
-    const digest = paneFrom(snapshot({ events: document }), options({ lastSeen: NOW - 60 })).digest;
-    assert.ok(digest, label + " hid a source it could not read");
-    const said = digest.lines.flat().map((slot) => slot.text).join("|");
-    assert.match(said, /trials could not be read/, label);
-    assert.equal(digest.lines.flat().some((slot) => slot.color === "warning"), true, label);
-    // Nothing was drawn as new, so closing the pane moves no look.
-    assert.equal(digest.through, null, label);
-    assert.equal(said.includes("Old"), false, label);
-    assert.match(digest.heading.map((slot) => slot.text).join(""), /nothing new from what could be read/i,
-                 label);
-  }
-});
-
 const SERIES = { bucket_minutes: 60, buckets: [0, 1.5, 0, 3.25], total: 4.75, complete: true, sessions: 2 };
 
 test("the sessions section draws the roster's spend over the window, with its total", () => {
@@ -1992,13 +1883,6 @@ test("a spend series that is not complete is a floor and is marked so", () => {
   assert.equal(label.some((slot) => slot.text.includes("incomplete") && slot.color === "warning"), true);
 });
 
-test("a 60-column pane draws the unread-source line of a quiet digest, cut rather than dropped", () => {
-  const quiet = { ...events([], "empty"), sources: { trials: "failed", prs: "ready", roster: "ready" } } as never;
-  const drawn = renderedText(renderPane(paneFrom(snapshot({ events: quiet }),
-                                                 options({ lastSeen: NOW - 60, width: 60 })))).join("");
-  assert.match(drawn, /Nothing new from what could be read/);
-  assert.match(drawn, /trials could not be/, drawn);
-});
 
 test("a 60-column pane keeps the incomplete mark beside a two-digit floor", () => {
   for (const total of [14.75, 1234.56]) {
@@ -2262,21 +2146,6 @@ test("a load source that could not be read is named rather than drawn as a quiet
   const drawn = paneFrom(built, options({ sectionOrder: ["load", "warnings"] }));
   assert.equal(group(drawn, "Load").state, "failed");
   assert.equal(group(drawn, "Load").rows.length, 0);
-});
-
-test("a switch pacer did not state offers no press, and an armed press waits only while on", () => {
-  const pressed: boolean[] = [];
-  const actions = { copy: () => undefined, refuse: () => undefined, reply: () => undefined,
-                    pacer: (wanted: boolean) => { pressed.push(wanted); } };
-  const unread = group(pacerPane(pacerReading({ enabled: null }), { actions }), "Pacer");
-  assert.deepEqual(unread.rows[0]?.slot.map((slot) => slot.text), ["not read"]);
-  assert.equal(unread.rows[0]?.press, undefined);
-  // A first press armed while pacer was on means nothing once it reads off.
-  const off = group(pacerPane(pacerReading({ enabled: false }),
-                              { actions, confirmingPacer: true }), "Pacer");
-  assert.deepEqual(off.rows[0]?.meta.map((slot) => slot.text), ["press to switch on"]);
-  off.rows[0]?.press?.onPress();
-  assert.deepEqual(pressed, [true]);
 });
 
 test("a held slot says what pacer could not record about it", () => {

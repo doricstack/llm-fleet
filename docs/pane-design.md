@@ -28,8 +28,6 @@ llm-fleet                     3 working  1 waiting  1 failed
 
 +----------------------------------------------------------+
 | v  Pacer                                      1 of 2 busy |
-|   o Pacer                                                 on |
-|     press to switch off                                    |
 |   o Settings                          2 slots, 4 per run   |
 |     qos utility, nice 10                                   |
 |   o Slot 1                                     my-project  |
@@ -188,22 +186,11 @@ color, capped to the room the row has: failing checks are kept first, then
 pending ones, and every check left out is counted as `+N` beside the dots. The
 first failing check is named where the verdict would be.
 
-Under the controls the pane draws "Since you left": the events newer than the
-person's last look, newest first, five lines at most and the rest counted. The
-last look is the newest event a digest drew, and it moves only when the pane
-closes, by its key, its control, `/llm-fleet`, or Escape, which the band finds on its
-next paint. A digest left open is not yet read, so it stays. Each session keeps
-its own look in the host's state, written only at the version it read, so two
-loads of one session never move it back; a close the band finds while it draws
-is written at the next tick, or at the next prompt or the session's end when no
-tick has come, since the host refuses a write a paint makes. Every
-session also shares one in the
-store under `digest-seen`, which a new session starts from; the store has no
-compare-and-set, so two sessions closing in the same moment can leave the earlier
-look there, and another session's next digest shows a few events again. Nothing new draws nothing. Events that could not be
-read say so and never read as a quiet stretch, and a source the events could not
-see is named under what they did see. The session's end waits for the folds and
-the last look still being written, for two seconds at most, so a press made just
+The pane draws no list of what happened while the person was away. A section
+that gathered the day's events was read once and then passed over, and the
+sections below it already state what needs a person now: a failed run, a job
+waiting on input, a pull request whose checks fail. The session's end waits for
+the folds still being written, for two seconds at most, so a press made just
 before it closes lands and a host that stopped answering does not hold the end.
 
 ## Measured progress only

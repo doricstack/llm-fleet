@@ -282,8 +282,6 @@
      "name": "A gap between records longer than this ends a working segment"},
     {"path": "history.timelineSegmentLimit", "type": "integer", "default": 48, "minimum": 1,
      "name": "Timeline segments kept per session; the oldest are merged past it"},
-    {"path": "history.eventLimit", "type": "integer", "default": 50, "minimum": 1,
-     "name": "Events kept for the digest, newest first"},
 
     {"path": "sources.agents.inputPricePerMTok", "type": "map", "valueType": "number",
      "keyValues": ["fable-5-1", "opus-5-5", "opus-5", "opus-4-8", "opus-4-7", "sonnet-5-5",

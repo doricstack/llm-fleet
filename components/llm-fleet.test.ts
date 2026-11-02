@@ -816,18 +816,12 @@ test("the command opens the pane, and closes it when it is already open", async 
 test("a pane the person closed is opened by the next command, not closed again", async () => {
   // Escape closes the pane without a word to the command. The host says it
   // shut, and that is what the next /llm-fleet acts on.
-  const memory: Record<string, unknown> = { [SEEN]: { at: 1789995000 } };
-  const session: Record<string, unknown> = {};
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, session });
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT } });
   await driven.start();
   await driven.quiesce();
   await driven.run();
   await driven.hostClosed();
   await settles();
-  // What the pane showed is recorded as seen, as it is for a close the band
-  // notices; Escape is not a reason to show the same digest again.
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-  assert.deepEqual(memory[SEEN], { at: 1789999900 });
   const again = await driven.run() as { text: string };
   assert.deepEqual(driven.calls.opened, [PANE, PANE]);
   assert.deepEqual(driven.calls.closed, []);
@@ -1521,6 +1515,72 @@ test("a fold a person pressed is not undone by a slow host answering late", asyn
   const reloaded = renderedText(await driven.quiesce() as never).join("\n");
   assert.equal(reloaded.includes("\u25be\nWorktrees"), true);
   assert.equal(reloaded.includes("\u25b8\nBackground sessions"), true);
+});
+
+test("the tick a paint asked for is cancelled once it has made its writes", async () => {
+  // The host's late answer to a fold read is written at the next tick, since a
+  // paint may not write it. One tick is all it waits for: left standing, it
+  // would fire for the rest of the session.
+  const session: Record<string, unknown> = {};
+  const memory: Record<string, unknown> = { [FOLDS_KEY]: { sessions: true } };
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
+                        heldState: true });
+  await driven.start();
+  await driven.quiesce();
+  driven.releaseState();
+  await settles();
+  const before = driven.calls.cancelled;
+  driven.tick(AFTER_PAINT_MS);
+  await settles();
+  assert.deepEqual(session["llm-fleet/folded"], { sessions: true });
+  assert.equal(driven.calls.cancelled, before + 1);
+  // The tick that made them is gone, so firing it again writes nothing.
+  driven.tick(AFTER_PAINT_MS);
+  await settles();
+  assert.equal(driven.calls.stateSets.filter((key) => key === "llm-fleet/folded").length, 1);
+});
+
+test("with no clock, a fold a late answer brings waits for the next prompt", async () => {
+  // Without a clock there is no tick to make the write, so it waits for the
+  // next event that is not a paint. Writing it from the paint itself is the one
+  // thing the host refuses.
+  const session: Record<string, unknown> = {};
+  const memory: Record<string, unknown> = { [FOLDS_KEY]: { sessions: true } };
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
+                        heldState: true, noClock: true });
+  await driven.start();
+  await driven.quiesce();
+  driven.releaseState();
+  await settles();
+  assert.equal("llm-fleet/folded" in session, false);
+  await driven.prompt("next");
+  await settles();
+  assert.deepEqual(session["llm-fleet/folded"], { sessions: true });
+});
+
+test("with no clock, a fold a late answer brings is written when the session ends", async () => {
+  const session: Record<string, unknown> = {};
+  const memory: Record<string, unknown> = { [FOLDS_KEY]: { sessions: true } };
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
+                        heldState: true, noClock: true });
+  await driven.start();
+  await driven.quiesce();
+  driven.releaseState();
+  await settles();
+  assert.equal("llm-fleet/folded" in session, false);
+  await driven.end();
+  await settles();
+  assert.deepEqual(session["llm-fleet/folded"], { sessions: true });
+});
+
+test("a host with no clock still draws the pane", async () => {
+  // The ages on the pane move on a timer. A host that has no timer gives a pane
+  // whose ages stand still, never a paint that fails.
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, noClock: true });
+  await driven.start();
+  const tree = await driven.render();
+  assert.equal(renderedText(tree as never).join("\n").includes("llm-fleet"), true);
+  assert.deepEqual(driven.calls.refusedInRender, []);
 });
 
 test("a configuration that places no sections draws a pane with none", async () => {
@@ -2922,30 +2982,6 @@ test("pacer takes the band's gear; a press switches it and draws pacer's own ans
   assert.deepEqual(ran[1], ["--set", "on"]);
 });
 
-test("the pane's pacer row switches pacer off only on a second press", async () => {
-  const ran: string[][] = [];
-  const driven = stub({ answer: (argv) => {
-    if (argv[1]?.endsWith("pacer.py")) {
-      ran.push(argv.slice(2));
-      return { exitCode: 0, stdout: JSON.stringify({ state: "ready", enabled: false,
-        switchSource: "file", slotCount: 2, slots: [], errors: [] }) };
-    }
-    return undefined;
-  } });
-  await driven.start();
-  await driven.settle();
-  await driven.render();
-  await driven.press("pacer.switch");
-  await drain();
-  // The first press arms the switch-off and runs nothing.
-  assert.deepEqual(ran, []);
-  const armed = renderedText(await driven.render() as never).join("\n");
-  assert.equal(armed.includes("press again to switch off"), true);
-  await driven.press("pacer.switch");
-  await drain();
-  assert.deepEqual(ran, [["--set", "off"]]);
-});
-
 test("a first press to switch pacer off lapses, and a lapsed one only arms again", async () => {
   const ran: string[][] = [];
   const driven = stub({ answer: (argv) => {
@@ -3030,22 +3066,23 @@ test("another press while the switch-off is armed puts the arming down", async (
     return undefined;
   } });
   await driven.start();
-  await driven.settle();
-  await driven.render();
-  await driven.press("pacer.switch");
   await drain();
-  // Any other control the pane drew, pressed between the two.
+  await driven.band();
+  await driven.pressBand(BAND_PACER);
+  await drain();
+  // The first press arms the switch-off and runs nothing.
+  assert.deepEqual(ran, []);
+  // Any control the pane drew, pressed between the two, puts the arming down.
   await driven.render();
   await driven.press("fleet.section.sessions");
-  await driven.press("fleet.section.sessions");
   await drain();
-  await driven.render();
-  await driven.press("pacer.switch");
+  await driven.band();
+  await driven.pressBand(BAND_PACER);
   await drain();
   assert.deepEqual(ran, []);
 });
 
-test("a press from a row drawn before pacer moved runs nothing", async () => {
+test("a press from a reading drawn before pacer moved runs nothing", async () => {
   let enabled = false;
   const ran: string[][] = [];
   let whole = 0;
@@ -3060,9 +3097,7 @@ test("a press from a row drawn before pacer moved runs nothing", async () => {
   } });
   await driven.start();
   await driven.settle();
-  // Drawn while pacer was off: the row offers to switch it on.
-  const drawn = renderedText(await driven.render() as never).join("\n");
-  assert.equal(drawn.includes("press to switch on"), true);
+  await driven.band();
   // Another session switches it on, and this one reads that before the press.
   enabled = true;
   const before = whole;
@@ -3070,7 +3105,8 @@ test("a press from a row drawn before pacer moved runs nothing", async () => {
   await driven.band();
   await drain();
   assert.ok(whole > before, "no new reading landed before the press");
-  await driven.press("pacer.switch");
+  // The press reads pacer as it stands, so it does not ask for what is already on.
+  await driven.pressBand(BAND_PACER);
   await drain();
   assert.deepEqual(ran, []);
 });
@@ -5153,95 +5189,12 @@ test("a busy slot's elapsed time counts on between reads of pacer's status", asy
   assert.equal(driven.calls.argv.length, 0);
 });
 
-/** The store key the digest's last look is kept under, as the types contract declares it. */
-const SEEN = "digest-seen";
-/** Where the host holds this session's own look, keyed as the engine keys its values. */
-const HELD_SEEN = "llm-fleet/digestSeen";
-
-/** An ISO time at these epoch seconds, as the readers write one. */
-function isoAt(seconds: number): string {
-  return new Date(seconds * 1000).toISOString().replace(".000Z", "Z");
-}
-
-/** A reading holding two events, one newer than the last look the cases keep and one older. */
-const DIGEST = {
-  ...OUTPUT,
-  events: { state: "ready", sources: { trials: "ready", prs: "ready", roster: "ready" }, errors: [],
-            events: [{ at: isoAt(1789999900), kind: "trial-failed", title: "repo feat/new", ref: "k1" },
-                     { at: isoAt(1789990000), kind: "pr-opened", title: "Older pull", ref: "o/p#1" }] },
-};
-
-/** A reading whose events are these titles at these epoch seconds. */
-function digestOf(...entries: [string, number][]) {
-  return { ...DIGEST, events: { ...DIGEST.events,
-    events: entries.map(([title, at]) => ({ at: isoAt(at), kind: "pr-opened", title, ref: "o/p#" + at })) } };
-}
-
-/** Lets the store writes a press started finish, up to a bound. */
-async function storeSettles(memory: Record<string, unknown>, key: string): Promise<void> {
-  for (let turn = 0; turn < 50 && !(key in memory); turn += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-}
-
 /** Lets every write a press started finish. */
 async function settles(): Promise<void> {
   for (let turn = 0; turn < 30; turn += 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
-
-test("closing the pane keeps the newest event the digest drew, and the next look draws only newer", async () => {
-  const memory: Record<string, unknown> = { [SEEN]: { at: 1789995000 } };
-  const session: Record<string, unknown> = {};
-  const carried = { at: 1790000000, documents: DIGEST };
-  const driven = stub({ stored: carried, memory, session });
-  await driven.start();
-  const text = renderedText(await driven.quiesce() as never).join("\n");
-  assert.equal(text.includes("Since you left"), true, text);
-  assert.equal(text.includes("repo feat/new"), true);
-  // Older than the last look, so not news.
-  assert.equal(text.includes("Older pull"), false);
-  await driven.press("fleet.close");
-  await settles();
-  // The session's own look, held by the host, and the look every session shares.
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-  assert.deepEqual(memory[SEEN], { at: 1789999900 });
-  // The next session shares the store: nothing is newer than that look.
-  const next = stub({ stored: carried, memory, sessionId: "session-next" });
-  await next.start();
-  const again = renderedText(await next.quiesce() as never).join("\n");
-  assert.equal(again.includes("Since you left"), false, again);
-});
-
-test("a pane Escape closed moves the last look when the band next finds it shut", async () => {
-  const memory: Record<string, unknown> = {};
-  const session: Record<string, unknown> = {};
-  const panes = [{ id: PANE }];
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, session, panes });
-  await driven.start();
-  await driven.band();
-  // No last look yet: the first one shows the newest of what the reading holds.
-  const text = renderedText(await driven.quiesce() as never).join("\n");
-  assert.equal(text.includes("Older pull"), true, text);
-  // Escape closes the pane without a word to the plugin; the band sees it gone.
-  panes.length = 0;
-  await driven.band();
-  await settles();
-  // The band is a paint, and the host refuses a write a paint makes: nothing
-  // is written until the next tick, which is an event of its own.
-  assert.equal(SEEN in memory, false);
-  assert.equal(HELD_SEEN in session, false);
-  driven.tick(AFTER_PAINT_MS);
-  await storeSettles(memory, SEEN);
-  await settles();
-  assert.deepEqual(memory[SEEN], { at: 1789999900 });
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-  assert.deepEqual(driven.calls.refusedInRender, []);
-  // One tick is all it waits for: the timer is stopped, not left running.
-  const ticks = driven.calls.timers.filter((timer) => timer.ms === AFTER_PAINT_MS);
-  assert.equal(ticks.length > 0 && ticks.every((timer) => timer.cancelled), true);
-});
 
 test("a restored fold written at the tick never lands over another load's later press", async () => {
   // Two loads of one session share the host's fold and the store. A's restore
@@ -5471,57 +5424,6 @@ test("a fold read that lands after the session ended is still written", async ()
   assert.equal(driven.calls.stateSets.filter((key) => key === "llm-fleet/folded").length, 2);
 });
 
-test("a close the band found is written at the session's end when no tick came first", async () => {
-  const memory: Record<string, unknown> = {};
-  const session: Record<string, unknown> = {};
-  const panes = [{ id: PANE }];
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, session, panes });
-  await driven.start();
-  await driven.band();
-  await driven.quiesce();
-  panes.length = 0;
-  await driven.band();
-  await driven.end();
-  await storeSettles(memory, SEEN);
-  await settles();
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-  assert.deepEqual(memory[SEEN], { at: 1789999900 });
-});
-
-test("with no clock, a close the band found waits for the next prompt rather than the paint", async () => {
-  const memory: Record<string, unknown> = {};
-  const session: Record<string, unknown> = {};
-  const panes = [{ id: PANE }];
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, session, panes,
-                        noClock: true });
-  await driven.start();
-  await driven.band();
-  await driven.quiesce();
-  panes.length = 0;
-  await driven.band();
-  await settles();
-  assert.deepEqual(driven.calls.refusedInRender, []);
-  assert.equal(HELD_SEEN in session, false);
-  await driven.prompt("next");
-  await storeSettles(memory, SEEN);
-  await settles();
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-});
-
-test("a session's look is kept however many loads write first", async () => {
-  // Each refusal is another load's write landing; none of them is a reason to
-  // give up on the later look.
-  const session: Record<string, unknown> = {};
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory: {}, session,
-                        stateConflicts: 6 });
-  await driven.start();
-  await driven.quiesce();
-  await driven.press("fleet.close");
-  await settles();
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-  assert.equal(driven.calls.stateSets.filter((key) => key === HELD_SEEN).length, 7);
-});
-
 test("a press made before the restored fold is written is not undone when it is", async () => {
   // The restore read for a paint, so its write waits for the tick; a press in
   // between wrote itself, and the tick must write the fold as it stands then.
@@ -5542,150 +5444,3 @@ test("a press made before the restored fold is written is not undone when it is"
   assert.equal(reloaded.includes("▾\nWorktrees"), true, reloaded);
 });
 
-test("a store that cannot say what it holds has no look written over it", async () => {
-  // Blind, a write could move back a look another session moved further.
-  const memory: Record<string, unknown> = { [SEEN]: { at: 1790000500 } };
-  const session: Record<string, unknown> = {};
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, session,
-                        gateGet: (key) => (key === SEEN ? Promise.reject(new Error("store down")) : undefined) });
-  await driven.start();
-  await driven.quiesce();
-  await driven.press("fleet.close");
-  await settles();
-  assert.deepEqual(memory[SEEN], { at: 1790000500 });
-  assert.equal(driven.calls.stored.some((entry) => entry.key === SEEN), false);
-  // The session's own look is the host's, and it is still kept.
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-});
-
-test("a host that refuses a write without moving its version is not asked again", async () => {
-  // Only a version that moved is another load's write; a refusal at the version
-  // read is no race, and asking again would never end.
-  const session: Record<string, unknown> = {};
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory: {}, session,
-                        stateStuck: true });
-  await driven.start();
-  await driven.quiesce();
-  await driven.press("fleet.close");
-  await settles();
-  assert.equal(HELD_SEEN in session, false);
-  assert.equal(driven.calls.stateSets.filter((key) => key === HELD_SEEN).length, 1);
-});
-
-test("a pane closed before it drew a digest moves no last look", async () => {
-  const memory: Record<string, unknown> = { [SEEN]: { at: 1789995000 } };
-  const panes: { id: string }[] = [];
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, panes });
-  await driven.start();
-  await driven.run();
-  panes.push({ id: PANE });
-  await driven.run("close");
-  await settles();
-  assert.deepEqual(memory[SEEN], { at: 1789995000 });
-  assert.equal(driven.calls.stored.some((entry) => entry.key === SEEN), false);
-  assert.equal(driven.calls.stated.some((entry) => entry.key === HELD_SEEN), false);
-});
-
-test("a shared look another session moved further is not moved back", async () => {
-  const memory: Record<string, unknown> = { [SEEN]: { at: 1789995000 } };
-  const session: Record<string, unknown> = {};
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, session });
-  await driven.start();
-  await driven.quiesce();
-  // Another session closed its pane on a later event meanwhile.
-  memory[SEEN] = { at: 1790000500 };
-  await driven.press("fleet.close");
-  await settles();
-  assert.deepEqual(memory[SEEN], { at: 1790000500 });
-  assert.equal(driven.calls.stored.some((entry) => entry.key === SEEN), false);
-  // This session still keeps its own look.
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-});
-
-test("two loads of one session closing at once never move its look back", async () => {
-  // A hot reload leaves the old load's write in flight while the new load writes.
-  // The host's values are shared by both and written only at the version read,
-  // so the stale write is refused and re-read rather than landing over the later.
-  const memory: Record<string, unknown> = {};
-  const session: Record<string, unknown> = {};
-  let release: () => void = () => undefined;
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  const before = stub({ stored: { at: 1790000000, documents: digestOf(["first", 1789999000]) }, memory,
-                        session, gateState: (key) => (key === HELD_SEEN ? held : undefined) });
-  const after = stub({ stored: { at: 1790000000,
-                                 documents: digestOf(["second", 1789999900], ["first", 1789999000]) },
-                       memory, session });
-  await before.start();
-  await after.start();
-  await before.quiesce();
-  await after.quiesce();
-  await before.press("fleet.close");
-  await after.press("fleet.close");
-  await settles();
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-  release();
-  await settles();
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-  assert.equal(before.calls.stated.some((entry) => entry.key === HELD_SEEN), false,
-               "the stale write landed");
-  // The shared look is the later one too: the earlier load found it already there.
-  assert.deepEqual(memory[SEEN], { at: 1789999900 });
-});
-
-test("a load whose later look was refused reads again and keeps it", async () => {
-  // The other order: the later look's write is held while the earlier one lands,
-  // so the version it read is gone and its write is refused. It must read the
-  // earlier look and write over it, or the session keeps the earlier look.
-  const memory: Record<string, unknown> = {};
-  const session: Record<string, unknown> = {};
-  let release: () => void = () => undefined;
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  const before = stub({ stored: { at: 1790000000, documents: digestOf(["first", 1789999000]) }, memory,
-                        session });
-  const after = stub({ stored: { at: 1790000000,
-                                 documents: digestOf(["second", 1789999900], ["first", 1789999000]) },
-                       memory, session, gateState: (key) => (key === HELD_SEEN ? held : undefined) });
-  await before.start();
-  await after.start();
-  await before.quiesce();
-  await after.quiesce();
-  await after.press("fleet.close");
-  await settles();
-  await before.press("fleet.close");
-  await settles();
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999000 });
-  release();
-  await settles();
-  assert.deepEqual(session[HELD_SEEN], { at: 1789999900 });
-});
-
-test("a pane reopened in its session starts from the session's own look, whatever the shared one says", async () => {
-  // The shared look has no compare-and-set, so a close that crossed another can
-  // leave it behind; the session's own look, held by the host, does not move back.
-  const memory: Record<string, unknown> = { [SEEN]: { at: 1 } };
-  const session: Record<string, unknown> = { [HELD_SEEN]: { at: 1789999900 } };
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, session });
-  await driven.start();
-  const text = renderedText(await driven.quiesce() as never).join("\n");
-  assert.equal(text.includes("Since you left"), false, text);
-  // And with nothing held for the session, the shared look is what it starts from.
-  const fresh = stub({ stored: { at: 1790000000, documents: DIGEST },
-                       memory: { [SEEN]: { at: 1789999900 } }, session: {} });
-  await fresh.start();
-  const again = renderedText(await fresh.quiesce() as never).join("\n");
-  assert.equal(again.includes("Since you left"), false, again);
-});
-
-test("a host that will not hold the session's look still gets the shared one", async () => {
-  const memory: Record<string, unknown> = {};
-  const driven = stub({ stored: { at: 1790000000, documents: DIGEST }, memory, refusesState: true });
-  await driven.start();
-  await driven.quiesce();
-  await driven.press("fleet.close");
-  await storeSettles(memory, SEEN);
-  assert.deepEqual(memory[SEEN], { at: 1789999900 });
-  // The pane in front of the person carries on: reopened, it has nothing new.
-  await driven.run();
-  const text = renderedText(await driven.quiesce() as never).join("\n");
-  assert.equal(text.includes("Since you left"), false, text);
-});

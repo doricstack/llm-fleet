@@ -918,12 +918,12 @@ class LayoutTests(ConfigTestCase):
         self.assert_errors([("E_CONFIG_VALUE", "limits.jobStateClockSkewSeconds")],
                            {"limits": {"jobStateClockSkewSeconds": -1}})
 
-    def test_the_series_timeline_event_and_check_bounds_have_defaults_and_limits(self) -> None:
+    def test_the_series_timeline_and_check_bounds_have_defaults_and_limits(self) -> None:
         resolved = self.load()
         history = resolved["history"]
         self.assertEqual((history["spendWindowHours"], history["spendBucketMinutes"],
-                          history["timelineIdleMinutes"], history["timelineSegmentLimit"],
-                          history["eventLimit"]), (24, 60, 5, 48, 50))
+                          history["timelineIdleMinutes"], history["timelineSegmentLimit"]),
+                         (24, 60, 5, 48))
         self.assertEqual(resolved["sources"]["prs"]["checkRunLimit"], 12)
         # No dots at all is a choice: every check is then only counted.
         self.assertEqual(self.load({"sources": {"prs": {"checkRunLimit": 0}}})
@@ -932,14 +932,14 @@ class LayoutTests(ConfigTestCase):
                             ("history.spendBucketMinutes", 0),
                             ("history.spendBucketMinutes", 1441),
                             ("history.timelineIdleMinutes", 0),
-                            ("history.timelineSegmentLimit", 0), ("history.eventLimit", 0),
+                            ("history.timelineSegmentLimit", 0),
                             ("sources.prs.checkRunLimit", -1),
                             ("sources.prs.checkRunLimit", 101)):
             document: dict = {}
             set_path(document, path, value)
             self.assert_errors([("E_CONFIG_VALUE", path)], document)
-        self.assert_errors([("E_CONFIG_TYPE", "history.eventLimit")],
-                           {"history": {"eventLimit": 2.5}})
+        self.assert_errors([("E_CONFIG_TYPE", "history.timelineSegmentLimit")],
+                           {"history": {"timelineSegmentLimit": 2.5}})
 
     def test_voice_must_belong_to_the_selected_group(self) -> None:
         self.assert_errors([("E_CONFIG_RULE", "speech.voice")],

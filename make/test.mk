@@ -37,7 +37,6 @@ test-readers: ## Run the reader suites against real stub commands, stores and fi
 	$(TEST_ENV) $(PYTHON) tests/test_reader_agents.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_pacer.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_load.py -v
-	$(TEST_ENV) $(PYTHON) tests/test_reader_events.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_session.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_alerts.py -v
 	$(TEST_ENV) $(PYTHON) tests/test_reader_custom.py -v

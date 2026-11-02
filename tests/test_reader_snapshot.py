@@ -73,14 +73,9 @@ class SnapshotCase(unittest.TestCase):
 
     def test_every_document_is_present_when_everything_is_off(self):
         result = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0)
-        self.assertEqual(sorted(result), ["alerts", "band", "custom", "events", "generated_at",
+        self.assertEqual(sorted(result), ["alerts", "band", "custom", "generated_at",
                                           "load", "pacer", "pane", "prs", "roster",
                                           "session", "skills", "worktrees"])
-        # Nothing was read, so the digest holds nothing and says which sources
-        # it could not see.
-        self.assertEqual(result["events"], {
-            "state": "empty", "events": [], "errors": [],
-            "sources": {"prs": "disabled", "roster": "unavailable"}})
         # The job roster is on by default, so with no provider home configured it
         # is unavailable rather than switched off; the rest are off by default.
         self.assertEqual(result["roster"]["state"], "unavailable")
@@ -619,66 +614,57 @@ class JobStateTests(unittest.TestCase):
         (folder / "state.json").write_text(json.dumps(body), encoding="utf-8")
 
     def entered(self, now, config=None):
-        """Each job's transition time, and the job events the same read's digest holds."""
+        """Each job's transition time, as the read dated it."""
         result = snapshot.read_snapshot(config or self.config(), now=now)
         self.assertEqual(result["roster"]["state"], "ready", result["roster"]["errors"])
-        times = {job["id"]: job["entered_at"] for job in result["roster"]["jobs"]}
-        found = {event["ref"]: (event["kind"], event["at"])
-                 for event in result["events"]["events"] if event["kind"].startswith("job-")}
-        return times, found
+        return {job["id"]: job["entered_at"] for job in result["roster"]["jobs"]}
 
     def test_a_job_first_seen_waiting_is_dated_by_its_own_file(self):
         self.rows("blocked")
         self.job_file("job-0", state="blocked", updatedAt=FIRST - 300)
-        times, found = self.entered(FIRST)
+        times = self.entered(FIRST)
         self.assertEqual(times, {"job-0": FIRST - 300})
-        self.assertEqual(found, {"one:job-0": ("job-waiting", iso(FIRST - 300, 0))})
 
     def test_a_job_first_seen_waiting_with_no_recorded_time_has_none(self):
         # Nobody saw it begin to wait, so the read that first saw it is no time
-        # for the digest to call new, on this read or any later one.
+        # for the read to call the wait's start, on this read or any later one.
         self.rows("blocked")
         for now in (FIRST, FIRST + 20):
-            times, found = self.entered(now)
+            times = self.entered(now)
             self.assertEqual(times, {"job-0": None})
-            self.assertEqual(found, {})
 
     def test_a_job_seen_to_begin_waiting_is_dated_by_that_read_across_reads(self):
         self.rows("working")
         self.entered(FIRST)
         self.rows("blocked")
-        self.assertEqual(self.entered(FIRST + 20)[0], {"job-0": FIRST + 20})
-        times, found = self.entered(FIRST + 40)
+        self.assertEqual(self.entered(FIRST + 20), {"job-0": FIRST + 20})
+        times = self.entered(FIRST + 40)
         self.assertEqual(times, {"job-0": FIRST + 20})
-        self.assertEqual(found, {"one:job-0": ("job-waiting", iso(FIRST + 20, 0))})
 
     def test_a_finished_job_is_dated_by_its_files_finish(self):
         self.rows("done")
         self.job_file("job-0", state="done", lastTerminalAt=FIRST - 100, updatedAt=FIRST - 90)
-        times, found = self.entered(FIRST)
+        times = self.entered(FIRST)
         self.assertEqual(times, {"job-0": FIRST - 100})
-        self.assertEqual(found, {"one:job-0": ("job-finished", iso(FIRST - 100, 0))})
 
     def test_a_dated_wait_keeps_its_date_while_the_file_is_rewritten(self):
         self.rows("blocked")
         self.job_file("job-0", state="blocked", updatedAt=FIRST - 300)
-        self.assertEqual(self.entered(FIRST)[0], {"job-0": FIRST - 300})
+        self.assertEqual(self.entered(FIRST), {"job-0": FIRST - 300})
         # The job writes its file again and is still waiting: the same wait is
         # not news a second time.
         self.job_file("job-0", state="blocked", updatedAt=FIRST + 10)
-        times, found = self.entered(FIRST + 20)
+        times = self.entered(FIRST + 20)
         self.assertEqual(times, {"job-0": FIRST - 300})
-        self.assertEqual(found, {"one:job-0": ("job-waiting", iso(FIRST - 300, 0))})
 
     def test_a_wait_first_seen_undated_is_not_dated_by_a_later_rewrite(self):
         self.rows("blocked")
-        self.assertEqual(self.entered(FIRST)[0], {"job-0": None})
+        self.assertEqual(self.entered(FIRST), {"job-0": None})
         # Written after a read already saw the job waiting, so it is not when
         # the wait began.
         self.job_file("job-0", state="blocked", updatedAt=FIRST + 10)
-        times, found = self.entered(FIRST + 20)
+        times = self.entered(FIRST + 20)
         self.assertEqual(times, {"job-0": None})
-        self.assertEqual(found, {})
 
     def test_a_new_wait_after_working_takes_a_new_date(self):
         self.rows("blocked")
@@ -689,7 +675,7 @@ class JobStateTests(unittest.TestCase):
         self.entered(FIRST + 20)
         self.rows("blocked")
         self.job_file("job-0", state="blocked", updatedAt=FIRST + 30)
-        self.assertEqual(self.entered(FIRST + 40)[0], {"job-0": FIRST + 30})
+        self.assertEqual(self.entered(FIRST + 40), {"job-0": FIRST + 30})
 
     def test_a_file_older_than_the_change_a_read_saw_does_not_date_the_new_wait(self):
         # The file still holds an earlier wait; a read saw the job working
@@ -698,9 +684,8 @@ class JobStateTests(unittest.TestCase):
         self.rows("working")
         self.entered(FIRST)
         self.rows("blocked")
-        times, found = self.entered(FIRST + 20)
+        times = self.entered(FIRST + 20)
         self.assertEqual(times, {"job-0": FIRST + 20})
-        self.assertEqual(found, {"one:job-0": ("job-waiting", iso(FIRST + 20, 0))})
 
     def test_a_job_first_seen_finished_is_kept_by_its_finish_not_its_start(self):
         # Started 1000 seconds ago, past a 600-second finished window, but it
@@ -708,9 +693,8 @@ class JobStateTests(unittest.TestCase):
         config = self.config(history={"finishedJobSeconds": 600})
         self.rows("done")
         self.job_file("job-0", state="done", lastTerminalAt=FIRST - 60)
-        times, found = self.entered(FIRST, config)
+        times = self.entered(FIRST, config)
         self.assertEqual(times, {"job-0": FIRST - 60})
-        self.assertEqual(found, {"one:job-0": ("job-finished", iso(FIRST - 60, 0))})
 
     def test_a_file_that_disagrees_with_the_registry_or_the_clock_dates_nothing(self):
         self.rows("blocked", "blocked", "blocked")
@@ -719,9 +703,8 @@ class JobStateTests(unittest.TestCase):
         # A time well past the read was not written by this machine's clock.
         self.job_file("job-1", state="blocked", updatedAt=FIRST + 3600)
         self.job_file("job-2", state="blocked", updatedAt="yesterday")
-        times, found = self.entered(FIRST)
+        times = self.entered(FIRST)
         self.assertEqual(times, {"job-0": None, "job-1": None, "job-2": None})
-        self.assertEqual(found, {})
 
     def test_a_state_that_holds_keeps_the_time_it_began_across_reads(self):
         self.rows("blocked", "working")
