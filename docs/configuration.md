@@ -251,7 +251,6 @@ A command that is not on the PATH reads as unavailable; one that exits nonzero, 
 | `alerts.tabTint.waitingRgb` | three byte integers | `[255,176,0]` | Same; read by the tab helper from the configuration, not carried in the reading |
 | `alerts.tabTint.staleSeconds` | integer, at least 30 | None; each session kept its own tint | `120`; read by the tab helper: a session sharing a tab whose entry in the tab's locked record is older than this no longer counts toward the tab's color, and each session says its level again every third of it, none included while tinting is on, so a failure whose session died is let go |
 | `speech.enabled` | boolean | On | `false` until user opts in and supplies synthesis |
-| `speech.backend` | enum | Local Kokoro WAV generation | `kokoro`; no system-voice fallback |
 | `speech.command` | executable path or null | Home-relative local synthesis binary | `null`; explain unavailable when speech requested |
 | `speech.group` | enum | Female | `female` |
 | `speech.voice` | string or null | Stored pick, otherwise first usable voice | `null`; use group order |

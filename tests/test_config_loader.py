@@ -951,8 +951,11 @@ class LayoutTests(ConfigTestCase):
         resolved = self.load({"speech": {"group": "male", "voice": "am_onyx"}})
         self.assertEqual(resolved["speech"]["voice"], "am_onyx")
 
-    def test_speech_backend_and_group_are_declared_choices(self) -> None:
-        self.assert_errors([("E_CONFIG_VALUE", "speech.backend")], {"speech": {"backend": "system"}})
+    def test_the_speech_group_is_a_declared_choice_and_the_backend_is_gone(self) -> None:
+        # The backend named one implementation and no module read it. A document
+        # naming it now takes the same refusal as any other retired setting.
+        self.assert_errors([("E_CONFIG_UNKNOWN_KEY", "speech.backend")],
+                           {"speech": {"backend": "system"}})
         self.assert_errors([("E_CONFIG_VALUE", "speech.group")], {"speech": {"group": "robot"}})
         resolved = self.load({"speech": {"enabled": True}})
         self.assertFalse(resolved["speech"]["enabled"] is False)

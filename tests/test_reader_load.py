@@ -297,6 +297,19 @@ PhysMem: 126G used (9887M wired, 0B compressor), 1634M unused.
         self.assertEqual(system["memoryUsedBytes"], (16000000 - 2000000) * 1024)
         self.assertIsNone(system["loadAverage"])
 
+    def test_a_windows_rate_is_the_busy_share_of_two_samples(self):
+        # GetSystemTimes counts idle, kernel and user ticks, and the kernel
+        # total already holds the idle ones. Between the samples the kernel
+        # gained 100 ticks and user 100, of which 50 were idle: three quarters
+        # of the machine was busy.
+        first = (100, 300, 200)
+        second = (150, 400, 300)
+        self.assertEqual(load.windows_cpu_percent(first, second), 75.0)
+        # A machine that gave nothing between the samples states no figure
+        # rather than a measured zero.
+        self.assertIsNone(load.windows_cpu_percent(first, first))
+        self.assertEqual(load.windows_cpu_percent((0, 0, 0), (100, 100, 0)), 0.0)
+
     def test_a_machine_with_two_processor_packages_reports_the_whole_machine(self):
         # wmic prints one block per processor instance. Keeping the last one
         # drew one package's share as the machine's: 3 percent while the other
@@ -336,6 +349,20 @@ PhysMem: 126G used (9887M wired, 0B compressor), 1634M unused.
         self.assertEqual(len(system["loadAverage"]), 3)
         self.assertLessEqual(system["memoryUsedBytes"], system["memoryTotalBytes"])
 
+    @unittest.skipUnless(os.name == "nt", "Windows is where the kernel32 read runs")
+    def test_a_windows_machine_answers_its_own_figures_without_a_command(self):
+        # wmic is gone on Windows 11 24H2 and PowerShell takes longer to start
+        # than a read may wait, so the platform's own interface is asked first.
+        # This is the live check: the counters come from the running machine.
+        system = load.windows_system()
+        self.assertIsNotNone(system)
+        assert system is not None
+        self.assertIsNotNone(system["cpuPercent"], system)
+        self.assertGreaterEqual(system["cpuPercent"], 0.0)
+        self.assertLessEqual(system["cpuPercent"], 100.0)
+        self.assertGreater(system["memoryTotalBytes"], 0)
+        self.assertLessEqual(system["memoryUsedBytes"], system["memoryTotalBytes"])
+
     @unittest.skipUnless(os.name == "nt", "Windows is where the PowerShell fallback runs")
     def test_a_windows_machine_without_wmic_is_asked_through_powershell(self):
         # Windows 11 24H2 turns `wmic` off by default, so the reader asks the
@@ -347,7 +374,11 @@ PhysMem: 126G used (9887M wired, 0B compressor), 1634M unused.
                               "echo TotalVisibleMemorySize=16000000\r\n"
                               "echo FreePhysicalMemory=2000000\r\n"
                               "echo LoadPercentage=42\r\n")
-            system = load.system_load({"PATH": folder}, 10.0)
+            # The platform's own interface is answered with nothing, which is
+            # what a machine that refuses that call looks like: the command
+            # behind it is the subject here.
+            with mock.patch.object(load, "windows_system", lambda: None):
+                system = load.system_load({"PATH": folder}, 10.0)
         self.assertIsNotNone(system, "the PowerShell answer was not read")
         assert system is not None
         self.assertEqual(system["cpuPercent"], 42.0)
@@ -366,7 +397,9 @@ PhysMem: 126G used (9887M wired, 0B compressor), 1634M unused.
             asked.append(list(command))
             return ""
 
-        with mock.patch.object(load, "_print", record), mock.patch.object(load, "PLATFORM", "nt"):
+        with mock.patch.object(load, "_print", record), \
+                mock.patch.object(load, "windows_system", lambda: None), \
+                mock.patch.object(load, "PLATFORM", "nt"):
             load.system_load({"PATH": ""}, 3.0)
         powershell = [command for command in asked if command[0] == "powershell"]
         self.assertEqual(len(powershell), 1)

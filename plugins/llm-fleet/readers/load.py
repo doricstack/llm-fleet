@@ -418,10 +418,86 @@ def _file_text(path: str) -> str:
         return ""
 
 
+def windows_cpu_percent(first: tuple[int, int, int],
+                        second: tuple[int, int, int]) -> float | None:
+    """The busy share between two GetSystemTimes samples, or None without ticks.
+
+    Each sample is (idle, kernel, user), and the kernel total already holds the
+    idle ticks, so the machine's whole time between the samples is kernel plus
+    user and what it was busy with is that less the idle.
+    """
+    idle = second[0] - first[0]
+    total = (second[1] - first[1]) + (second[2] - first[2])
+    if total <= 0:
+        return None
+    return 100.0 * max(0, total - idle) / total
+
+
+def windows_system() -> dict[str, Any] | None:
+    """Windows' own figures through kernel32, with no command to start.
+
+    `wmic` is gone from Windows 11 24H2, and PowerShell takes tens of seconds to
+    start on a cold machine, which is longer than a read may wait: kernel32 is
+    already loaded and answers at once.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return None
+
+    class FileTime(ctypes.Structure):
+        _fields_ = [("low", wintypes.DWORD), ("high", wintypes.DWORD)]
+
+    class MemoryStatus(ctypes.Structure):
+        _fields_ = [("length", wintypes.DWORD), ("load", wintypes.DWORD),
+                    ("totalPhysical", ctypes.c_ulonglong),
+                    ("availablePhysical", ctypes.c_ulonglong),
+                    ("totalPageFile", ctypes.c_ulonglong),
+                    ("availablePageFile", ctypes.c_ulonglong),
+                    ("totalVirtual", ctypes.c_ulonglong),
+                    ("availableVirtual", ctypes.c_ulonglong),
+                    ("availableExtendedVirtual", ctypes.c_ulonglong)]
+
+    try:
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+
+        def ticks() -> tuple[int, int, int]:
+            samples = (FileTime(), FileTime(), FileTime())
+            if not kernel.GetSystemTimes(*(ctypes.byref(sample) for sample in samples)):
+                raise OSError(ctypes.get_last_error())
+            return tuple((sample.high << 32) | sample.low for sample in samples)  # type: ignore[return-value]
+
+        first = ticks()
+        time.sleep(PROC_SAMPLE_SECONDS)
+        second = ticks()
+        memory = MemoryStatus()
+        memory.length = ctypes.sizeof(MemoryStatus)
+        if not kernel.GlobalMemoryStatusEx(ctypes.byref(memory)):
+            raise OSError(ctypes.get_last_error())
+    except (OSError, AttributeError):
+        return None
+    total = int(memory.totalPhysical)
+    available = int(memory.availablePhysical)
+    return {"cpuPercent": windows_cpu_percent(first, second), "loadAverage": None,
+            "memoryUsedBytes": max(0, total - available), "memoryTotalBytes": total}
+
+
 def system_load(environment: Mapping[str, str], seconds: float) -> dict[str, Any] | None:
     """What the whole machine is doing, or None where the platform does not say."""
     try:
         if PLATFORM == "nt":
+            # The platform's own interface first: on Windows 11 24H2 there is no
+            # `wmic` to call, and PowerShell takes longer to start than a read
+            # may wait, so a machine that answers kernel32 draws its meters at
+            # once and the commands behind it are kept for the machine where
+            # that call is refused.
+            direct = windows_system()
+            if direct is not None and (direct["cpuPercent"] is not None
+                                       or direct["memoryUsedBytes"] is not None):
+                return direct
             wmic = parse_wmic_system(
                 _print(environment, ["wmic", "OS", "get",
                                      "FreePhysicalMemory,TotalVisibleMemorySize", "/value"],

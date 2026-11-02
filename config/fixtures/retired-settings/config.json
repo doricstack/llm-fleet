@@ -8,7 +8,7 @@
     "statuslinePalette": {"accent": "cyan"},
     "running": "accent"
   },
-  "speech": {"samplesDirectory": "/fixture/samples"},
+  "speech": {"backend": "kokoro", "samplesDirectory": "/fixture/samples"},
   "timeouts": {"lockSeconds": 12, "probeGraceSeconds": 1, "audioCleanupMs": 5000},
   "limits": {"worktreeWorkers": 8},
   "progress": {"orphanCountStaleSeconds": 300},

@@ -30,6 +30,10 @@
     },
     {
       "code": "E_CONFIG_UNKNOWN_KEY",
+      "path": "speech.backend"
+    },
+    {
+      "code": "E_CONFIG_UNKNOWN_KEY",
       "path": "speech.samplesDirectory"
     },
     {

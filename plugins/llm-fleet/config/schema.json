@@ -227,7 +227,6 @@
     {"path": "alerts.copyToastMs", "type": "integer", "default": 6000, "minimum": 1},
 
     {"path": "speech.enabled", "type": "boolean", "default": false},
-    {"path": "speech.backend", "type": "string", "default": "kokoro", "values": ["kokoro"]},
     {"path": "speech.command", "type": "path", "default": null, "nullable": true},
     {"path": "speech.group", "type": "string", "default": "female", "values": ["female", "male"]},
     {"path": "speech.voice", "type": "string", "default": null, "nullable": true, "nonEmpty": true},
