@@ -2734,10 +2734,14 @@ test("a session joins speech that is on anywhere, and starts off when it is off 
     await drain();
     assert.equal(speakWord(await driven.band()), "♪ Speak: off", String(left));
     const reply = await driven.speak("male") as { text: string };
-    // Picking a voice turns speech on, so the one line it says is the reply's.
-    assert.equal(voicesSaid(helped).length, 1, String(left));
-    assert.equal(reply.text.includes("speech is off"), false, reply.text);
-    assert.equal(memory[SPEECH_ON_KEY], SPOKEN, String(left));
+    // A pick keeps the switch exactly as it was, and says nothing: the voice is
+    // chosen, and speech stays off until a person presses the switch.
+    assert.equal(voicesSaid(helped).length, 0, String(left));
+    // It says the pick was kept and that speech is off, rather than speaking a
+    // word nobody asked for.
+    assert.equal(reply.text.includes("off"), true, reply.text);
+    assert.equal(memory[SPEECH_ON_KEY], left, String(left));
+    assert.equal(speakWord(await driven.band()), "♪ Speak: off", String(left));
   }
 });
 
@@ -3180,22 +3184,52 @@ test("each session keeps the voice it picked, and speech coming back on speaks i
   await second.speak("female");
   assert.deepEqual(memory["voice:session-a"], { voice: "male" });
   assert.deepEqual(memory["voice:session-b"], { voice: "female" });
-  // Picking a voice turns speech on, for everyone.
-  assert.equal(memory[SPEECH_ON_KEY], SPOKEN);
-  // Off and on again from the band: the hello is in this session's own voice.
+  // A voice pick is a voice, not a switch: on and off are the switch's alone,
+  // so a pick in a window nobody is watching cannot put the voice back on.
+  assert.equal(memory[SPEECH_ON_KEY], undefined);
+  // On from the band: the hello is in this session's own voice. Off again says
+  // nothing, and the session beside it said nothing either, because a pick is
+  // not a switch.
   await first.band();
   await first.pressBand(BAND_SPEAK);
   await drain();
   await first.band();
   await first.pressBand(BAND_SPEAK);
   await drain();
-  assert.deepEqual(voicesSaid(helpedA), ["--voice=am_adam", "--voice=am_adam"]);
-  assert.deepEqual(voicesSaid(helpedB), ["--voice=af_sky"]);
+  assert.deepEqual(voicesSaid(helpedA), ["--voice=am_adam"]);
+  assert.deepEqual(voicesSaid(helpedB), []);
   // A session that starts again under the same identifier finds its voice.
   const again = stub({ memory, sessionId: "session-a", answer: machine([]) });
   await again.start();
   await drain();
   const status = await again.speak("") as { text: string };
+  assert.equal(status.text.includes("male"), true, status.text);
+});
+
+test("a voice picked in another session leaves speech off", async () => {
+  // The defect a person reported: `/speak male` in any session wrote the
+  // machine-wide switch, so speech turned itself back on and a window nobody
+  // could see started talking again. The switch is the only thing that turns
+  // speech on, wherever it is pressed.
+  const memory: Record<string, unknown> = { [SPEECH_ON_KEY]: false };
+  const helpedA: string[][] = [];
+  const helpedB: string[][] = [];
+  const quiet = stub({ memory, sessionId: "session-a", answer: machine(helpedA) });
+  const other = stub({ memory, sessionId: "session-b", answer: machine(helpedB) });
+  await quiet.start();
+  await other.start();
+  await drain();
+  await other.speak("male");
+  await drain();
+  assert.deepEqual(memory["voice:session-b"], { voice: "male" });
+  assert.equal(memory[SPEECH_ON_KEY], false);
+  assert.deepEqual(voicesSaid(helpedA), []);
+  assert.deepEqual(voicesSaid(helpedB), []);
+  assert.equal(quiet.calls.played, 0);
+  assert.equal(other.calls.played, 0);
+  assert.equal(speakWord(await quiet.band()), "♪ Speak: off");
+  // The voice it picked is still there for when speech is turned on.
+  const status = await other.speak("") as { text: string };
   assert.equal(status.text.includes("male"), true, status.text);
 });
 
@@ -3205,6 +3239,10 @@ test("off in one session is off everywhere, whatever voice each session picked",
   const second = stub({ memory, sessionId: "session-b", answer: machine([]) });
   await first.start();
   await second.start();
+  await drain();
+  // On from the switch, which is the only thing that turns it on.
+  await first.band();
+  await first.pressBand(BAND_SPEAK);
   await drain();
   await second.speak("male");
   const reply = await first.speak("off") as { text: string };

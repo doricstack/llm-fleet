@@ -20,7 +20,7 @@ import { FOOTER_TEXT } from "./version.ts";
 // before the machine-wide spend tile needed the same rule in that module.
 export { money };
 import type {
-  AgentFigures, Job, Load, LoadProcess, LoadSystem, PullRequest, PullRequests, Roster,
+  AgentFigures, Job, Load, LoadProcess, PullRequest, PullRequests, Roster,
   SessionFigures, SkillItem, Skills, Snapshot, SpendSeries, Worktree,
   Worktrees, CustomRow, CustomSection, Pacer, PacerRun, PacerSlot } from "./state.ts";
 
@@ -1910,74 +1910,6 @@ function meterState(percent: number): string {
 }
 
 /**
- * One meter for the whole machine, above the processes that make it up.
- *
- * The bar is the pane's own, so its colour follows the state this row carries
- * and therefore the theme's failure, waiting and working tones: red at ninety
- * and above, amber from seventy, green below. The share is the row's right-hand
- * figure, where every other row states its number: words set beside a bar are
- * what the line cuts first when it is tight, and a share of the machine is the
- * one figure this row cannot lose.
- */
-function loadMeterRow(key: string, title: string, percent: number, said: Slot[],
-                      column: "cpu" | "memory"): Row {
-  const figure: Slot = { text: Math.round(percent) + "%" };
-  // The share stands in the column its own name stands over: the processor's
-  // under CPU, the memory's under MEM. The figures are drawn as a right-hand
-  // block, so a column is placed by what follows it as much as by its own
-  // width: the processor's figure keeps the memory column's cells after it,
-  // and a figure drawn at the row's edge would sit under MEM whichever meter
-  // it belonged to.
-  const slot: Slot[] = column === "cpu"
-    ? [{ ...figure, width: CPU_COLUMN, align: "right" },
-       { text: "", width: MEMORY_COLUMN }]
-    : [{ text: "", width: CPU_COLUMN },
-       { ...figure, width: MEMORY_COLUMN, align: "right" }];
-  return {
-    key: "load:" + key,
-    title,
-    state: meterState(percent),
-    meta: said,
-    slot,
-    // `null` rather than absent: the words a bar computes are the counts it was
-    // given, and the share is already stated in the row's own column. The cells
-    // are a gauge's, not the line's whole length: a bar drawn to the edge is the
-    // one part of this row a narrow card cuts, and a meter that loses its end
-    // states less than one that does not.
-    bar: { done: Math.max(0, Math.min(100, percent)), total: 100, label: null, cells: 24 },
-  };
-}
-
-/**
- * The machine's own figures, as meters: CPU with its load averages, then memory.
- *
- * Drawn only for what the platform stated. A platform that states none draws no
- * meter, which is why this is empty rather than a pair of noughts.
- */
-function loadMeters(system: LoadSystem | null | undefined): Row[] {
-  if (system === null || system === undefined) {
-    return [];
-  }
-  const rows: Row[] = [];
-  if (system.cpuPercent !== null) {
-    const averages = system.loadAverage === null ? null
-      : system.loadAverage.map((value) => value.toFixed(1)).join(" ");
-    rows.push(loadMeterRow("cpu", "CPU", system.cpuPercent,
-                           averages === null ? [] : [{ text: "load " + averages, dim: true }],
-                           "cpu"));
-  }
-  if (system.memoryUsedBytes !== null && system.memoryTotalBytes !== null
-      && system.memoryTotalBytes > 0) {
-    rows.push(loadMeterRow("memory", "MEM",
-                            (100 * system.memoryUsedBytes) / system.memoryTotalBytes,
-                            [{ text: bytes(system.memoryUsedBytes) + " of "
-                                     + bytes(system.memoryTotalBytes), dim: true }],
-                            "memory"));
-  }
-  return rows;
-}
-
-/**
  * One process under load: what it is, where it works, and what it costs the
  * machine now.
  *
@@ -2029,7 +1961,10 @@ function loadRow(entry: LoadProcess): Row {
  */
 function loadGroup(load: Load, options: PaneOptions): Group {
   const processes = load.processes.map(loadRow);
-  const rows = [...loadMeters(load.system), ...processes];
+  // The machine's figures are stated on the heading, once. A row for each of
+  // them repeated the same percentage a line below it, above the rows that say
+  // what is actually running.
+  const rows = processes;
   // A reading from a build that carried no machine figures has none to draw.
   const system = load.system ?? null;
   const parts: Slot[][] = [];

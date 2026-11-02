@@ -121,10 +121,14 @@ export function speakRequest(args: string, current: VoiceSetting,
         return null;
       }
       selectedWord = word;
-      selection = { isOn: true, voice, ...(word === voice ? {} : { name: word }) };
+      // A pick is a voice, not a switch. Speech is turned on and off by the
+      // switch alone, so a pick made in a window nobody is watching cannot put
+      // the voice back on after a person turned it off.
+      selection = { isOn: current.isOn, voice, ...(word === voice ? {} : { name: word }) };
     }
   }
-  // Picking a voice switches speech on, so off with a pick asks for both.
+  // "off male" asks for two things at once, and either reading of it is a guess:
+  // it is refused rather than decided by the order the words were typed in.
   if (isOn === false && selection !== undefined) {
     return null;
   }

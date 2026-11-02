@@ -49,7 +49,7 @@ Your prompt
 
 ## What the pane shows
 
-![The llm-fleet pane, drawn from a sample machine](https://github.com/doricstack/llm-fleet/releases/download/v0.4.18/pane-demo-0.4.18.gif)
+![The llm-fleet pane, drawn from a sample machine](https://github.com/doricstack/llm-fleet/releases/download/v0.4.19/pane-demo-0.4.19.gif)
 
 The figures at the top are the controls: press one and the pane narrows to those rows.
 
@@ -62,7 +62,7 @@ The figures at the top are the controls: press one and the pane narrows to those
 | Warnings | source errors, interactive session counts and data age | yes |
 | Worktrees | each worktree with its cleanup line | no |
 | Skill scans | each scan with its report command | no |
-| Load | the machine's own CPU and memory as meters, then the processes using the most of either | no |
+| Load | the machine's own CPU and memory on the heading, then the processes using the most of either | no |
 | Keys | the pane's own bindings and your key tips | yes |
 | Your own sections | whatever one of your commands prints as rows | no |
 

@@ -84,13 +84,12 @@ dim line above the rows, in the same widths as the columns. The load section is
 that case: a percentage and a byte count side by side say nothing about which is
 which until they are named.
 
-The load section opens on the machine itself: one row for the processor and one
-for memory, each a bar filled to the share in use and the figure beside it. The
-bar is the reading, and its colour is the reading too: green below seventy
-percent, amber to ninety, red above it. Beside the bar the row states what the
-figure came from, the load average for the processor and the bytes used of the
-total for memory. A platform that states nothing draws no meter and no figure,
-rather than a machine at nought.
+The load section states the machine on its heading, in two figures: the share of
+the processor and the share of memory, coloured by the same rule a row is green,
+amber and red at seventy and ninety percent. They are stated once, on the
+heading, and the section's rows are the processes that make them up, each with
+its own share and its own bytes under the CPU and MEM names. A platform that
+states nothing draws no figure rather than a machine at nought.
 
 Under the last card the pane draws one dim line naming the plugin, its version and
 its license. It sits at the bottom, never in the head: the head reports this

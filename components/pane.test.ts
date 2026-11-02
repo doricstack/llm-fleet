@@ -2163,42 +2163,29 @@ test("a load row keeps each figure in its own column", () => {
                    load.columns?.map((slot) => slot.width));
 });
 
-test("the load section leads with the machine's own figures, as meters", () => {
+test("the load heading carries the machine's figures, and the section draws only its processes", () => {
   const built = paneFrom(snapshot({
     load: { state: "ready", sampled_at: NOW, total: 412, errors: [], processes: [PROCESS],
             system: { cpuPercent: 75.4, loadAverage: [39.26, 34.6, 33.93],
                       memoryUsedBytes: 137438953472, memoryTotalBytes: 274877906944 } },
   }), options({ sectionOrder: ["load"] }));
   const load = group(built, "Load");
-  // The machine's meters stand above the processes that make them up.
-  assert.deepEqual(load.rows.slice(0, 2).map((row) => row.title), ["CPU", "MEM"]);
-  assert.deepEqual(load.rows.slice(0, 2).map((row) => row.bar?.done), [75.4, 50]);
-  // Each share stands in the column its own name stands over: the processor's
-  // holds the first column's width, and the memory's leaves that column empty
-  // and takes the second. A figure with no column is drawn at the row's edge,
-  // which is the memory column's edge, so both meters would read under MEM.
-  assert.deepEqual(load.rows[0]?.slot.map((slot) => [slot.text, slot.width]),
-                   [["75%", 8], ["", 11]]);
-  assert.deepEqual(load.rows[1]?.slot.map((slot) => [slot.text, slot.width]),
-                   [["", 8], ["50%", 11]]);
-  assert.deepEqual(load.columns?.map((slot) => slot.width), [8, 11]);
-  // Seventy-five percent of the machine is a wait, not a failure.
-  assert.equal(load.rows[0]?.state, "waiting");
-  assert.equal(load.rows[1]?.state, "working");
-  // What the meter states beside its bar is the figure behind it.
-  assert.deepEqual(load.rows[0]?.meta.map((slot) => slot.text), ["load 39.3 34.6 33.9"]);
-  assert.deepEqual(load.rows[1]?.meta.map((slot) => slot.text), ["128.0 GB of 256.0 GB"]);
-  // The heading states the same two shares, then how many rows were chosen.
+  // The machine's figures are stated once, on the heading. A row for each of
+  // them repeated what the heading already said, above rows that are the work.
+  assert.deepEqual(load.rows.map((row) => row.title), ["CompilingProgram thing"]);
+  // The heading states the two shares, then how many rows were chosen.
   assert.deepEqual(load.summary.map((slot) => slot.text),
                    ["CPU 75%", "  MEM 50%", "  1 of 412 shown"]);
   assert.deepEqual(load.summary.map((slot) => slot.color), ["warning", "success", "subtle"]);
+  // The process columns keep their names and their widths.
+  assert.deepEqual(load.columns?.map((slot) => slot.width), [8, 11]);
 });
 
-test("the meters draw even when the process list could not be read", () => {
+test("the heading still states the machine's figures when no process could be read", () => {
   // Windows has no process command unless one is configured, so the section is
-  // unavailable there by default. The machine's own figures were still read,
-  // and a section that drops every row for the list it could not get hides a
-  // reading it has: the meters stand, and the heading says what was missing.
+  // unavailable there by default. The machine's own figures were read, and a
+  // section that drops them for the list it could not get hides a reading it
+  // has: the heading carries them and says what was missing.
   const built = paneFrom(snapshot({
     load: { state: "unavailable", sampled_at: NOW, total: 0, processes: [],
             errors: [{ source: "load", reason: "no process command is configured" }],
@@ -2206,26 +2193,40 @@ test("the meters draw even when the process list could not be read", () => {
                       memoryUsedBytes: 1073741824, memoryTotalBytes: 2147483648 } },
   }), options({ sectionOrder: ["load"] }));
   const load = group(built, "Load");
-  assert.deepEqual(load.rows.slice(0, 2).map((row) => row.title), ["CPU", "MEM"]);
-  assert.deepEqual(load.rows.slice(0, 2).map((row) => row.bar?.done), [42, 50]);
+  assert.deepEqual(load.rows, []);
+  assert.equal(load.summary?.[0]?.text, "CPU 42%");
+  assert.equal(load.summary?.[1]?.text, "  MEM 50%");
   assert.equal(load.state, "unavailable");
+  // A reading can state work and call itself unavailable in the same breath:
+  // the machine's figures were read while the process list was refused. Rows
+  // that were read are drawn, because a state word over an empty body hides
+  // work the reading actually holds.
+  const partial = paneFrom(snapshot({
+    load: { state: "unavailable", sampled_at: NOW, total: 1, processes: [PROCESS],
+            errors: [{ source: "load", reason: "the process list could not be read" }],
+            system: { cpuPercent: 42, loadAverage: null,
+                      memoryUsedBytes: 1073741824, memoryTotalBytes: 2147483648 } },
+  }), options({ sectionOrder: ["load"] }));
+  const drawn = group(partial, "Load");
+  assert.deepEqual(drawn.rows.map((row) => row.title), ["CompilingProgram thing"]);
+  assert.equal(drawn.summary?.[0]?.text, "CPU 42%");
 });
 
-test("a meter turns red at ninety percent, and is green below seventy", () => {
-  const meter = (cpuPercent: number) => {
+test("a heading figure turns red at ninety percent, and is green below seventy", () => {
+  const tone = (cpuPercent: number) => {
     const built = paneFrom(snapshot({
       load: { state: "ready", sampled_at: NOW, total: 1, errors: [], processes: [],
               system: { cpuPercent, loadAverage: null, memoryUsedBytes: null,
                         memoryTotalBytes: null } },
     }), options({ sectionOrder: ["load"] }));
-    return group(built, "Load").rows[0];
+    return group(built, "Load").summary?.[0];
   };
-  assert.equal(meter(69.9)?.state, "working");
-  assert.equal(meter(70)?.state, "waiting");
-  assert.equal(meter(89.9)?.state, "waiting");
-  assert.equal(meter(90)?.state, "failed");
-  // A platform that prints above a hundred is drawn as a full bar, not past it.
-  assert.equal(meter(193.8)?.bar?.done, 100);
+  assert.equal(tone(69.9)?.color, "success");
+  assert.equal(tone(70)?.color, "warning");
+  assert.equal(tone(89.9)?.color, "warning");
+  assert.equal(tone(90)?.color, "error");
+  // A platform that prints above a hundred is still one word, not arithmetic.
+  assert.equal(tone(193.8)?.text, "CPU 194%");
 });
 
 test("a machine that states no figures draws no meter, only its processes", () => {
