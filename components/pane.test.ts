@@ -39,8 +39,8 @@ test("a press on a figure narrows the pane to that state, and the counts stay wh
     prs: { state: "ready", prs: [{ ...PULL, checks: "fail" }], errors: [] },
   });
   const failed = paneFrom(reading, options({ focus: "failed" }));
-  // The line says why only some rows are drawn, and the press that widens it.
-  assert.equal(failed.focus?.text, "Showing failed only.");
+  // The line says how many rows it is showing, and the press that widens it.
+  assert.equal(failed.focus?.text, "Showing 1 failed row.");
   assert.equal(failed.focus?.clear.key, "fleet.focus.clear");
   // The figures still count the whole machine, not the narrowed pane.
   assert.deepEqual(failed.cards?.map((card) => card.value), ["1", "1", "1"]);
@@ -51,6 +51,88 @@ test("a press on a figure narrows the pane to that state, and the counts stay wh
   assert.deepEqual(waiting.groups[0]?.rows.map((row) => row.title), ["Review adapter behavior"]);
   // A pane with no filter carries no line and draws every section it did before.
   assert.equal(paneFrom(reading, options()).focus, undefined);
+});
+
+test("the pane opens on what failed when nothing was pressed, and never on nothing", () => {
+  const failing = snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "failed" },
+                                     { ...JOB, id: "run", name: "Building the pane",
+                                       state: "working" }],
+              interactive: {}, errors: [], providers: {},
+              sources: { jobs: "ready", interactive: "empty" } },
+  });
+  // Opened on a failure with nothing pressed: the failed rows, and a line that
+  // says how many it is showing.
+  const opened = paneFrom(failing, options({ focusAuto: true }));
+  assert.equal(opened.focus?.text, "Showing 1 failed row.");
+  assert.deepEqual(opened.groups.map((group) => group.title), ["Background sessions"]);
+  assert.deepEqual(opened.groups[0]?.rows.map((row) => row.title), ["Review adapter behavior"]);
+
+  // Nothing failed: the same options open the whole fleet.
+  const calm = snapshot({ roster: { ...failing.roster,
+                                    jobs: [{ ...JOB, state: "working" }] } });
+  const whole = paneFrom(calm, options({ focusAuto: true }));
+  assert.equal(whole.focus, undefined);
+  assert.equal(whole.groups.length > 1, true);
+});
+
+test("the pane's own narrowing gives way to the fleet when it could draw nothing", () => {
+  // The one failure is a pull request the configuration hides, so no row the
+  // filter keeps can be drawn: an empty card set says less than the fleet it hid.
+  const hidden = snapshot({
+    prs: { state: "ready", prs: [{ ...PULL }], errors: [] },
+    roster: { state: "ready", jobs: [{ ...JOB, state: "working" }], interactive: {},
+              errors: [], providers: {}, sources: { jobs: "ready", interactive: "empty" } },
+  });
+  const sections = { ...options().sections, prs: { visible: false, collapsed: false } };
+  const automatic = paneFrom(hidden, options({ focusAuto: true, sections }));
+  // The whole fleet rather than a card set with nothing in it.
+  assert.equal(automatic.focus, undefined);
+  assert.equal(automatic.groups.length > 1, true);
+  // The hidden section is still hidden: widening does not resurrect it.
+  assert.equal(automatic.groups.some((group) => group.title === "Pull requests"), false);
+  assert.equal(automatic.groups.some((group) => group.title === "Background sessions"), true);
+  // A state the person pressed is kept as they asked, even with nothing to draw.
+  const pressed = paneFrom(hidden, options({ focus: "failed", sections }));
+  assert.equal(pressed.focus?.text, "Showing 0 failed rows.");
+});
+
+test("a warning row cannot stand in for a failure the pane does not draw", () => {
+  // The failure the count came from is a pull request in a hidden section. A
+  // warning row carries the same state word and is not what the figure was
+  // about, so it cannot satisfy the narrowing: the pane opens whole.
+  const reading = snapshot({
+    prs: { state: "ready", prs: [{ ...PULL }], errors: [] },
+    worktrees: { state: "failed", worktrees: [],
+                  errors: [{ source: "worktrees", reason: "cannot read" }] } as never,
+    roster: { state: "ready", jobs: [{ ...JOB, state: "working" }], interactive: {},
+              errors: [], providers: {}, sources: { jobs: "ready", interactive: "empty" } },
+  });
+  const sections = { ...options().sections, prs: { visible: false, collapsed: false } };
+  const pane = paneFrom(reading, options({ focusAuto: true, sections }));
+  assert.equal(pane.focus, undefined);
+  // The warning is still drawn; it is simply not a failure narrowing.
+  assert.equal(pane.groups.some((group) => group.title === "Warnings"), true);
+});
+
+test("a job whose provider says error is a failed row, and a folded section opens to it", () => {
+  const reading = snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "error" },
+                                     { ...JOB, id: "b", name: "Retry the webhook",
+                                       state: "failed" }],
+              interactive: {}, errors: [], providers: {},
+              sources: { jobs: "ready", interactive: "empty" } },
+  });
+  const folded = { ...options().sections, sessions: { visible: true, collapsed: true } };
+  const pane = paneFrom(reading, options({ focusAuto: true, sections: folded }));
+  // Two failed rows read as two, not one.
+  assert.equal(pane.focus?.text, "Showing 2 failed rows.");
+  const sessions = pane.groups.find((group) => group.title === "Background sessions");
+  assert.deepEqual(sessions?.rows.map((row) => row.title),
+                   ["Review adapter behavior", "Retry the webhook"]);
+  // A row behind a fold is counted by the line and not drawn: the narrowing
+  // opens the section it keeps.
+  assert.equal(sessions?.collapsed, false);
 });
 
 test("a press on a figure is the control that carries its state", () => {

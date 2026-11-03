@@ -1099,19 +1099,286 @@ test("a press on a headline figure narrows the pane, and its clear control widen
   await driven.start();
   await driven.settle();
   const all = renderedText(await driven.render() as never).join("\n");
-  assert.equal(all.includes("Showing working only."), false);
+  assert.equal(all.includes("Showing 1 working row."), false);
   assert.equal(buttonKeys(await driven.render()).includes("fleet.focus.working"), true);
   await driven.press("fleet.focus.working");
   const narrowed = renderedText(await driven.render() as never).join("\n");
-  assert.equal(narrowed.includes("Showing working only."), true);
+  assert.equal(narrowed.includes("Showing 1 working row."), true);
   assert.equal(narrowed.includes("Show all"), true);
   // The row in that state is still drawn, so the press narrowed the pane rather
   // than blanking it.
   assert.equal(narrowed.includes("Review adapter behavior"), true);
   await driven.press("fleet.focus.clear");
   const wide = renderedText(await driven.render() as never).join("\n");
-  assert.equal(wide.includes("Showing working only."), false);
+  assert.equal(wide.includes("Showing 1 working row."), false);
   assert.equal(wide.includes("Review adapter behavior"), true);
+});
+
+test("the pane opens straight to what failed, until the person widens it", async () => {
+  const failing = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] } };
+  const driven = stub({ stdout: JSON.stringify(failing) });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  const opened = renderedText(await driven.render() as never).join("\n");
+  // Opened while something failed, so the pane is the failed rows and says so.
+  assert.equal(opened.includes("Showing 1 failed row."), true);
+  assert.equal(opened.includes("Review adapter behavior"), true);
+  // The person widens it, and that word stands: the next open is whole.
+  await driven.press("fleet.focus.clear");
+  await driven.run();
+  await driven.run();
+  const again = renderedText(await driven.render() as never).join("\n");
+  assert.equal(again.includes("Showing 1 failed row."), false);
+});
+
+test("a pane opened with nothing failed opens whole", async () => {
+  const driven = stub();
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  const opened = renderedText(await driven.render() as never).join("\n");
+  // No narrowing line at all, rather than a line saying nothing was narrowed.
+  assert.equal(opened.includes("Showing"), false);
+  assert.equal(opened.includes("Background sessions"), true);
+  assert.equal(opened.includes("Pull requests"), true);
+});
+
+test("the band's own switch opens the pane on what failed, as the command does", async () => {
+  const failing = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] } };
+  const driven = stub({ stdout: JSON.stringify(failing) });
+  await driven.start();
+  await driven.settle();
+  await driven.band();
+  // The band is the pane's switch, and the narrowing is not the command's own:
+  // a press here opens the pane on the same rows.
+  await driven.pressBand("fleet.band.toggle");
+  const opened = renderedText(await driven.render() as never).join("\n");
+  assert.equal(opened.includes("Showing 1 failed row."), true);
+});
+
+test("an open that names a section draws it whole, and nothing narrows it", async () => {
+  const failing = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] } };
+  const driven = stub({ stdout: JSON.stringify(failing) });
+  await driven.start();
+  await driven.settle();
+  // The command asked for a section by name: hiding it behind a failure filter
+  // would open the pane on what the person did not ask for.
+  await driven.command("worktrees");
+  const opened = renderedText(await driven.render() as never).join("\n");
+  assert.equal(opened.includes("Showing"), false);
+  assert.equal(opened.includes("Worktrees"), true);
+});
+
+test("the band's item opens the pane where its row lives, not narrowed", async () => {
+  const two = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" },
+           { ...OUTPUT.roster.jobs[0], id: "job-2", name: "Waiting one",
+             state: "blocked", label: "Waiting for you" }] } };
+  const driven = stub({ stdout: JSON.stringify(two) });
+  await driven.start();
+  await driven.settle();
+  const item = buttonKeys(await driven.band() as never)
+    .find((key) => key.startsWith("fleet.band.item."));
+  assert.notEqual(item, undefined);
+  await driven.pressBand(item as string);
+  const opened = renderedText(await driven.render() as never).join("\n");
+  assert.equal(opened.includes("Showing"), false);
+  assert.equal(opened.includes("Waiting one"), true);
+});
+
+test("the figure of the state the pane opened on is a toggle, not a no-op", async () => {
+  const failing = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] } };
+  const driven = stub({ stdout: JSON.stringify(failing) });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 failed row."), true);
+  // The pane narrowed itself, and the lit figure turns that off on the first
+  // press, as the line under the controls says it can. The press itself asks
+  // for the frame: waiting for the clock would make it a second slow.
+  const before = driven.calls.invalidated.length;
+  await driven.press("fleet.focus.failed");
+  assert.equal(driven.calls.invalidated.length > before, true);
+  assert.equal(renderedText(await driven.render() as never).join("\n").includes("Showing"), false);
+  // Show all on a pane that narrowed itself asks for its frame too.
+  const reopened = stub({ stdout: JSON.stringify(failing) });
+  await reopened.start();
+  await reopened.settle();
+  await reopened.run();
+  await reopened.render();
+  const asked = reopened.calls.invalidated.length;
+  await reopened.press("fleet.focus.clear");
+  assert.equal(reopened.calls.invalidated.length > asked, true);
+  assert.equal(renderedText(await reopened.render() as never).join("\n").includes("Showing"), false);
+});
+
+test("a section command that is refused leaves the pane as it was", async () => {
+  const failing = { ...CONFIGURED, roster: { ...CONFIGURED.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] } };
+  const driven = stub({ stdout: JSON.stringify(failing) });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 failed row."), true);
+  // The configuration leaves the section out, so the command says so and opens
+  // nothing: the person's pane stays where it was.
+  const answer = await driven.command("keys") as { text: string };
+  assert.equal(/hides|draws no/.test(answer.text), true);
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 failed row."), true);
+});
+
+test("a section command for a hidden section leaves the pane as it was", async () => {
+  // The second refusal: the section is in the order and the configuration hides
+  // it. Neither refusal may widen a pane the person is reading.
+  const failing = { ...OUTPUT,
+    pane: { state: "ready", order: ["sessions", "keys"],
+            sections: { sessions: { visible: true, collapsed: false },
+                        keys: { visible: false, collapsed: false } } },
+    roster: { ...OUTPUT.roster,
+              jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] } };
+  const driven = stub({ stdout: JSON.stringify(failing) });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 failed row."), true);
+  const answer = await driven.command("keys") as { text: string };
+  assert.equal(/hides/.test(answer.text), true);
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 failed row."), true);
+});
+
+test("a band item the pane cannot open leaves the narrowing alone", async () => {
+  // The failure is drawn in a section the pane keeps; the row the item names
+  // lives in a section the configuration leaves out, so the open is refused.
+  const reading = { ...OUTPUT,
+    pane: { state: "ready", order: ["prs"],
+            sections: { prs: { visible: true, collapsed: false } } },
+    prs: { state: "ready", errors: [], prs: [{ repo: "owner/project", number: 7,
+      title: "Add the thing", branch: "feat/thing", head: "abc", is_draft: false,
+      checks: "fail" }] },
+    pacer: { state: "ready", enabled: true, switchSource: "file", reason: null,
+             version: 2, slotCount: 2, workersPerRun: 4, qos: "utility", nice: 10,
+             slots: [], waiting: [], outside: [], outsideCount: 0, outsideCpu: 0,
+             outsideRssKb: 0, errors: [],
+             recent: [{ at: OUTPUT.generated_at - 60, repo: "web-app", waitSeconds: 0,
+                        runSeconds: 1, exit: 75, slot: 0, mode: "refused",
+                        reason: "memory pressure" }] } };
+  const driven = stub({ stdout: JSON.stringify(reading) });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  const drawn = renderedText(await driven.render() as never).join("\n");
+  assert.equal(drawn.includes("Showing 1 failed row."), true, drawn);
+  // The person presses the lit figure off and on again: the narrowing is now
+  // their choice, the one a refused press must not take away.
+  await driven.press("fleet.focus.failed");
+  await driven.press("fleet.focus.failed");
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 failed row."), true);
+  const item = buttonKeys(await driven.band() as never)
+    .find((key) => key.startsWith("fleet.band.item."));
+  assert.notEqual(item, undefined, buttonKeys(await driven.band() as never).join(" "));
+  await driven.pressBand(item as string);
+  // Refused, so the pane is still the failed rows it was.
+  const after = renderedText(await driven.render() as never).join("\n");
+  assert.equal(after.includes("Showing 1 failed row."), true, after);
+});
+
+test("a section open the host will not place keeps the person's narrowing", async () => {
+  const waiting = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" }] } };
+  const driven = stub({ stdout: JSON.stringify(waiting), placed: false });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  // The person's own narrowing, pressed.
+  await driven.press("fleet.focus.waiting");
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 waiting row."), true);
+  const item = buttonKeys(await driven.band() as never)
+    .find((key) => key.startsWith("fleet.band.item.job:"));
+  assert.notEqual(item, undefined);
+  // Narrowed window: the host places nothing, so the press drew nothing and
+  // the narrowing it would have replaced is still there, along with every fold
+  // the person had, laid out by nobody.
+  const kept = driven.calls.stored.length;
+  await driven.pressBand(item as string);
+  const after = renderedText(await driven.render() as never).join("\n");
+  assert.equal(after.includes("Showing 1 waiting row."), true, after);
+  assert.deepEqual(driven.calls.stored.slice(kept), []);
+});
+
+test("a section open draws that section whole, even after a figure was pressed", async () => {
+  const failing = { ...OUTPUT,
+    pane: { state: "ready", order: ["sessions", "worktrees"],
+            sections: { sessions: { visible: true, collapsed: false },
+                        worktrees: { visible: true, collapsed: false } } },
+    roster: { ...OUTPUT.roster,
+              jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] } };
+  const driven = stub({ stdout: JSON.stringify(failing) });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  // The person's own narrowing, pressed on.
+  await driven.press("fleet.focus.failed");
+  await driven.press("fleet.focus.failed");
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 failed row."), true);
+  // Shut, then a section asked for by name: the stored narrowing is the thing
+  // an open that names a place replaces.
+  await driven.run();
+  await driven.command("worktrees");
+  const opened = renderedText(await driven.render() as never).join("\n");
+  assert.equal(opened.includes("Showing"), false, opened);
+  assert.equal(opened.includes("Worktrees"), true);
+});
+
+test("a state the person pressed stands through a close and reopen", async () => {
+  const failing = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" },
+           { ...OUTPUT.roster.jobs[0], id: "job-2", name: "Building the pane",
+             state: "working", label: "Working" }] } };
+  const driven = stub({ stdout: JSON.stringify(failing) });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  // Opened on the failure, then the person presses the working figure.
+  await driven.press("fleet.focus.working");
+  assert.equal(renderedText(await driven.render() as never).join("\n")
+                 .includes("Showing 1 working row."), true);
+  // Close and open again: the press is what opens, not the failure.
+  await driven.run();
+  await driven.run();
+  const again = renderedText(await driven.render() as never).join("\n");
+  assert.equal(again.includes("Showing 1 working row."), true);
+  assert.equal(again.includes("Showing 1 failed row."), false);
+
+  // The same stands for a figure pressed on the band.
+  const banded = stub({ stdout: JSON.stringify(failing) });
+  await banded.start();
+  await banded.settle();
+  await banded.band();
+  await banded.pressBand("fleet.band.focus.working");
+  await banded.run();
+  await banded.run();
+  assert.equal(renderedText(await banded.render() as never).join("\n")
+                 .includes("Showing 1 working row."), true);
 });
 
 test("a press on a row's figures opens what the row holds in full, and closes it again", async () => {
@@ -1139,7 +1406,28 @@ test("a press on the band's figure opens the pane narrowed to it", async () => {
   await driven.pressBand("fleet.band.focus.working");
   assert.deepEqual(driven.calls.opened, [PANE]);
   const words = renderedText(await driven.render() as never).join("\n");
-  assert.equal(words.includes("Showing working only."), true);
+  assert.equal(words.includes("Showing 1 working row."), true);
+});
+
+test("the band carries what this session spent, and no chip when it spent nothing", async () => {
+  // A routed session carries both: the reader's own price of the transcript and
+  // the host's Anthropic-table figure. The chip states the reader's, as the
+  // pane's own Cost tile does, so the two surfaces never disagree about money.
+  const priced = { ...OUTPUT,
+    session: { state: "ready", costUsd: 9.99, providerCostUsd: 1.24 } };
+  const driven = stub({ stdout: JSON.stringify(priced) });
+  await driven.start();
+  await driven.settle();
+  const chip = renderedText(await driven.band() as never).join("");
+  assert.equal(chip.includes("$1.24"), true);
+  assert.equal(chip.includes("$9.99"), false);
+
+  const unspent = { ...OUTPUT, session: { state: "ready", costUsd: 0 } };
+  const free = stub({ stdout: JSON.stringify(unspent) });
+  await free.start();
+  await free.settle();
+  // A spend of nothing is not worth the band's width; the session's own row says it.
+  assert.equal(renderedText(await free.band() as never).join("").includes("$0.00"), false);
 });
 
 test("the controls that act on every section fold them all, and open them all", async () => {
@@ -4381,7 +4669,7 @@ test("a band item opens the section its row is drawn in, and an unknown one open
   assert.equal(sectionOfKey("pacer:web-app:1792490400"), "pacer");
   assert.equal(sectionOfKey("job:job-a:blocked:1"), "sessions");
   assert.equal(sectionOfKey("pr:owner/project#9:abc"), "prs");
-  assert.equal(sectionOfKey("skill:x"), null);
+  assert.equal(sectionOfKey("skill:target-a:flagged:h1"), "skills");
   assert.equal(sectionOfKey("pacers:x"), null);
   // A section the pane no longer draws opens nothing, so a key left in a
   // session's store from an older build is a press that goes nowhere rather

@@ -13,7 +13,7 @@ import { ageText, durationText, fit } from "./layout.ts";
 import { stateColor } from "./cards.ts";
 import { mask, MASK } from "./mask.ts";
 import { THEME, worktreeToken, type Theme } from "./palette.ts";
-import { money, spendWindowTile } from "./session.ts";
+import { money, pricedCost, spendWindowTile } from "./session.ts";
 import { FOOTER_TEXT } from "./version.ts";
 
 // The money rule lives with the session figures it prices; this module drew it
@@ -213,6 +213,15 @@ export type PaneOptions = {
    * under them are the ones in that state, and a line says so.
    */
   focus?: Focus | null;
+  /**
+   * Whether the narrowing is the pane's own, taken because the pane opened
+   * while something failed, rather than a state the person pressed.
+   *
+   * It is what lets the pane widen itself again: a narrowing that would draw
+   * no row gives way to the whole fleet, since an empty card set says less than
+   * the fleet it hid. A state the person chose is never widened for them.
+   */
+  focusAuto?: boolean;
   /** The rows a person pressed open, by the key the row carries. */
   details?: Record<string, true>;
 };
@@ -236,7 +245,9 @@ export const DETAILS_PREFIX = "fleet.details.";
  */
 export function focusMatches(state: string | undefined, focus: Focus): boolean {
   if (focus === "failed") {
-    return state === "failed";
+    // A job whose provider says error ended in failure the same way, and the
+    // figure counts both, so the press must draw both.
+    return state === "failed" || state === "error";
   }
   if (focus === "waiting") {
     // A job that waits on a person carries the word its provider uses for it.
@@ -1364,21 +1375,6 @@ function percentOf(value: number): string {
 /** The word a figure the payload did not carry is drawn with. */
 const NOT_REPORTED: Slot = { text: "not reported", dim: true };
 
-/**
- * The money this session has spent: the reader's own price where it priced one.
- *
- * A routed session is priced from its own transcript, and the host's cost is an
- * Anthropic-table figure that is not that provider's money. Both can reach this
- * layer in one document, so the drawn figure is the reader's whenever it
- * reported a usable one rather than whichever field the host happened to fill.
- */
-function sessionSpend(session: SessionFigures): number | undefined {
-  const priced = session.providerCostUsd;
-  if (typeof priced === "number" && Number.isFinite(priced) && priced >= 0) {
-    return priced;
-  }
-  return session.costUsd;
-}
 
 /**
  * This session's own figures: what it has spent, and the windows it runs in.
@@ -1517,7 +1513,7 @@ function sessionGroup(session: SessionFigures, options: PaneOptions): Group {
   // watches instead, so they are what the heading states.
   const subscription = session.costUsd === 0
     && (session.fiveHourUsedPercent !== undefined || session.sevenDayUsedPercent !== undefined);
-  const spend = sessionSpend(session);
+  const spend = pricedCost(session);
   if (spend !== undefined && !subscription) {
     summary.push({ text: money(spend), color: "text" });
   }
@@ -2392,7 +2388,40 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   // section left with nothing to say leaves the pane rather than drawing an
   // empty card: the filter is a deliberate mode, and a heading over no rows is
   // a place a person presses and finds nothing.
-  const focus = options.focus ?? null;
+  // The pane opens on what failed when something did and the person has not
+  // said otherwise: a pane opened while something is wrong is opened for that.
+  // The choice is theirs from then on, and it is what the figures, Show all and
+  // the band record, not this.
+  let focus = options.focus ?? null;
+  const automatic = focus === null && options.focusAuto === true && failedOutcomes(snapshot) > 0;
+  if (automatic) {
+    focus = "failed";
+  }
+  /** The rows a narrowed pane draws, across every section. */
+  const focusedRows = (built: Group[]): number =>
+    built.reduce((count, group) => count + group.rows.length, 0);
+  // A narrowing that could draw nothing gives way to the whole fleet: the
+  // failure it was opened for sits in a section this pane does not draw, and an
+  // empty card set says less than the fleet it hid. A state the person pressed
+  // is kept as it is, because it is what they asked to see.
+  let drawable = true;
+  if (focus !== null) {
+    const wanted: Focus = focus;
+    // Only the rows the Failed outcomes figure counted can satisfy the pane's
+    // own narrowing. A warning row and a refused pacer run carry the same state
+    // word and are not what that figure was about, so they cannot stand in for
+    // a failure the pane cannot draw.
+    const counted = new Set(["sessions", "prs"]);
+    const sectionOf = (group: Group): string => {
+      const key = group.toggle?.key ?? "";
+      return key.startsWith(TOGGLE_PREFIX) ? key.slice(TOGGLE_PREFIX.length) : "";
+    };
+    drawable = groups.some((group) => counted.has(sectionOf(group))
+      && group.rows.some((row) => focusMatches(row.state, wanted)));
+  }
+  if (automatic && !drawable) {
+    focus = null;
+  }
   if (focus !== null) {
     for (let index = groups.length - 1; index >= 0; index -= 1) {
       const kept = groups[index]?.rows.filter((row) => focusMatches(row.state, focus)) ?? [];
@@ -2400,6 +2429,9 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
         groups.splice(index, 1);
       } else if (groups[index]) {
         groups[index].rows = kept;
+        // A section left folded would count its row on the heading and draw
+        // none of it, and a narrowed pane is opened for the rows it keeps.
+        groups[index].collapsed = false;
       }
     }
   }
@@ -2459,6 +2491,7 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
        card("Failed outcomes", failedNow, "error", "failed")]
     : [];
   const unreadable = unreadableSources(snapshot);
+  const shownRows = focus === null ? 0 : focusedRows(groups);
   return {
     title: "llm-fleet",
     cards,
@@ -2489,7 +2522,9 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     hint: "Esc or " + options.keys.close + " closes this pane",
     ...(focus === null ? {} : {
       focus: {
-        text: "Showing " + focus + " only.",
+        // The count says how much the pane is hiding, so a narrowed pane is
+        // never mistaken for a small fleet.
+        text: "Showing " + shownRows + " " + focus + (shownRows === 1 ? " row" : " rows") + ".",
         clear: { key: FOCUS_CLEAR, label: "Show all",
                  onPress: pressTo(options, FOCUS_CLEAR) },
       },

@@ -12,9 +12,24 @@ Every section is a card: a rounded rule the surface draws, with the section's
 name, its fold arrow, and its count on the heading, and its rows held inside.
 The headline figures are a row of cards under the title, each a quiet label over
 a bold value. Each figure is also a control: a press narrows the pane to the rows
-that figure counted, and a line under the controls says so and carries the press
-that widens it again. The figures keep counting the whole machine while a filter
-is on, so a narrowed pane never reads as a small fleet. A row carries a dot in its state's color beside its name, the
+that figure counted, and a line under the controls says which state it shows and
+how many rows, and carries the press that widens it again. The figures keep
+counting the whole machine while a filter is on, so a narrowed pane never reads
+as a small fleet.
+
+A pane opened while something failed opens narrowed to the failed rows: that is
+what a person opening it came for. The choice is the person's from then on: a
+press on a figure, or on Show all, stands for the rest of the session, and the
+pane never narrows itself again. Until then the narrowing is worked out from the
+reading being drawn rather than kept: a failure that cleared while the pane was
+shut does not reopen it on nothing, and a narrowing that could draw no row, since
+the failure sits in a section this pane does not draw, gives way to the whole
+fleet. An open that names a place is never narrowed: a command that opens one
+section, and the band's item, which names a row, draw what they name. A press on
+the figure of the state already drawn widens the pane, because the figure is a
+toggle of what is drawn, not of the choice stored behind it. A job whose provider says error is one of the rows it keeps, and the
+section holding them is opened, because a row behind a fold is counted by the
+line and drawn by nobody. A row carries a dot in its state's color beside its name, the
 state word in its right slot, and a rate bar across the card under any item that
 has a total.
 
@@ -100,9 +115,13 @@ refusal, so the version a person quotes is always on the pane they are reading.
 The band is the pane's switch, and it is always drawn: a command typed while a
 turn runs waits for the turn to end, and a press on the band runs at once. The
 switch leads and says which way a press goes, Open fleet or Close fleet. After
-it come the figures on chips, a figure at zero left out, then the worst thing
-that needs a person in its own color with the rest counted, and Dismiss at the
-right when there is something to dismiss. Errors sort ahead of waits. This
+it come the figures on chips, a figure at zero left out, then what this session
+has spent on a chip, stated by the pane's own rule so both surfaces name the same
+money, then the worst thing that needs a person in its own color
+with the rest counted, and Dismiss at the right when there is something to
+dismiss. A line too narrow gives the spend chip up before the item, since the
+figure is still on the pane's own tiles and the item is what the band is read
+for. Errors sort ahead of waits. This
 session's own job is left out. A dismissal holds across sessions until the item
 changes, and `/llm-fleet unhide` brings everything back.
 

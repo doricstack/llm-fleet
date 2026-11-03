@@ -388,6 +388,33 @@ test("a figure is the press that opens the pane narrowed to what it counted", ()
   assert.deepEqual(quietKeys, [BAND_TOGGLE, BAND_FOCUS + "working"]);
 });
 
+test("the band states what this session spent, and gives the chip up before the item", () => {
+  const item = { key: "job:one:blocked", level: "warning" as const,
+                 text: "fix the parser is waiting for you" };
+  const priced = renderedText(bandTree({
+    items: [], counts: { working: 1, waiting: 0, failed: 0 }, spend: "~$1.24", open: false,
+    width: 120, onToggle: noop, onDismiss: noop })).join("");
+  assert.equal(priced.includes("~$1.24"), true);
+  // Nothing priced it: no chip, since a spend of nothing is a different claim.
+  const unpriced = renderedText(bandTree({
+    items: [], counts: { working: 1, waiting: 0, failed: 0 }, spend: null, open: false,
+    width: 120, onToggle: noop, onDismiss: noop })).join("");
+  assert.equal(unpriced.includes("$"), false);
+  // A line too narrow for both gives the chip up: it is a figure a person can
+  // still find on the pane's own tiles, and the item it would push out is not.
+  const tight = (width: number, spend: string | null) => renderedText(bandTree({
+    items: [item], counts: { working: 1, waiting: 0, failed: 0 }, spend, open: false,
+    width, onToggle: noop, onDismiss: noop })).join("");
+  // At this width the figures fit and the item does not: the chip still goes,
+  // and the item it gave way to is the one drawn.
+  const crowded = tight(60, "$1.24");
+  assert.equal(crowded.includes("$1.24"), false);
+  assert.equal(crowded.includes("fix the"), true);
+  assert.equal(tight(60, null).includes("fix the"), true);
+  // And a line with no room for either draws no chip.
+  assert.equal(tight(30, "$1.24").includes("$1.24"), false);
+});
+
 test("what the band leads with opens the pane", () => {
   const items = [{ key: "trial:r:feat/a:TRYING", level: "error" as const,
                    text: "Trial failed on repo feat/a: 2 failed" }];

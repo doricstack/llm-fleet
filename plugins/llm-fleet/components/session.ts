@@ -44,6 +44,26 @@ export function money(usd: number): string {
   return "$" + usd.toFixed(2);
 }
 
+/**
+ * The money a session's figures price it at: the reader's own price where it
+ * took one, the host's figure otherwise.
+ *
+ * A routed session is priced from its own transcript, and the host's cost is an
+ * Anthropic-table figure that is not that provider's money. Both can reach this
+ * layer in one document, so the drawn figure is the reader's whenever it
+ * reported a usable one. The pane's Cost tile and the band's chip both name
+ * this, so two surfaces cannot state different money for one session.
+ */
+export function pricedCost(
+  figures: { providerCostUsd?: number; costUsd?: number } | null | undefined,
+): number | undefined {
+  const priced = figures?.providerCostUsd;
+  if (typeof priced === "number" && Number.isFinite(priced) && priced >= 0) {
+    return priced;
+  }
+  return figures?.costUsd;
+}
+
 /** One headline figure of the session section. */
 export type SpendTile = { label: string; value: string; color?: "subtle" };
 

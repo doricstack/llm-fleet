@@ -325,6 +325,13 @@ export type BandInput = {
   items: BandItem[];
   /** The figures, or null while there is no reading or the roster could not be read. */
   counts: BandCounts | null;
+  /**
+   * What this session has spent, as its chip says it: the figure with a `~`
+   * when it was priced rather than billed. Absent or null when nothing priced
+   * it, and the chip is not drawn, since a spend of nothing and no spend read
+   * are different claims.
+   */
+  spend?: string | null;
   /** Why there are no figures, when that is the case, such as a read in flight. */
   note?: string;
   /** Whether the pane is open, which is what the switch's word says. */
@@ -433,6 +440,16 @@ export function bandTree(input: BandInput): Node {
     parts.push(text({ dimColor: true }, "Nothing running"));
     used += PART_GAP + "Nothing running".length;
   }
+  // What this session has spent, beside the figures: it is the one number about
+  // this session a person wants without opening the pane, and the pane's own
+  // tiles are only read once it is open.
+  let spendAt = -1;
+  const spend = input.spend ?? null;
+  if (spend !== null && spend !== "") {
+    spendAt = parts.length;
+    parts.push(chip(spend, "subtle"));
+    used += PART_GAP + spend.length + 2;
+  }
   if (input.counts === null && input.note) {
     parts.push(text({ dimColor: true }, input.note));
     used += PART_GAP + input.note.length;
@@ -462,7 +479,18 @@ export function bandTree(input: BandInput): Node {
     parts[gearAt] = button(gear.key, short, gear.press);
     used -= full.length - short.length;
   }
-  const room = input.width - used - PART_GAP - dismissWidth;
+  // The spend chip goes before the item does: what needs a person is the reason
+  // the band is read, and a figure is still on the pane's own tiles. What
+  // decides it is the room the item needs, not only whether the fixed parts
+  // overflow: a line where the figures fit and the item does not gives the chip
+  // up too, so the item is drawn where it otherwise would not be.
+  let room = input.width - used - PART_GAP - dismissWidth;
+  const crowded = input.items.length > 0 ? room <= 8 : used + dismissWidth > input.width;
+  if (spendAt >= 0 && crowded) {
+    parts.splice(spendAt, 1);
+    used -= PART_GAP + (spend as string).length + 2;
+    room = input.width - used - PART_GAP - dismissWidth;
+  }
   const [first, ...others] = input.items;
   if (first !== undefined && room > 8) {
     const failing = others.filter((item) => item.level === "error").length;
