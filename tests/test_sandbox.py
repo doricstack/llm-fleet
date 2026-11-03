@@ -8,6 +8,7 @@ reads and writes a real user's folder and passes or fails by the order it ran
 in, which is what two roster cases did on a Windows runner.
 """
 
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -64,6 +65,36 @@ class ResolutionTests(unittest.TestCase):
             # environment resolves the packaged defaults, never the file on the
             # machine, which is the other half of the same leak.
             self.assertEqual(resolved["providers"], [])
+
+
+class SymlinkTests(unittest.TestCase):
+    # A read-only folder is how this machine refuses a write; Windows does not
+    # deny one to its owner that way, so there the refusal is made by the real
+    # cases on a machine without the privilege, and this one says nothing.
+    @unittest.skipIf(os.name == "nt", "a folder's mode does not deny Windows its own writes")
+    def test_a_machine_that_refuses_a_symlink_skips_the_case_by_name(self):
+        # The refusal is made where the platform makes it: a folder this user
+        # may read and not write. As the owner on macOS and Linux the mode is
+        # enough; Windows answers a symlink it will not create the same way.
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / "closed"
+            folder.mkdir()
+            folder.chmod(0o500)
+            try:
+                with self.assertRaises(unittest.SkipTest) as refused:
+                    sandbox.symlink(Path(root) / "target", folder / "link")
+            finally:
+                folder.chmod(0o700)
+        self.assertIn("cannot create a symlink", str(refused.exception))
+
+    def test_a_machine_that_makes_a_symlink_makes_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root) / "target"
+            target.write_text("x", encoding="utf-8")
+            link = Path(root) / "link"
+            sandbox.symlink(target, link)
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(link.read_text(encoding="utf-8"), "x")
 
 
 if __name__ == "__main__":

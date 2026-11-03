@@ -250,14 +250,32 @@ export function bandItems(snapshot: Snapshot, dismissed: readonly string[],
   // A run pacer refused, and that alone. A command that failed inside a run
   // already said so where it ran, and repeating it here is a line a person
   // dismisses every time without learning anything; the run stays in the pane.
+  //
+  // A refusal is one item per repository and reason, however many times it
+  // repeats. Its key carries those two and never the time, so dismissing it
+  // once holds: a machine that refuses the same run all afternoon asks its
+  // person once, and says how many times it happened.
+  const refusals = new Map<string, { repo: string | null; reason: string | null;
+                                     count: number; at: number }>();
   for (const run of snapshot.pacer?.recent ?? []) {
     if (run.mode !== "refused") {
       continue;
     }
-    const where = said(run.repo ?? "a repository");
-    errors.push({ key: "pacer:" + (run.repo ?? "") + ":" + run.at, level: "error",
-                  text: "Pacer refused a run in " + where
-                    + (run.reason ? ": " + said(run.reason) : "") });
+    const key = "pacer:" + (run.repo ?? "") + ":" + (run.reason ?? "");
+    const held = refusals.get(key);
+    if (held === undefined) {
+      refusals.set(key, { repo: run.repo, reason: run.reason, count: 1, at: run.at });
+    } else {
+      held.count += 1;
+      held.at = Math.max(held.at, run.at);
+    }
+  }
+  const refused = [...refusals].sort((first, second) => second[1].at - first[1].at);
+  for (const [key, held] of refused) {
+    errors.push({ key, level: "error",
+                  text: "Pacer refused " + (held.count === 1 ? "a run" : held.count + " runs")
+                    + " in " + said(held.repo ?? "a repository")
+                    + (held.reason ? ": " + said(held.reason) : "") });
   }
   for (const pull of snapshot.prs.prs) {
     if (pull.checks === "fail") {

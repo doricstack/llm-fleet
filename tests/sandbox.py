@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import unittest
 from pathlib import Path
 
 import paths  # noqa: F401  (puts the plugin root on the path)
@@ -70,3 +71,20 @@ def home_environment(root: Path, **extra: str) -> dict[str, str]:
         environment.pop(name, None)
     environment.update(extra)
     return environment
+
+
+def symlink(target: Path, link: Path, target_is_directory: bool = False) -> None:
+    """A symlink a case needs, or a skip that says this machine cannot make one.
+
+    Windows makes a symlink only with the privilege or the developer setting
+    for it, and a runner without either fails the case with `WinError 1314`.
+    The behaviour a case asks about cannot be exercised where the link cannot
+    exist, so the case is skipped by name rather than left failing for a
+    setting nobody reading the result can see.
+    """
+    try:
+        os.symlink(target, link, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as error:
+        raise unittest.SkipTest(
+            "this machine cannot create a symlink ({0}); the case needs one".format(
+                getattr(error, "winerror", None) or error)) from None

@@ -23,6 +23,7 @@ from unittest import mock
 import wave
 
 import paths  # puts the plugin root on the path
+import sandbox
 
 from config.loader import load_config
 from readers import alerts, jobs
@@ -63,7 +64,7 @@ HANG_MS = 1_000
 def make_link(case, link, target):
     """Make `link` point at `target`, or skip the case where this platform will not."""
     try:
-        os.symlink(target, link)
+        sandbox.symlink(target, link)
     except (OSError, NotImplementedError) as refused:
         case.skipTest("this platform will not create a link here: {0}".format(refused))
 
@@ -174,7 +175,7 @@ class ClaimTests(AlertsCase):
         elsewhere = self.root / "elsewhere"
         elsewhere.mkdir()
         try:
-            os.symlink(elsewhere, self.state / "claims", target_is_directory=True)
+            sandbox.symlink(elsewhere, self.state / "claims", target_is_directory=True)
         except (OSError, NotImplementedError) as refused:
             self.skipTest("this platform will not create a link here: {0}".format(refused))
         with self.assertRaises(OSError):
@@ -441,7 +442,7 @@ class LockTests(AlertsCase):
         self.state.mkdir(parents=True)
         victim = self.root / "victim"
         victim.write_text("keep me")
-        os.symlink(victim, self.state / ".lock")
+        sandbox.symlink(victim, self.state / ".lock")
         with self.assertRaises(alerts.UnsafePath):
             self.take(self.state / ".lock")
         self.assertEqual(victim.read_text(), "keep me")
@@ -451,7 +452,7 @@ class LockTests(AlertsCase):
         elsewhere = self.root / "elsewhere"
         elsewhere.mkdir()
         self.state.mkdir(parents=True)
-        os.symlink(elsewhere, self.state / "claims")
+        sandbox.symlink(elsewhere, self.state / "claims")
         with self.assertRaises(alerts.UnsafePath):
             self.take(self.state / "claims" / ".lock")
         self.assertEqual(list(elsewhere.iterdir()), [])
@@ -511,7 +512,7 @@ class LockTests(AlertsCase):
             # Checked by name as a folder, then swapped for a link before it is opened.
             if step == "folder-open":
                 folder.rename(self.state / "claims-real")
-                os.symlink(elsewhere, folder)
+                sandbox.symlink(elsewhere, folder)
 
         with mock.patch.object(alerts, "_between", swap):
             with self.assertRaises(alerts.UnsafePath):
@@ -529,7 +530,7 @@ class LockTests(AlertsCase):
 
         def swap(step):
             if step == "lock":
-                os.symlink(victim, folder / ".lock")
+                sandbox.symlink(victim, folder / ".lock")
 
         with mock.patch.object(alerts, "_between", swap):
             with self.assertRaises(alerts.UnsafePath):
@@ -545,7 +546,7 @@ class LockTests(AlertsCase):
         def swap(name):
             if name == step and not swapped:
                 folder.rename(folder.with_name(folder.name + "-real"))
-                os.symlink(elsewhere, folder)
+                sandbox.symlink(elsewhere, folder)
                 swapped.append(name)
 
         return swap, swapped, elsewhere
@@ -618,7 +619,7 @@ class LockTests(AlertsCase):
         real = self.root / "real-state"
         real.mkdir()
         self.state = self.root / "linked-state"
-        os.symlink(real, self.state)
+        sandbox.symlink(real, self.state)
         return real
 
     def test_a_state_directory_given_as_a_link_claims_speaks_and_answers(self):
@@ -647,7 +648,7 @@ class LockTests(AlertsCase):
         real = self.linked_state()
         elsewhere = self.root / "elsewhere"
         elsewhere.mkdir()
-        os.symlink(elsewhere, real / alerts.CLAIMS)
+        sandbox.symlink(elsewhere, real / alerts.CLAIMS)
         self.assertEqual(self.run_main("claim", "job:a:blocked:1")[0], 1)
         self.assertEqual(list(elsewhere.iterdir()), [])
 
@@ -656,7 +657,7 @@ class LockTests(AlertsCase):
         (self.state / alerts.LOCKS).mkdir(parents=True)
         victim = self.root / "victim"
         victim.write_text("keep me")
-        os.symlink(victim, self.state / alerts.LOCKS / "voice.lock")
+        sandbox.symlink(victim, self.state / alerts.LOCKS / "voice.lock")
         spoken = alerts.speak(self.config(), "af_sky", "hello", self.environ, state_dir=self.state)
         self.assertEqual(spoken["file"], None)
         self.assertIn("lock", spoken["reason"])
@@ -680,7 +681,7 @@ class OwnerOnlyFileTests(AlertsCase):
         victim.chmod(0o644)
         path.unlink(missing_ok=True)
         path.parent.mkdir(parents=True, exist_ok=True)
-        os.symlink(victim, path)
+        sandbox.symlink(victim, path)
         return victim
 
     def untouched(self, victim):
@@ -690,7 +691,7 @@ class OwnerOnlyFileTests(AlertsCase):
         elsewhere = self.root / ("elsewhere-" + folder.name)
         elsewhere.mkdir()
         folder.parent.mkdir(parents=True, exist_ok=True)
-        os.symlink(elsewhere, folder)
+        sandbox.symlink(elsewhere, folder)
         return elsewhere
 
     def test_the_focus_file(self):
@@ -1051,7 +1052,7 @@ class QuestionTests(AlertsCase):
 
     def link(self, target, link):
         try:
-            os.symlink(target, link)
+            sandbox.symlink(target, link)
         except (OSError, NotImplementedError, AttributeError):
             self.skipTest("this platform does not allow creating a symbolic link here")
 
@@ -1627,7 +1628,7 @@ class QuestionTests(AlertsCase):
         def swap(step):
             if step == "marker" and not swapped:
                 folder.rename(self.state / "answers-real")
-                os.symlink(elsewhere, folder)
+                sandbox.symlink(elsewhere, folder)
                 swapped.append(step)
 
         with mock.patch.object(alerts, "_between", swap):

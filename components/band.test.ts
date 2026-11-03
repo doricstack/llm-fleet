@@ -160,7 +160,7 @@ test("a pacer run it refused is an error on the band; one that failed on its own
   assert.deepEqual(pacer.map((item) => item.text),
                    ["Pacer refused a run in web-app: memory pressure"]);
   assert.deepEqual(pacer.map((item) => item.level), ["error"]);
-  assert.deepEqual(pacer.map((item) => item.key), ["pacer:web-app:" + (AT - 60)]);
+  assert.deepEqual(pacer.map((item) => item.key), ["pacer:web-app:memory pressure"]);
   // A refusal pacer could not tie to a repository still says where it happened.
   const unnamed = bandItems(snapshotFrom(reading({
     pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [],
@@ -178,6 +178,44 @@ test("a pacer run it refused is an error on the band; one that failed on its own
   const quiet = bandItems(snapshotFrom(reading({
     pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [] } }), AT), [], "");
   assert.equal(quiet.some((item) => item.key.startsWith("pacer:")), false);
+});
+
+test("a refusal that repeats is one item, and one dismissal holds for all of it", () => {
+  const run = (repo: string | null, at: number, reason: string | null) =>
+    ({ at, repo, waitSeconds: 0, runSeconds: 1, exit: 75, slot: null, mode: "refused",
+       reason });
+  const repeated = snapshotFrom(reading({
+    pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [], recent: [
+      run("web-app", AT - 30, "memory pressure"),
+      run("web-app", AT - 60, "memory pressure"),
+      run("web-app", AT - 90, "no slot free"),
+      run("fleet", AT - 120, "memory pressure")] },
+  }), AT);
+  const items = bandItems(repeated, [], "").filter((item) => item.key.startsWith("pacer:"));
+  // Two refusals of the same repository and reason are one line, and it says
+  // how often: a person reads it once rather than twice.
+  assert.deepEqual(items.map((item) => item.text), [
+    "Pacer refused 2 runs in web-app: memory pressure",
+    "Pacer refused a run in web-app: no slot free",
+    "Pacer refused a run in fleet: memory pressure",
+  ]);
+  // Newest first, so the line that just happened is the one on top.
+  assert.deepEqual(items.map((item) => item.key), [
+    "pacer:web-app:memory pressure", "pacer:web-app:no slot free", "pacer:fleet:memory pressure",
+  ]);
+  // Dismissing the repeat takes the whole repeat with it, including a refusal
+  // that lands after the dismissal: the key is the condition, not the run.
+  const dismissed = bandItems(repeated, ["pacer:web-app:memory pressure"], "")
+    .filter((item) => item.key.startsWith("pacer:"));
+  assert.deepEqual(dismissed.map((item) => item.key),
+                   ["pacer:web-app:no slot free", "pacer:fleet:memory pressure"]);
+  // A different reason is a different item, and is not dismissed with it.
+  const changed = snapshotFrom(reading({
+    pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [],
+             recent: [run("web-app", AT - 10, "no slot free")] } }), AT);
+  assert.deepEqual(bandItems(changed, ["pacer:web-app:memory pressure"], "")
+    .filter((item) => item.key.startsWith("pacer:")).map((item) => item.text),
+                   ["Pacer refused a run in web-app: no slot free"]);
 });
 
 test("a job that has waited past the configured span is left to the pane", () => {

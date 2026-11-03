@@ -106,8 +106,15 @@ right when there is something to dismiss. Errors sort ahead of waits. This
 session's own job is left out. A dismissal holds across sessions until the item
 changes, and `/llm-fleet unhide` brings everything back.
 
+An item is a condition, not an occurrence, and its key says so. A run pacer
+refused is one item per repository and reason, however often it repeats, and
+the line says how many times: a machine that refuses the same run all afternoon
+asks its person once, and one dismissal holds for every repeat. A different
+reason, or a different repository, is a new item; a pull request whose head
+moves is a new one too, since its checks were run again.
+
 ```text
-[ Close fleet ]  2 working  2 waiting  1 failed  Pacer refused a run in my-project . 2 more waiting   [ Dismiss ]
+[ Close fleet ]  2 working  2 waiting  1 failed  Pacer refused 3 runs in my-project: memory pressure . 2 more waiting   [ Dismiss ]
 ```
 
 ## Agent cards

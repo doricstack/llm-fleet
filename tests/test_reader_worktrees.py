@@ -623,7 +623,7 @@ class CacheTests(WorktreeCase):
                                        "errors": []}), encoding="utf-8")
         before = planted.read_text(encoding="utf-8")
         cache.unlink()
-        os.symlink(planted, cache)
+        sandbox.symlink(planted, cache)
         self.worktree("two", "feat/two")
         result = self.read(now=NOW + 2)
         self.assertEqual(sorted(row["name"] for row in result["worktrees"]), ["one", "two"])
@@ -632,7 +632,7 @@ class CacheTests(WorktreeCase):
         # A lock linked to a file holding a fresh time is not read as a live lock.
         taken = self.root / "taken"
         taken.write_text("{0:.6f}".format(NOW + 400), encoding="utf-8")
-        os.symlink(taken, self.state / worktrees.LOCK_NAME)
+        sandbox.symlink(taken, self.state / worktrees.LOCK_NAME)
         self.worktree("three", "feat/three")
         again = self.read(now=NOW + 401)
         self.assertEqual(sorted(row["name"] for row in again["worktrees"]), ["one", "three", "two"])
@@ -892,7 +892,7 @@ class HolderTests(WorktreeCase):
         real = self.root / "real-root"
         real.mkdir()
         link = self.root / "linked-root"
-        os.symlink(real, link)
+        sandbox.symlink(real, link)
         spellings = worktrees._roots_as_written([link])
         self.assertIn(str(real.resolve()), spellings)
         self.assertIn(str(link), spellings)
@@ -917,7 +917,7 @@ class HolderTests(WorktreeCase):
         target = self.root / "elsewhere" / "one"
         target.parent.mkdir(parents=True)
         self.git("worktree", "add", "-b", "feat/one", str(target), "main")
-        os.symlink(target, self.roots / "one")
+        sandbox.symlink(target, self.roots / "one")
         # A tool reports what the kernel has, which is the resolved path: on
         # macOS a temporary folder is spelled through /private there.
         environment = self.with_lsof(
@@ -1059,7 +1059,7 @@ class HolderTests(WorktreeCase):
         target.parent.mkdir(parents=True)
         self.git("worktree", "add", "-b", "feat/one", str(target), "main")
         link = self.roots / "one"
-        os.symlink(target, link)
+        sandbox.symlink(target, link)
         holder = subprocess.Popen(["sleep", "30"], cwd=str(target))
 
         def stop():
