@@ -17,19 +17,21 @@ how many rows, and carries the press that widens it again. The figures keep
 counting the whole machine while a filter is on, so a narrowed pane never reads
 as a small fleet.
 
-A pane opened while something failed opens narrowed to the failed rows: that is
-what a person opening it came for. The choice is the person's from then on: a
-press on a figure, or on Show all, stands for the rest of the session, and the
-pane never narrows itself again. Until then the narrowing is worked out from the
-reading being drawn rather than kept: a failure that cleared while the pane was
-shut does not reopen it on nothing, and a narrowing that could draw no row, since
-the failure sits in a section this pane does not draw, gives way to the whole
-fleet. An open that names a place is never narrowed: a command that opens one
-section, and the band's item, which names a row, draw what they name. A press on
-the figure of the state already drawn widens the pane, because the figure is a
-toggle of what is drawn, not of the choice stored behind it. A job whose provider says error is one of the rows it keeps, and the
-section holding them is opened, because a row behind a fold is counted by the
-line and drawn by nobody. A row carries a dot in its state's color beside its name, the
+A pane opened while something failed opens on it: that is what a person opening
+it came for. The sections holding a failure are drawn open on those rows, and
+every other section is folded where it stands. No section leaves the pane for
+this: the section picker names every section, and a heading the pane drops is a
+place the picker promises and the pane does not draw. It is worked out from the
+reading being drawn rather than kept, so a failure that cleared while the pane
+was shut does not reopen anything on nothing. A fold the person pressed
+outranks it and stands on the next paint. A press on a figure narrows the pane
+to that state and that choice is the person's from then on: a press on a figure,
+or on Show all, stands for the rest of the session, and the pane works out no
+open of its own again. An open that names a place is never narrowed: a command
+that opens one section, and the band's item, which names a row, draw what they
+name. A press on the figure of the state already drawn widens the pane, because
+the figure is a toggle of what is drawn, not of the choice stored behind it. A
+job whose provider says error is one of the rows it keeps. A row carries a dot in its state's color beside its name, the
 state word in its right slot, and a rate bar across the card under any item that
 has a total.
 

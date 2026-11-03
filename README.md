@@ -40,6 +40,7 @@ Your prompt
 - Keeps every session and background job in one live pane, with each row's model, step, context use and cost.
 - Prices each session at the rate the host it ran on charges, model by model: a DeepSeek or Kimi session at that provider's own rate card, read once a day from its public pricing page, and a session that switched models with what each one cost. `sources.rates.enabled: false` keeps it to the starter table and makes no request.
 - Marks a row working, waiting or failed, and keeps the figures at the top as controls that narrow the pane to those rows.
+- Opens on what failed when anything did: every section stays in the pane, the ones holding a failure open on those rows and the rest folded where they are.
 - Draws a band above the prompt carrying what needs you, with each figure opening the pane on its rows.
 - Reaches you with an alert when a job fails or starts waiting.
 - Folds a section by pressing its heading, and opens the rest of a row by pressing its figures.
@@ -51,7 +52,7 @@ Your prompt
 
 ![The llm-fleet pane, drawn from a sample machine](https://github.com/doricstack/llm-fleet/releases/download/v0.4.22/pane-demo-0.4.22.gif)
 
-The figures at the top are the controls: press one and the pane narrows to those rows.
+The figures at the top are the controls: press one and the pane narrows to those rows, and a line under the controls says how many rows it shows, with **Show all** to widen it again. The pane opens on what failed when anything did, without hiding a section: the sections holding a failure are opened on it and the rest are folded where they are, and any fold you press yourself stands.
 
 | Section | What it shows | On at install |
 | --- | --- | --- |

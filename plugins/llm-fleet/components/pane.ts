@@ -214,14 +214,23 @@ export type PaneOptions = {
    */
   focus?: Focus | null;
   /**
-   * Whether the narrowing is the pane's own, taken because the pane opened
-   * while something failed, rather than a state the person pressed.
+   * Whether the pane works out its own open, because the pane opened while
+   * something failed and the person has not said otherwise.
    *
-   * It is what lets the pane widen itself again: a narrowing that would draw
-   * no row gives way to the whole fleet, since an empty card set says less than
-   * the fleet it hid. A state the person chose is never widened for them.
+   * It opens the sections that hold a failure on those rows and folds the rest
+   * where they are. Nothing leaves the pane: the section picker names every
+   * section, and a heading the pane drops is a place the picker promises and
+   * the pane does not draw.
    */
   focusAuto?: boolean;
+  /**
+   * The folds the person pressed themselves, which outrank the pane's own open.
+   *
+   * Only presses are here, not the folds the configuration asks for: a section
+   * the configuration folded opens itself for a failure, and a section the
+   * person folded stays folded on the next paint.
+   */
+  pressedFolds?: Record<string, boolean>;
   /** The rows a person pressed open, by the key the row carries. */
   details?: Record<string, true>;
 };
@@ -2394,34 +2403,12 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   // the band record, not this.
   let focus = options.focus ?? null;
   const automatic = focus === null && options.focusAuto === true && failedOutcomes(snapshot) > 0;
-  if (automatic) {
-    focus = "failed";
-  }
   /** The rows a narrowed pane draws, across every section. */
   const focusedRows = (built: Group[]): number =>
     built.reduce((count, group) => count + group.rows.length, 0);
-  // A narrowing that could draw nothing gives way to the whole fleet: the
-  // failure it was opened for sits in a section this pane does not draw, and an
-  // empty card set says less than the fleet it hid. A state the person pressed
-  // is kept as it is, because it is what they asked to see.
-  let drawable = true;
-  if (focus !== null) {
-    const wanted: Focus = focus;
-    // Only the rows the Failed outcomes figure counted can satisfy the pane's
-    // own narrowing. A warning row and a refused pacer run carry the same state
-    // word and are not what that figure was about, so they cannot stand in for
-    // a failure the pane cannot draw.
-    const counted = new Set(["sessions", "prs"]);
-    const sectionOf = (group: Group): string => {
-      const key = group.toggle?.key ?? "";
-      return key.startsWith(TOGGLE_PREFIX) ? key.slice(TOGGLE_PREFIX.length) : "";
-    };
-    drawable = groups.some((group) => counted.has(sectionOf(group))
-      && group.rows.some((row) => focusMatches(row.state, wanted)));
-  }
-  if (automatic && !drawable) {
-    focus = null;
-  }
+  // A press on a figure is the person asking for one state and nothing else, so
+  // a section left with no such row leaves the pane rather than drawing an
+  // empty card.
   if (focus !== null) {
     for (let index = groups.length - 1; index >= 0; index -= 1) {
       const kept = groups[index]?.rows.filter((row) => focusMatches(row.state, focus)) ?? [];
@@ -2433,6 +2420,28 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
         // none of it, and a narrowed pane is opened for the rows it keeps.
         groups[index].collapsed = false;
       }
+    }
+  } else if (automatic) {
+    // The pane's own open leaves every section where it stands, because the
+    // section picker names them all and a heading the pane drops is a place the
+    // picker promises and the pane does not draw. A section holding a failure is
+    // drawn open on its failed rows; every other section is folded where it is,
+    // whole, so the fleet is one press away rather than absent. A fold the
+    // person pressed outranks both: the next paint must not undo a press.
+    const pressed = options.pressedFolds ?? {};
+    for (const group of groups) {
+      const key = group.toggle?.key ?? "";
+      const name = key.startsWith(TOGGLE_PREFIX) ? key.slice(TOGGLE_PREFIX.length) : "";
+      if (name !== "" && pressed[name] !== undefined) {
+        continue;
+      }
+      const failed = group.rows.filter((row) => focusMatches(row.state, "failed"));
+      if (failed.length === 0) {
+        group.collapsed = true;
+        continue;
+      }
+      group.rows = failed;
+      group.collapsed = false;
     }
   }
   // A row that holds more than its two lines gets the press that opens them,

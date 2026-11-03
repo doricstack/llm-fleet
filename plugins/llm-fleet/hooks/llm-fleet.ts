@@ -407,22 +407,6 @@ type State = {
    * their choice stands for the session and the pane never narrows itself again.
    */
   focusChosen: boolean;
-  /**
-   * Whether the open in hand named a section or a row, by the command that
-   * opens one section or by the band item that names one.
-   *
-   * A pane opened for a named place draws that place and nothing narrows it:
-   * the person asked for a section, or for a row, and hiding it behind a
-   * failure filter would open the pane on what they did not ask for.
-   */
-  namedOpen: boolean;
-  /**
-   * The state the last paint narrowed to, or null when it drew the whole fleet.
-   *
-   * The pane can widen its own narrowing, so a press on a figure has to answer
-   * what is drawn rather than the choice stored beside it.
-   */
-  drawnFocus: Focus | null;
   /** The rows a person pressed open, by the key the row carries. */
   details: Record<string, true>;
   /**
@@ -2623,7 +2607,16 @@ async function raise($: Engine, state: State, documents: ReaderDocuments, at: nu
   }
   const { fresh, seen } = newEvents(state.seen, snapshotFrom(documents, at), state.sessionId);
   state.seen = seen;
+  // A person who dismissed an item from the band asked not to be told about it
+  // again, and the band's key is the same one an alert carries: a toast or a
+  // notification for a dismissed item is the press thrown away. The key is
+  // still remembered above, so an item that comes back after it cleared is news
+  // again once its dismissal has been let go.
+  const hidden = new Set(state.hidden);
   for (const fired of fresh) {
+    if (hidden.has(fired.key)) {
+      continue;
+    }
     await alert($, state, fired).catch(() => undefined);
   }
 }
@@ -2973,7 +2966,6 @@ async function openOn($: Engine, state: State, section: string): Promise<{ text:
   // that drew nothing must not take the person's narrowing away.
   const landed = wasOpen || opened.isPlaced;
   if (landed) {
-    state.namedOpen = true;
     state.focus = null;
     // The folds are the open too: a pane that was not placed must not leave a
     // layout behind that nobody chose.
@@ -3060,7 +3052,7 @@ export const register: Register = (on, options) => {
   const state: State = { held: null, looking: false, readingWhole: false, counting: false, hydrated: false, pressed: {},
                          restored: false, shownAll: {}, shownAllRestored: false,
                          putAway: {}, putAwayRestored: false,
-                         focus: null, focusChosen: false, namedOpen: false, drawnFocus: null,
+                         focus: null, focusChosen: false,
                          details: {},
                          confirmingPacer: false, pacerArmedAt: 0,
                          hidden: [], replied: [], replying: new Set(), cleared: [],
@@ -3319,7 +3311,6 @@ export const register: Register = (on, options) => {
     // person says otherwise. The pane works that out from the reading it draws,
     // on every open and every path that opens it, so a failure that cleared
     // while the pane was shut cannot reopen it on nothing.
-    state.namedOpen = false;
     const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
     state.open = opened.isPlaced;
     $.ui.invalidate("ui.render");
@@ -3414,14 +3405,7 @@ export const register: Register = (on, options) => {
     return surfaceTree({ documents: withSession(shown, state.engineSession) as never,
                          width, now, surface: e.surface,
                          takenAt: state.held.at,
-                         transform: (drawn: Pane) => {
-                           // What the paint narrowed to, for the figure's
-                           // toggle: the pane can decide to widen its own
-                           // narrowing, and the press answers what is drawn.
-                           state.drawnFocus = drawn.focus === undefined ? null
-                             : state.focusChosen ? state.focus : "failed";
-                           return moved($, state, drawn, now * 1000);
-                         },
+                         transform: (drawn: Pane) => moved($, state, drawn, now * 1000),
                          onPress: (element: string) => {
                            // The host runs this in the plugin's environment when
                            // a button is pressed, which is how the pane hears
@@ -3463,13 +3447,11 @@ export const register: Register = (on, options) => {
                            // in the line under the controls.
                            if (element === FOCUS_CLEAR) {
                              // Shown whole by the person's own word: the pane
-                             // does not narrow itself again this session. What
-                             // is drawn decides whether a frame is owed: a pane
-                             // that narrowed itself holds no stored focus, and
-                             // the press still has to repaint it.
-                             const shown = state.focusChosen ? state.focus : state.drawnFocus;
+                             // does not work out an open of its own again this
+                             // session. A frame is owed only when something was
+                             // narrowed, so a pane already whole does not repaint.
                              state.focusChosen = true;
-                             if (state.focus !== null || shown !== null) {
+                             if (state.focus !== null) {
                                state.focus = null;
                                $.ui.invalidate("ui.render");
                              }
@@ -3479,18 +3461,15 @@ export const register: Register = (on, options) => {
                              const which = element.slice(FOCUS_PREFIX.length);
                              const known: Focus[] = ["working", "waiting", "failed"];
                              const chosen = known.find((name) => name === which) ?? null;
-                             // The toggle answers what is drawn: while the pane
-                             // has narrowed itself, the stored choice is empty
-                             // and the drawn state is what a press turns off.
-                             const shown = state.focusChosen ? state.focus : state.drawnFocus;
+                             // The toggle answers the state the pane is drawn in:
+                             // the same figure pressed twice widens it again.
+                             const shown = state.focus;
                              const wanted = chosen !== null && chosen !== shown ? chosen : null;
                              // A press on a figure is the person choosing what
                              // they are looking at, so the pane keeps that
                              // choice and does not pick for them on the next open.
                              state.focusChosen = true;
-                             // A frame is owed when what is drawn changes. The
-                             // stored choice is empty while the pane narrowed
-                             // itself, so it cannot answer that question.
+                             // A frame is owed when what is drawn changes.
                              if (wanted !== shown) {
                                state.focus = wanted;
                                $.ui.invalidate("ui.render");
@@ -3547,6 +3526,7 @@ export const register: Register = (on, options) => {
                          },
                          options: withTipsWord(state, {
                            ...paneOptions(width, now, pane), folded: drawnFolds,
+                           pressedFolds: state.pressed,
                            shownAll: state.shownAll,
                            putAway: state.putAway,
                            // What the person chose stands; until they choose,
@@ -3557,7 +3537,7 @@ export const register: Register = (on, options) => {
                            // names nothing: a command that opens one section,
                            // or a band item that names a row, draws what it
                            // names.
-                           focusAuto: !state.focusChosen && !state.namedOpen,
+                           focusAuto: !state.focusChosen,
                            details: state.details,
                            actions: paneActions($, state, e.surface),
                            replied: state.replied,
@@ -3649,11 +3629,6 @@ export const register: Register = (on, options) => {
         // a press that trusted the paint would close a pane already closed.
         const flip = (isOpen: boolean) => {
           state.open = !isOpen;
-          // The switch names nothing: an open by it is the same open the
-          // command makes, and goes to what failed like it.
-          if (!isOpen) {
-            state.namedOpen = false;
-          }
           $.ui.invalidate("ui.render");
           return isOpen ? $.ui.close({ id: PANE })
             : $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });

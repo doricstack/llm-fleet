@@ -41,7 +41,7 @@ A session started before the update has no pane until it restarts. From a checko
 ## Using the pane
 
 - The figures at the top are controls. Press **Working sessions**, **Waiting on you** or **Failed outcomes** to narrow the pane to those rows; a line under the controls says how many rows that is, with **Show all** to widen it again.
-- The pane opens narrowed to what failed when anything did. Press a figure or **Show all** and your choice stands for the rest of the session.
+- The pane opens on what failed when anything did: the sections holding a failure open on those rows and the rest are folded where they are, so no section leaves the pane. A fold you press yourself stands, and pressing a figure or **Show all** is your choice for the rest of the session.
 - A row that holds more than its two lines says so on its figures: press them to open the rest (path, provider, cleanup line, check list), and press again to close it.
 - A section heading folds it, and the keys section lists every binding the pane draws.
 - On the band above the prompt, the figures open the pane narrowed to their state, what this session has spent sits beside them on a chip, and the item the band leads with opens the pane where its row lives.
