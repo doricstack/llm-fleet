@@ -1204,6 +1204,54 @@ test("the configured row ceiling caps a section and says what it left out", () =
   assert.deepEqual(group2.summary.map((slot) => slot.text), ["4 need attention"]);
 });
 
+test("the skill heading counts the scan rather than the rows the ceiling let through", () => {
+  // Ten rows fit the pane, so ten was the number the heading drew however many
+  // the scan flagged, and it added the owner's skills to what installs hold.
+  const items = Array.from({ length: 10 }, (_, index) => ({
+    name: "skill-" + index, target: "a-target", verdict: "flagged",
+    score: index, issue: "", hash: "h" + index, scope: "own",
+  }));
+  const built = snapshot({ skills: {
+    state: "ready", items: items as never, new: [], running: null, counts: {},
+    generated_at: NOW, errors: [],
+    scopes: {
+      own: { targets: 23, flagged: 17, review: 5, failed: 0 },
+      builtin: { targets: 12, flagged: 2, review: 0, failed: 0 },
+      synced: { targets: 9, flagged: 4, review: 1, failed: 0 },
+      installed: { targets: 130, flagged: 23, review: 3, failed: 6 },
+    },
+  } });
+  const drawn = group(paneFrom(built, options({ geometry: { ...GEOMETRY, skillRows: 10 } })),
+                      "Skills");
+  // His own findings are the number he can act on; everything else is stated
+  // beside it rather than dropped, because those rows still draw under it.
+  // "not shown" is of every finding the heading counts, so the ones the reading
+  // itself could not hand over are not lost between the two figures.
+  assert.deepEqual(drawn.summary.map((slot) => slot.text),
+                   ["22 need attention", "  39 not yours", "  51 not shown"]);
+});
+
+test("a skill row says when the finding is not in one of his own skills", () => {
+  const items = [
+    { name: "one", target: "~/skills/one", verdict: "flagged", score: 1,
+      hash: "a", issue: "", scope: "own" },
+    { name: "discord", target: "~/.claude/plugins/marketplaces/x", verdict: "flagged",
+      score: 2, hash: "b", issue: "", scope: "installed" },
+    // A name every object carries is not a scope, and is never drawn as one.
+    { name: "odd", target: "~/skills/odd", verdict: "flagged", score: 3,
+      hash: "c", issue: "", scope: "constructor" },
+  ];
+  const built = snapshot({ skills: { state: "ready", items: items as never, new: [],
+                                     running: null, counts: {}, generated_at: NOW,
+                                     errors: [] } });
+  const rows = group(paneFrom(built, options()), "Skills").rows;
+  assert.deepEqual(rows[1]?.meta, [{ text: "~/skills/one" }, { text: " · score 1" }]);
+  assert.deepEqual(rows[2]?.meta,
+                   [{ text: "~/.claude/plugins/marketplaces/x" },
+                    { text: " · score 2" }, { text: " · installed plugin", dim: true }]);
+  assert.deepEqual(rows[3]?.meta, [{ text: "~/skills/odd" }, { text: " · score 3" }]);
+});
+
 test("a section's configured legend reaches the pane it is drawn by", () => {
   // Every section draws its own legend, from the choice the pane was handed. A
   // legend configured and drawn by one section only is a legend the other seven

@@ -513,7 +513,7 @@ class SkillTests(StubCase):
         self.assertEqual(len(result["items"]), 1)
         self.assertEqual(result["items"][0], {"name": "three", "target": "/fixture/runner/skills/three",
                                               "verdict": "issues", "score": 0.5,
-                                              "hash": "abc1234",
+                                              "hash": "abc1234", "scope": "own",
                                               "issue": "high secret: looks like a key (a.py:4)"})
 
     def test_a_target_under_the_user_directory_is_shortened(self):
@@ -536,6 +536,121 @@ class SkillTests(StubCase):
         config["limits"] = dict(config["limits"], skillItems=3)
         result = skills.read_skills(config, now=NOW)
         self.assertEqual(len(result["items"]), 3)
+
+    def test_findings_are_counted_by_whose_skill_they_are_in(self):
+        # The scan walks the whole machine, so its rows mix the owner's skills
+        # with what an install copied and what the tooling synced over. One
+        # number for all of them is a number nobody can act on.
+        self.summary({"targets": [
+            {"target": "/fixture/runner/skills/one", "verdict": "flagged"},
+            {"target": "/fixture/runner/skills/two", "verdict": "review"},
+            {"target": "/fixture/runner/skills/.system/three", "verdict": "flagged"},
+            {"target": "/fixture/runner/skills/synced/abc-123/four", "verdict": "review"},
+            {"target": "/fixture/runner/plugins/marketplaces/x/five", "verdict": "flagged"},
+            {"target": "/fixture/runner/plugins/marketplaces/x/six", "verdict": "clean"},
+            {"target": "/fixture/runner/plugins/marketplaces/x/seven", "verdict": "failed"},
+        ]})
+        self.assertEqual(self.read()["scopes"], {
+            "own": {"targets": 2, "flagged": 1, "review": 1, "failed": 0},
+            "builtin": {"targets": 1, "flagged": 1, "review": 0, "failed": 0},
+            "synced": {"targets": 1, "flagged": 0, "review": 1, "failed": 0},
+            "installed": {"targets": 3, "flagged": 1, "review": 0, "failed": 1},
+            "other": {"targets": 0, "flagged": 0, "review": 0, "failed": 0},
+        })
+
+    def test_a_clean_or_dismissed_target_is_counted_but_does_not_need_attention(self):
+        self.summary({"targets": [
+            {"target": "/fixture/runner/skills/one", "verdict": "clean"},
+            {"target": "/fixture/runner/skills/two", "verdict": "flagged", "reviewed": True},
+        ]})
+        self.assertEqual(self.read()["scopes"]["own"],
+                         {"targets": 2, "flagged": 0, "review": 0, "failed": 0})
+
+    def test_a_verdict_this_reader_does_not_know_is_counted_as_one_to_read(self):
+        # The row draws under the heading whatever word the scan gave it, so a
+        # heading that counted only the words it knew would count less than the
+        # rows beneath it.
+        self.summary({"targets": [
+            {"target": "/fixture/runner/skills/one", "verdict": "issues"},
+            {"target": "/fixture/runner/skills/two", "verdict": "failed"},
+        ]})
+        result = self.read()
+        self.assertEqual(result["scopes"]["own"],
+                         {"targets": 2, "flagged": 0, "review": 1, "failed": 1})
+        self.assertEqual(len(result["items"]), 2)
+
+    def test_his_own_findings_come_before_anyone_elses(self):
+        self.summary({"targets": [
+            {"target": "/fixture/runner/plugins/marketplaces/x/five", "verdict": "flagged"},
+            {"target": "/fixture/runner/plugins/marketplaces/x/six", "verdict": "flagged"},
+            {"target": "/fixture/runner/skills/one", "verdict": "flagged"},
+        ]})
+        config = dict(self.config())
+        config["limits"] = dict(config["limits"], skillItems=2)
+        result = skills.read_skills(config, now=NOW)
+        self.assertEqual([item["scope"] for item in result["items"]], ["own", "installed"])
+
+    def test_a_row_says_whose_skill_it_is_in(self):
+        self.summary({"targets": [
+            {"target": "/fixture/runner/skills/one", "verdict": "flagged"},
+            {"target": "/fixture/runner/skills/.system/two", "verdict": "flagged"},
+            {"target": "/fixture/runner/skills/synced/abc/three", "verdict": "flagged"},
+            {"target": "/fixture/runner/plugins/marketplaces/x/four", "verdict": "flagged"},
+        ]})
+        self.assertEqual(sorted(item["scope"] for item in self.read()["items"]),
+                         ["builtin", "installed", "own", "synced"])
+        # A folder that is named after a scope is still the owner's skill.
+        self.assertEqual(skills.skill_scope("/fixture/runner/skills/plugins/five"), "own")
+
+    def test_a_scope_the_scan_names_is_the_one_counted(self):
+        # The scan works its scope out from the roots it ran with, so its word
+        # decides whether a finding counts as his, whatever the path looks like.
+        self.summary({"targets": [
+            {"target": "/fixture/runner/skills/one", "verdict": "flagged", "scope": "installed"},
+            {"target": "/fixture/runner/skills/other/two", "verdict": "flagged", "scope": "other"},
+            {"target": "/fixture/runner/plugins/x/three", "verdict": "flagged", "scope": "own"},
+        ]})
+        result = self.read()
+        self.assertEqual({item["target"]: item["scope"] for item in result["items"]},
+                         {"/fixture/runner/skills/one": "installed",
+                          "/fixture/runner/skills/other/two": "other",
+                          "/fixture/runner/plugins/x/three": "own"})
+        self.assertEqual(result["scopes"]["installed"]["flagged"], 1)
+        self.assertEqual(result["scopes"]["other"]["flagged"], 1)
+        self.assertEqual(result["scopes"]["own"]["flagged"], 1)
+
+    def test_a_row_the_reader_cannot_draw_is_not_counted(self):
+        # A mapping with no target makes no row, and a heading counting it would
+        # stand over nothing.
+        self.summary({"targets": [
+            {"verdict": "flagged"},
+            {"target": "/fixture/runner/skills/one", "verdict": "flagged"},
+        ]})
+        result = self.read()
+        self.assertEqual(result["scopes"]["own"],
+                         {"targets": 2, "flagged": 1, "review": 0, "failed": 0})
+        self.assertEqual(len(result["items"]), 1)
+
+    def test_a_notice_on_a_row_the_cap_drops_marks_no_row(self):
+        self.summary({"targets": [
+            {"target": "/fixture/runner/plugins/x/one", "verdict": "flagged"},
+            {"target": "/fixture/runner/plugins/x/two", "verdict": "flagged"},
+            {"target": "/fixture/runner/skills/three", "verdict": "flagged"},
+        ]})
+        self.notices([json.dumps({"target": "/fixture/runner/plugins/x/one", "verdict": "flagged",
+                                  "at": NOW - 60}),
+                      json.dumps({"target": "/fixture/runner/plugins/x/two", "verdict": "flagged",
+                                  "at": NOW - 60}),
+                      json.dumps({"target": "/fixture/runner/skills/three", "verdict": "flagged",
+                                  "at": NOW - 60})])
+        config = dict(self.config())
+        config["limits"] = dict(config["limits"], skillItems=2)
+        result = skills.read_skills(config, now=NOW)
+        # His own row is drawn first, then the first of the others; the notice on
+        # the row the cap dropped marks nothing, so no alert names a row the
+        # pane never draws.
+        self.assertEqual([item["scope"] for item in result["items"]], ["own", "installed"])
+        self.assertEqual([item["name"] for item in result["new"]], ["three", "one"])
 
     def test_a_fresh_running_scan_reports_its_counts(self):
         self.summary({"targets": []})

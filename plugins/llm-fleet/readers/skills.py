@@ -26,6 +26,21 @@ SUMMARY_NAME = "summary.json"
 PROGRESS_NAME = "progress.json"
 NOTICES_NAME = "notices.jsonl"
 CLEAN = "clean"
+# Whose skill a finding is in. The scan walks the whole machine, so its rows mix
+# the owner's own skills with what an install copied and what the tooling synced
+# over; a heading that added them together was a number nobody could act on.
+OWN = "own"
+BUILTIN = "builtin"
+SYNCED = "synced"
+INSTALLED = "installed"
+OTHER = "other"
+SCOPES = (OWN, BUILTIN, SYNCED, INSTALLED, OTHER)
+# What the scan itself calls a scope, for a summary written since it started
+# naming one on each row. It is coarser than this reader: it separates his
+# skills from everything else, and the two managed folders inside his own tree
+# are still read from the path.
+SCAN_SCOPES = {OWN: OWN, INSTALLED: INSTALLED, OTHER: OTHER}
+VERDICTS = ("flagged", "review", "failed")
 
 
 def _read_json(path: Path, max_bytes: int) -> Any:
@@ -79,6 +94,33 @@ def issue_line(issue: Any, limit: int) -> str:
     return cut("{0} {1}: {2} ({3})".format(severity, category, finding, where).strip(), limit) or ""
 
 
+def skill_scope(target: Any, scope: Any = None) -> str:
+    """Whose skill a finding is in.
+
+    The scan names a scope on each row now, worked out from the roots it was run
+    with, and that word is what says whether the finding counts as his. A
+    summary written before it did is read from the path instead. Either way the
+    two managed folders inside his own tree are told apart from his own skills,
+    because a built-in and a synced copy are also his to change only in place.
+    """
+    named = SCAN_SCOPES.get(scope) if isinstance(scope, str) else None
+    if named == INSTALLED or named == OTHER:
+        return named
+    if not isinstance(target, str) or not target:
+        return named or OWN
+    parts = Path(target).parts
+    # A folder named "plugins" is a plugin install only where it is not itself
+    # under a skills folder, which is where a skill of his own would sit.
+    if named is None and "plugins" in parts and (
+            "skills" not in parts or parts.index("plugins") < parts.index("skills")):
+        return INSTALLED
+    if ".system" in parts:
+        return BUILTIN
+    if "synced" in parts:
+        return SYNCED
+    return named or OWN
+
+
 def skill_item(row: Any, home: Path | None, limit: int) -> dict[str, Any] | None:
     """One finding row, or None when the row does not carry what a row needs."""
     if not isinstance(row, Mapping):
@@ -96,6 +138,7 @@ def skill_item(row: Any, home: Path | None, limit: int) -> dict[str, Any] | None
         "verdict": printable(verdict),
         "score": score if isinstance(score, (int, float)) and not isinstance(score, bool) else None,
         "hash": printable(row.get("hash") or ""),
+        "scope": skill_scope(target, row.get("scope")),
         "issue": issue_line(first, limit),
     }
 
@@ -150,8 +193,8 @@ def read_skills(config: Mapping[str, Any], *, now: float | None = None,
     clock = float(now) if now is not None else time.time()
     limits = config["limits"]
     result: dict[str, Any] = {"state": "disabled", "generated_at": None, "counts": {},
-                              "items": [], "new": [], "running": None, "errors": [],
-                              "report_command": report_command(config)}
+                              "scopes": {}, "items": [], "new": [], "running": None,
+                              "errors": [], "report_command": report_command(config)}
     if not source["enabled"]:
         return result
     folder = Path(source["directory"])
@@ -186,25 +229,42 @@ def read_skills(config: Mapping[str, Any], *, now: float | None = None,
             fresh = False
         if fresh and _countable(progress.get("done")) and _countable(progress.get("total")):
             running = {"done": _count(progress.get("done")), "total": _count(progress.get("total"))}
-    items: list[dict[str, Any]] = []
-    new: list[dict[str, Any]] = []
+    found: dict[str, dict[str, int]] = {
+        scope: {"targets": 0, "flagged": 0, "review": 0, "failed": 0} for scope in SCOPES}
+    rows: list[tuple[dict[str, Any], bool]] = []
     for row in summary.get("targets") or []:
         if not isinstance(row, Mapping):
             continue
-        if row.get("verdict") == CLEAN or row.get("reviewed") is True:
+        scope = skill_scope(row.get("target"), row.get("scope"))
+        found[scope]["targets"] += 1
+        verdict = row.get("verdict")
+        if verdict == CLEAN or row.get("reviewed") is True:
             continue
         item = skill_item(row, home, limit)
         if item is None:
             continue
-        if len(items) < cap:
-            items.append(item)
+        # Counted only for a row that is drawn: a mapping the reader refuses is
+        # no row, and a heading counting it would stand over nothing.
+        # A row the scan could not judge is still a row, counted in its scope as
+        # one to read, because it draws under the heading with the warning color
+        # whatever word the scan gave it.
+        found[scope][verdict if verdict in VERDICTS else "review"] += 1
         # A notice names the target the scan wrote, so it is matched as written:
         # comparing it with the shortened path a row displays would never match.
-        if row.get("target") in notices and len(new) < cap:
-            new.append(item)
+        rows.append((item, row.get("target") in notices))
+    # His own skills first: the rows the heading counts are the rows the pane
+    # has the room to draw, or the heading is counting what a reader cannot see.
+    rows.sort(key=lambda pair: SCOPES.index(pair[0]["scope"]))
+    kept = rows[:cap]
+    items = [item for item, _ in kept]
+    # Only a row this reading hands over can be marked new or raise an alert, so
+    # a notice on a row the cap dropped marks nothing rather than a row the pane
+    # never draws.
+    new = [item for item, noticed in kept if noticed]
     result["generated_at"] = summary.get("generated_at")
     counts = summary.get("counts")
     result["counts"] = counts if isinstance(counts, Mapping) else {}
+    result["scopes"] = found
     result["items"] = items
     result["new"] = new
     result["running"] = running

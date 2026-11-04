@@ -44,6 +44,7 @@ A session started before the update has no pane until it restarts. From a checko
 - The pane opens on what failed when anything did: the sections holding a failure open on those rows and the rest are folded where they are, so no section leaves the pane. A fold you press yourself stands, and pressing a figure or **Show all** is your choice for the rest of the session.
 - A row that holds more than its two lines says so on its figures: press them to open the rest (path, provider, cleanup line, check list), and press again to close it.
 - A section heading folds it, and the keys section lists every binding the pane draws.
+- The skills heading counts the findings in your own skills, apart from the ones under plugin installs, synced copies and built-ins, which it states beside that number. It counts what the scan found rather than the rows the pane had room to draw, so a count never shrinks to the size of the section.
 - On the band above the prompt, the figures open the pane narrowed to their state, what this session has spent sits beside them on a chip, and the item the band leads with opens the pane where its row lives.
 - What a row offers is copied or opened from its title: a job's attach line, a worktree's cleanup line, a pull request's page, a skill report command.
 

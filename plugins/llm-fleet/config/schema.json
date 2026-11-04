@@ -267,7 +267,8 @@
     {"path": "limits.questionCharacters", "type": "integer", "default": 200, "minimum": 1},
     {"path": "limits.agentTranscriptBytes", "type": "integer", "default": 16777216,
      "minimum": 1},
-    {"path": "limits.skillItems", "type": "integer", "default": 10, "minimum": 1},
+    {"path": "limits.skillItems", "type": "integer", "default": 100, "minimum": 1,
+     "name": "The findings a reading keeps, so that showing all rows reaches what the heading counts"},
     {"path": "limits.skillScanBytes", "type": "integer", "default": 16777216, "minimum": 1,
      "name": "The largest skill scan summary read; a larger one is reported, not read"},
 

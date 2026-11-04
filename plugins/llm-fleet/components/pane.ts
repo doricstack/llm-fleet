@@ -1020,11 +1020,22 @@ function pullRequestRow(pull: PullRequest): Row {
   };
 }
 
+/** How a finding's scope is said on its row; his own skills carry no label. */
+const SKILL_SCOPES: Record<string, string> = {
+  builtin: "built-in", synced: "synced copy", installed: "installed plugin", other: "other folder",
+};
+
 /** One skill finding: its target, its score, and whether a read found it new. */
 function skillRow(item: SkillItem, isNew: boolean): Row {
   const meta: Slot[] = [{ text: item.target }];
   if (item.score !== null) {
     meta.push({ text: " \u00b7 score " + item.score });
+  }
+  const scope = item.scope === undefined ? undefined : SKILL_SCOPES[item.scope];
+  // A name the map does not hold, including one every object inherits, is no
+  // label rather than the text of a function the object carries.
+  if (typeof scope === "string") {
+    meta.push({ text: " \u00b7 " + scope, dim: true });
   }
   return {
     title: (isNew ? "* " : "") + shown(item.name).text,
@@ -1763,6 +1774,37 @@ function skillStatusRow(skills: Skills, options: PaneOptions): Row | null {
   };
 }
 
+/**
+ * What the heading says about the scan: how many findings are in the owner's own
+ * skills, and how many are anywhere else.
+ *
+ * The count comes from the rows the scan wrote, not from the rows a reader kept
+ * or the pane draws: ten rows fit, so ten was the number it said however many
+ * the scan flagged. Findings under a plugin install, a synced copy or a built-in
+ * are counted apart rather than dropped, because those rows still draw under it.
+ * A reading written before the scan listed its scopes falls back to its rows.
+ */
+function skillHeading(skills: Skills): { slots: Slot[]; counted: number } {
+  const scopes = skills.scopes ?? {};
+  const names = Object.keys(scopes);
+  const attention = (scope: string) => {
+    const counts = scopes[scope];
+    return counts === undefined ? 0
+      : (counts.flagged ?? 0) + (counts.review ?? 0) + (counts.failed ?? 0);
+  };
+  if (names.length === 0) {
+    return { slots: primaryCount(skills.items.length, "need attention", "warning"),
+             counted: skills.items.length };
+  }
+  const counted = names.reduce((sum, name) => sum + attention(name), 0);
+  const elsewhere = counted - attention("own");
+  return {
+    counted,
+    slots: [...primaryCount(attention("own"), "need attention", "warning"),
+            ...(elsewhere > 0 ? [{ text: elsewhere + " not yours", dim: true }] : [])],
+  };
+}
+
 function skillGroup(skills: Skills, options: PaneOptions): Group {
   const fresh = new Set(skills.new.map((item) => item.hash + "|" + item.target));
   // The same press that raises a section's ceiling raises this one, which is a
@@ -1771,28 +1813,30 @@ function skillGroup(skills: Skills, options: PaneOptions): Group {
     : Math.max(0, options.geometry.skillRows);
   const shown = skills.items.slice(0, ceiling);
   const status = skillStatusRow(skills, options);
+  const heading = skillHeading(skills);
   const rows = [...(status ? [status] : []), ...shown.map((item) =>
     skillRow(item, fresh.has(item.hash + "|" + item.target)))];
   // A scan with more findings than the pane will draw says how many it left out.
   // Cutting them silently draws a section that looks like the whole scan, and a
   // count beside a heading that no longer matches the rows under it is worse
-  // than the extra line.
-  const withheld = skills.items.length - shown.length;
+  // than the extra line. The count is of every finding the heading counts, so
+  // one the reading itself could not hand over is not lost between the two.
+  const withheld = Math.max(0, heading.counted - shown.length);
   // A running scan says how far it is on its status row, which every running
   // scan has, so the heading does not say it a second time.
   // A scan that ran and left nothing to read is a reading, and its line says so.
   const state = status !== null && skills.state === "empty" ? "ready" : partial(rows, skills.state);
   const group = sectionGroup(
     "skills", rows, state,
-    combine([primaryCount(skills.items.length, "need attention", "warning"),
-             countSlot(withheld, "not shown", "warning")]),
+    combine([heading.slots, countSlot(withheld, "not shown", "warning")]),
     options);
   group.observed = rows.length;
   // The findings the scan row ceiling held back are drawn under the section
   // while the pointer is on it, so "5 not shown" is a count a person can open,
   // and the control beside it opens them where no pointer is.
-  if (withheld > 0) {
-    group.held = skills.items.slice(ceiling).map((item) =>
+  const held = skills.items.slice(ceiling);
+  if (held.length > 0) {
+    group.held = held.map((item) =>
       skillRow(item, fresh.has(item.hash + "|" + item.target)));
     const key = SHOW_ALL_PREFIX + "skills";
     group.rows = [...group.rows, { key: "show-all", title: "show all rows", dim: true, meta: [],

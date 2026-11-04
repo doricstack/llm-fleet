@@ -303,7 +303,7 @@ A command that is not on the PATH reads as unavailable; one that exits nonzero, 
 | `timeouts.rateCardSeconds`, `limits.rateCardBytes` | seconds 1 to 30, bytes at least 65536 | 4, 4000000; one deadline covers every card of a refresh, and a page larger than the bound is refused rather than cut |
 | Rate record | `<stateDir>/records/rate-cards.json` | Each generation's fetched rates with the time they were read, and each failed try with its reason. Written by the refresh alone; a read only opens it |
 | `runtime.childEnvironment.stripPrefixes`, `runtime.childEnvironment.stripNames` | non-empty string arrays | Credential baseline; configuration may add entries, never remove one |
-| `limits.skillItems`, `history.skillNoticeDays` | positive integers | 10, 7 |
+| `limits.skillItems`, `history.skillNoticeDays` | positive integers | 100, 7; the findings a reading keeps, high enough that showing all rows reaches the number the heading counts |
 | `limits.skillScanBytes` | positive integer | 16777216; a scan summary larger than this, or one that is not JSON, is named in the warnings rather than drawn as a scan that found nothing |
 | `refresh.skillStaleSeconds` | seconds | 900 |
 

@@ -336,6 +336,26 @@ test("the skill report command travels with the scan, and a reading without one 
   assert.equal(without.skills.report_command, null);
 });
 
+test("the scan's counts by whose skill they are in travel, and a broken one is dropped", () => {
+  const built = snapshotFrom({ skills: {
+    state: "ready",
+    scopes: {
+      own: { targets: 23, flagged: 17, review: 5, failed: 0 },
+      installed: { targets: 130, flagged: 23, review: 3, failed: 6 },
+      synced: "many",
+    },
+    items: [{ name: "one", target: "~/skills/one", verdict: "flagged", scope: "installed" },
+            { name: "two", target: "~/skills/two", verdict: "flagged", scope: 9 }],
+  } }, NOW);
+  assert.deepEqual(built.skills.scopes, {
+    own: { targets: 23, flagged: 17, review: 5, failed: 0 },
+    installed: { targets: 130, flagged: 23, review: 3, failed: 6 },
+  });
+  assert.equal(built.skills.items[0]?.scope, "installed");
+  // A scope that is not a string is no scope at all, not a label to draw.
+  assert.equal(built.skills.items[1]?.scope, undefined);
+});
+
 /** An ISO time `ago` seconds before NOW, to the second, as the readers write one. */
 function iso(ago: number): string {
   return new Date((NOW - ago) * 1000).toISOString().replace(".000Z", "Z");

@@ -10,7 +10,7 @@
  */
 
 import type {
-  AgentFigures, FanEntry, Job, ModelSpend, RateAccount, JobReply, Load, LoadProcess, LoadSystem, PullRequest, PullRequests, ReaderState, Roster, SkillItem, Skills,
+  AgentFigures, FanEntry, Job, ModelSpend, RateAccount, JobReply, Load, LoadProcess, LoadSystem, PullRequest, PullRequests, ReaderState, Roster, SkillItem, SkillScope, Skills,
   SessionFigures, Snapshot, SourceState, Worktree,
   Worktrees, Custom, CustomRow, CustomSection, CheckRun, SpendSeries,
   TimelineSegment, Pacer, PacerOutside, PacerRun, PacerSlot, PacerWaiter } from "./state.ts";
@@ -478,7 +478,27 @@ function skillItems(value: unknown): SkillItem[] {
     score: maybeCount(entry.score),
     hash: text(entry.hash),
     issue: text(entry.issue),
+    ...(typeof entry.scope === "string" ? { scope: entry.scope } : {}),
   }));
+}
+
+function skillScopes(value: unknown): Record<string, SkillScope> {
+  const scopes: Record<string, SkillScope> = {};
+  if (!isObject(value)) {
+    return scopes;
+  }
+  for (const [name, counts] of Object.entries(value)) {
+    if (!isObject(counts)) {
+      continue;
+    }
+    scopes[name] = {
+      targets: count(counts.targets),
+      flagged: count(counts.flagged),
+      review: count(counts.review),
+      failed: count(counts.failed),
+    };
+  }
+  return scopes;
 }
 
 function skillsFrom(document: unknown): Skills {
@@ -496,6 +516,7 @@ function skillsFrom(document: unknown): Skills {
     state: stateOf(document, "empty"),
     generated_at: maybeCount(source.generated_at),
     counts,
+    scopes: skillScopes(source.scopes),
     items: skillItems(source.items),
     new: skillItems(source.new),
     // A running scan without a total has no denominator to report.

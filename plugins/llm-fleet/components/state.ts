@@ -245,14 +245,29 @@ export type SkillItem = {
   verdict: string;
   score: number | null;
   hash: string;
+  /** Whose skill it is in: own, builtin, synced or installed; absent from older readings. */
+  scope?: string;
   /** The worst finding as one line, empty when there is none. */
   issue: string;
+};
+
+/** What one scope of the scan holds, by verdict. */
+export type SkillScope = {
+  targets: number;
+  flagged: number;
+  review: number;
+  failed: number;
 };
 
 export type Skills = {
   state: ReaderState;
   generated_at: number | null;
   counts: Record<string, number>;
+  /**
+   * The scan's findings by whose skill they are in, from the rows it wrote
+   * rather than from the rows a reader kept; absent from an older reading.
+   */
+  scopes?: Record<string, SkillScope>;
   items: SkillItem[];
   new: SkillItem[];
   running: { done: number; total: number } | null;
