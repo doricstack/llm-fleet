@@ -10,7 +10,7 @@
  * opened is the band's to show, not an alert's to announce.
  */
 
-import { isOwnJob } from "./band.ts";
+import { hisSkill, isOwnJob } from "./band.ts";
 import { mask } from "./mask.ts";
 import type { Snapshot } from "./state.ts";
 
@@ -50,6 +50,11 @@ export function eventsOf(snapshot: Snapshot, sessionId: string): FleetEvent[] {
     }
   }
   for (const skill of snapshot.skills.new ?? []) {
+    // A finding outside his skills is other people's code: the pane shows it
+    // and the band and an alert do not interrupt for it.
+    if (!hisSkill(skill.scope)) {
+      continue;
+    }
     const key = "skill:" + skill.target + ":" + skill.verdict + ":" + skill.hash;
     const name = said(skill.name);
     if (skill.verdict === "flagged") {

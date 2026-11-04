@@ -652,6 +652,9 @@ a live desktop session was exercised during scaffolding.
 
 The first snapshot establishes a baseline without replaying old events. New job
 completion or blocking, failing PR checks, and skill findings can raise alerts.
+A skill finding raises one only when it is in the owner's own skills: a row
+under a plugin install or another tool's folder is drawn in the pane and never
+interrupts, since nobody there can act on it.
 A run pacer refused is drawn on the band and raises no alert of its own: the
 band is where a run nobody can start is readable, and a refusal is not a
 question waiting for an answer. Toasts go to the session with the last submitted

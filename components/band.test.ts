@@ -131,6 +131,24 @@ test("a newly flagged skill is an error on the band, and one to read or a failed
 /** A key of the shape the masking refuses, built in parts so no file holds one whole. */
 const SKILL_KEY = ["sk-", "ant-", "api03-", "B".repeat(24)].join("");
 
+test("the band raises only a finding in his own skills", () => {
+  // A plugin tree is other people's code: a row there is the pane's to show and
+  // not the band's to interrupt for. A reading written before rows carried a
+  // scope is his, because there was nothing else for it to be.
+  const items = bandItems(snapshotFrom(reading({
+    skills: { state: "ready", items: [], counts: {}, new: [
+      skill("mine", "flagged"),
+      skill("theirs", "flagged", { scope: "installed" }),
+      skill("theirs-too", "review", { scope: "other" }),
+      skill("older", "flagged"),
+    ] },
+  }), AT), [], "");
+  assert.deepEqual(items.filter((item) => item.key.startsWith("skill:"))
+                     .map((item) => item.text),
+                   ["Skill flagged: mine, reads mine secrets",
+                    "Skill flagged: older, reads older secrets"]);
+});
+
 test("a skill's finding is masked on the band as it is on the pane", () => {
   const items = bandItems(snapshotFrom(reading({
     skills: { state: "ready", items: [], counts: {},

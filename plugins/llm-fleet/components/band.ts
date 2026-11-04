@@ -212,9 +212,20 @@ export function keptHidden(hidden: readonly string[], current: readonly string[]
   return [...new Set([...kept, ...dismissing])].slice(-limit);
 }
 
+/**
+ * Whether a finding is in the owner's own skills.
+ *
+ * A row under a plugin install, a synced copy or a built-in is other people's
+ * code: the pane shows it and neither the band nor an alert interrupts for it.
+ * A reading written before rows carried a scope is his, because there was
+ * nothing else for it to be.
+ */
+export function hisSkill(scope: string | undefined): boolean {
+  return scope === undefined || scope === "own";
+}
+
 /** What a new skill finding says on the band, and whether it is an error or a wait. */
-function skillItem(skill: Snapshot["skills"]["new"][number]): BandItem {
-  const key = "skill:" + skill.target + ":" + skill.verdict + ":" + skill.hash;
+function skillItem(skill: Snapshot["skills"]["new"][number]): BandItem {  const key = "skill:" + skill.target + ":" + skill.verdict + ":" + skill.hash;
   if (skill.verdict === "flagged") {
     return { key, level: "error",
              text: "Skill flagged: " + said(skill.name) + ", " + said(skill.issue) };
@@ -286,6 +297,9 @@ export function bandItems(snapshot: Snapshot, dismissed: readonly string[],
     }
   }
   for (const skill of snapshot.skills.new) {
+    if (!hisSkill(skill.scope)) {
+      continue;
+    }
     const item = skillItem(skill);
     (item.level === "error" ? errors : waits).push(item);
   }
