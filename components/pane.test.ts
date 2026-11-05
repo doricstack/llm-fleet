@@ -191,12 +191,15 @@ test("every section names the figure its rows end in", () => {
   // its right-hand column holds. Load names two figures in their own widths.
   const built = paneFrom(snapshot(), options());
   const named = new Map(built.groups.map((section) => [section.title, section.columns]));
-  // A session names its state: the project it works for opens the row's words.
-  assert.deepEqual(named.get("Background sessions")?.map((cell) => cell.text),
-                   ["STATE"]);
-  // Pacer names its slot columns, because its rows end in three figures.
-  assert.deepEqual(named.get("Pacer")?.map((cell) => cell.text),
-                   [" PROJECT", " WORKTREE", " ELAPSED"]);
+  // A session's right-hand cell is a state word, which names itself; a header for
+  // it cost a line and drew as "S..." on a narrow card.
+  assert.equal(named.get("Background sessions"), undefined);
+  // Pacer's slot table names its three columns in a row of its own, drawn through
+  // the same cells as the values, so the names cannot sit off the columns.
+  const pacer = built.groups.find((section) => section.title === "Pacer");
+  assert.equal(named.get("Pacer"), undefined);
+  assert.deepEqual(pacer?.rows[0]?.slot?.map((cell) => cell.text.trim()),
+                   ["REPO", "WORKTREE", "ELAPSED"]);
   assert.deepEqual(named.get("Pull requests"), [{ text: "CHECKS" }]);
   assert.deepEqual(named.get("Worktrees"), [{ text: "STATE" }]);
   assert.deepEqual(named.get("Skills"), [{ text: "VERDICT" }]);
@@ -334,22 +337,24 @@ test("the pacer section draws its slots as columns, then its settings", () => {
   const built = pacerPane(pacerReading());
   assert.deepEqual(built.groups.map((entry) => entry.title), ["This session", "Pacer"]);
   const section = group(built, "Pacer");
-  // The slots lead: they are the live state, and the column names are theirs.
+  // The column names lead, drawn through the same cells as the values so they
+  // cannot sit off them; the slots follow, then the switch and the rest.
   assert.deepEqual(section.rows.map((row) => row.title),
-                   ["Slot 1", "Slot 2", "Slot 3", "Slot 4", "Settings"]);
-  assert.deepEqual(section.columns?.map((cell) => cell.text), [" PROJECT", " WORKTREE", " ELAPSED"]);
-  // A held slot: the project it runs for, its worktree and how long it has run,
-  // each in its own column.
+                   ["", "Long", "Slot 2", "Slot 3", "Slot 4", "Settings"]);
   assert.deepEqual(section.rows[0]?.slot.map((cell) => cell.text),
+                   ["REPO", " WORKTREE", " ELAPSED"]);
+  // A held slot: the repo it runs for, its worktree and how long it has run,
+  // each in its own column, under the names above them.
+  assert.deepEqual(section.rows[1]?.slot.map((cell) => cell.text),
                    ["llm-fleet", " llm-fleet-private", " 10m"]);
-  assert.equal(section.rows[0]?.state, "working");
+  assert.equal(section.rows[1]?.state, "working");
   // A free slot keeps the columns and says free in the worktree's.
-  assert.deepEqual(section.rows[1]?.slot.map((cell) => cell.text.trim()),
+  assert.deepEqual(section.rows[2]?.slot.map((cell) => cell.text.trim()),
                    ["", "free", ""]);
-  assert.equal(section.rows[1]?.state, undefined);
+  assert.equal(section.rows[2]?.state, undefined);
   // Pacer's live settings travel with each read, so a change made while the
   // pane is open is drawn on the next one.
-  assert.deepEqual(section.rows[4]?.meta.map((cell) => cell.text), ["4 slots, 6 per run"]);
+  assert.deepEqual(section.rows[5]?.meta.map((cell) => cell.text), ["4 slots, 6 per run"]);
   assert.deepEqual(section.summary?.map((cell) => cell.text), ["1 of 4 busy"]);
 });
 
@@ -357,12 +362,18 @@ test("a slot draws pacer's own name when it sends one", () => {
   const section = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: true, pid: 1, repo: "long-run", name: "Long (reserved)",
       project: "workbench", startedAt: NOW - 60 }] })), "Pacer");
-  // The reserved slot says what it is rather than being counted in as Slot 1.
-  assert.equal(section.rows[0]?.title, "Long (reserved)");
-  // A document written before pacer named its slots still numbers them.
+  // The reserved slot is the first one, so it says so in the same word every read:
+  // its name in the table stays one width wide whatever pacer calls it.
+  assert.equal(section.rows[1]?.title, "Long");
+  // An older document that names no slot is drawn the same way, so the first row
+  // never renames itself between two reads of two pacer versions.
   const older = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: false, pid: null, repo: null, startedAt: null }] })), "Pacer");
-  assert.equal(older.rows[0]?.title, "Slot 1");
+  assert.equal(older.rows[1]?.title, "Long");
+  // Every other slot keeps the name pacer gave it, which may say what it holds.
+  const named = group(pacerPane(pacerReading({ slots: [
+    { slot: 2, busy: false, pid: null, repo: null, name: "integration", startedAt: null }] })), "Pacer");
+  assert.equal(named.rows[1]?.title, "integration");
 });
 
 test("the slot columns hold their place however the slots change", () => {
@@ -373,15 +384,16 @@ test("the slot columns hold their place however the slots change", () => {
       project: "self-service-workbench", startedAt: NOW - 60 }] })), "Pacer");
   const quiet = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: false, pid: null, repo: null, startedAt: null }] })), "Pacer");
-  const widths = (section: typeof crowded) => (section.rows[0]?.slot ?? []).map((cell) => cell.width);
-  // The columns are the same on a busier read, and the header lines up with
-  // them: a pane that re-reads pacer while a slot is busy never moves a cell.
-  assert.deepEqual(widths(crowded), widths(quiet));
-  assert.deepEqual(crowded.columns?.map((cell) => cell.width), widths(crowded));
-  // Every row of the section shares them, so no cell pushes the one after it.
-  assert.deepEqual((crowded.rows[1]?.slot ?? []).map((cell) => cell.width), widths(crowded));
-  // A worktree named after an agent says so, and the project is what it works on.
-  assert.deepEqual((crowded.rows[1]?.slot ?? []).map((cell) => cell.text.trim()),
+  const widths = (row: typeof crowded.rows[number] | undefined) =>
+    (row?.slot ?? []).map((cell) => cell.width);
+  // The columns are the same on a busier read, and the names sit in a row of the
+  // same widths: a pane that re-reads pacer while a slot is busy moves no cell.
+  assert.deepEqual(widths(crowded.rows[1]), widths(quiet.rows[1]));
+  assert.deepEqual(widths(crowded.rows[0]), widths(crowded.rows[1]));
+  // Every slot row shares them, so no cell pushes the one after it.
+  assert.deepEqual(widths(crowded.rows[2]), widths(crowded.rows[1]));
+  // A worktree named after an agent says so, and the repo is what it works on.
+  assert.deepEqual((crowded.rows[2]?.slot ?? []).map((cell) => cell.text.trim()),
                    ["self-service-workbench", "agent af95b91b", "1m"]);
 });
 
@@ -391,13 +403,13 @@ test("a run whose folder names it twice is drawn once", () => {
   const same = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: true, pid: 1, repo: "w4", project: "w4", name: "Long (reserved)",
       startedAt: NOW - 60 }] })), "Pacer");
-  assert.deepEqual((same.rows[0]?.slot ?? []).map((cell) => cell.text.trim()),
+  assert.deepEqual((same.rows[1]?.slot ?? []).map((cell) => cell.text.trim()),
                    ["w4", "", "1m"]);
   // A post-merge check is named for what it checks, not for its scratch tree.
   const post = group(pacerPane(pacerReading({ slots: [
     { slot: 1, busy: true, pid: 2, repo: "post-merge-example-repo-c0c5f474.tree",
       project: "example-repo", startedAt: NOW - 60 }] })), "Pacer");
-  assert.deepEqual((post.rows[0]?.slot ?? []).map((cell) => cell.text.trim()),
+  assert.deepEqual((post.rows[1]?.slot ?? []).map((cell) => cell.text.trim()),
                    ["example-repo", "example-repo-c0c5f474", "1m"]);
 });
 
@@ -406,17 +418,17 @@ test("a busy slot's elapsed time counts on between reads", () => {
   // was read: a slot that has run ten minutes reads twenty once ten more have
   // passed, without another read of pacer's status.
   const ten = group(pacerPane(pacerReading()), "Pacer");
-  assert.equal(ten.rows[0]?.slot.at(-1)?.text.trim(), "10m");
+  assert.equal(ten.rows[1]?.slot.at(-1)?.text.trim(), "10m");
   const later = group(pacerPane(pacerReading(), { now: NOW + 600 }), "Pacer");
-  assert.equal(later.rows[0]?.slot.at(-1)?.text.trim(), "20m");
-  assert.equal(later.rows[0]?.state, "working");
+  assert.equal(later.rows[1]?.slot.at(-1)?.text.trim(), "20m");
+  assert.equal(later.rows[1]?.state, "working");
 });
 
 test("a busy slot whose holder pacer could not name is busy, never free", () => {
   const section = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: true, pid: null, repo: null, startedAt: null }] })), "Pacer");
-  assert.deepEqual(section.rows[0]?.slot.map((cell) => cell.text.trim()), ["", "held", ""]);
-  assert.equal(section.rows[0]?.state, "working");
+  assert.deepEqual(section.rows[1]?.slot.map((cell) => cell.text.trim()), ["", "held", ""]);
+  assert.equal(section.rows[1]?.state, "working");
 });
 
 test("waiters pacer did not report draw nothing, and reported ones are counted", () => {
@@ -2184,30 +2196,24 @@ test("no spend series draws no spend line, and a roster that failed draws none",
 });
 
 /** A ready agent card's figures with a timeline. */
-function agent(timeline: unknown) {
-  return { state: "ready", costUsd: 1, costSource: "estimate", timeline };
+function agent(timeline: unknown, steps: unknown = null) {
+  return { state: "ready", costUsd: 1, costSource: "estimate", timeline, steps };
 }
 
-test("an agent card carries its timeline, and the stretch since its last record is its state", () => {
-  const timeline = [{ start: NOW - 600, end: NOW - 300, state: "working" },
-                    { start: NOW - 300, end: NOW - 200, state: "idle" },
-                    { start: NOW - 200, end: NOW - 100, state: "working" }];
-  const blocked = { ...JOB, agent: agent(timeline) };
-  const row = group(paneFrom(snapshot({ roster: roster([blocked]) }), options()), "Background sessions").rows[0];
-  assert.deepEqual(row?.timeline, { from: NOW - 600, to: NOW, segments: timeline, tail: "waiting" });
-  const busy = { ...LIVE, agent: agent(timeline) };
-  const working = group(paneFrom(snapshot({ roster: roster([busy]) }), options()), "Background sessions").rows[0];
-  assert.equal(working?.timeline?.tail, "working");
-});
-
-test("a finished card's timeline ends at its last record, and an unread one draws none", () => {
+test("a session card is words, not a band across the card", () => {
+  // A bar and a timeline on every card made each one five lines tall and said
+  // the same thing twice. The card states how far along it is beside the rest.
   const timeline = [{ start: NOW - 600, end: NOW - 300, state: "working" }];
-  const done = { ...LIVE, state: "done", since: NOW - 60, agent: agent(timeline) };
-  const row = group(paneFrom(snapshot({ roster: roster([done]) }), options()), "Background sessions").rows[0];
-  assert.deepEqual(row?.timeline, { from: NOW - 600, to: NOW - 300, segments: timeline });
-  const unread = { ...LIVE, agent: agent(null) };
-  const none = group(paneFrom(snapshot({ roster: roster([unread]) }), options()), "Background sessions").rows[0];
-  assert.equal(none?.timeline, undefined);
+  const row = group(paneFrom(snapshot({ roster: roster([{ ...LIVE, agent: agent(timeline) }]) }),
+                            options()), "Background sessions").rows[0];
+  assert.equal(row?.timeline, undefined);
+  assert.equal(row?.bar, undefined);
+  // The step it is on is still said, in the row's own words.
+  const steps = group(paneFrom(snapshot({
+    roster: roster([{ ...LIVE, agent: agent(timeline, { done: 3, total: 6, phase: "Design" }) }]) }),
+    options()), "Background sessions").rows[0];
+  const figures = [...(steps?.figures ?? []), ...(steps?.meta ?? [])].map((cell) => cell.text);
+  assert.equal(figures.some((text) => text.includes("3 / 6 steps")), true);
 });
 
 test("a section keeps the place configuration gave it, whatever it holds", () => {

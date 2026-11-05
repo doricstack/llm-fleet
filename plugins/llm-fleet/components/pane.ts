@@ -978,13 +978,15 @@ function agentRow(job: Job, agent: AgentFigures, options: PaneOptions): Row {
   // The step in hand is the bar's own label when there is a list to count it in;
   // a phase with no list behind it is said on a line of its own.
   const detail = question.text || (!listed && phase ? "Now: " + phase : "") || base.detail;
-  const bar: Row["bar"] = listed && steps
-    ? { done: steps.done, total: steps.total,
-        label: { text: `${steps.done} / ${steps.total} steps` + (phase ? " \u00b7 " + phase : "") } }
-    : share !== null
-      ? { done: share, total: 100,
-          label: { text: share.toFixed(0) + "% of the context window", dim: true } }
-      : undefined;
+  // How far along it is is a word beside the other facts, not a bar across the
+  // card: a bar and a timeline on every session made each one five lines tall,
+  // and a person reads the line for the same number.
+  const progress = listed && steps
+    ? `${steps.done} / ${steps.total} steps` + (phase ? " \u00b7 " + phase : "")
+    : share !== null ? share.toFixed(0) + "% of the context window" : "";
+  if (progress !== "") {
+    add({ text: progress, dim: true });
+  }
   return {
     ...base,
     title: title ? title.text : base.title,
@@ -994,7 +996,6 @@ function agentRow(job: Job, agent: AgentFigures, options: PaneOptions): Row {
     slot: title?.masked && !base.slot.some((slot) => slot.text.includes(MASK))
       ? [...base.slot, { text: " \u00b7 " + MASK, dim: true }] : base.slot,
     detail: detail || undefined,
-    bar,
     // Why the totals are a floor, in the reader's own words where it gave them:
     // a transcript longer than the bound and a subagent transcript nobody could
     // read are different reasons, and the sentence for one would name the wrong
@@ -1003,33 +1004,7 @@ function agentRow(job: Job, agent: AgentFigures, options: PaneOptions): Row {
       ? { text: agent.reason
           ? "Totals are a floor: " + agent.reason + "."
           : "Totals are from the end of a long transcript.", dim: true } : undefined,
-    ...timelineOf(job, agent, options),
   };
-}
-
-/**
- * The card's timeline: its stretches from the first to now while it lives, and
- * from the first to the last once it has ended.
- *
- * The stretch after the last record is the row's own state where the row knows
- * it: waiting on the person, mid-turn, or between turns. A job that says none of
- * those leaves it unknown rather than idle, since the transcript writes nothing
- * while a long tool call runs.
- */
-function timelineOf(job: Job, agent: AgentFigures, options: PaneOptions): Pick<Row, "timeline"> {
-  const segments = agent.timeline;
-  if (!segments || !segments.length) {
-    return {};
-  }
-  const from = Math.min(...segments.map((segment) => segment.start));
-  const last = Math.max(...segments.map((segment) => segment.end));
-  if (TERMINAL_STATES.has(job.state)) {
-    return { timeline: { from, to: last, segments } };
-  }
-  const tail = waiting(job) ? "waiting" : job.activity === "busy" ? "working"
-    : job.activity === "idle" ? "idle" : undefined;
-  return { timeline: { from, to: Math.max(last, options.now), segments,
-                       ...(tail ? { tail } : {}) } };
 }
 
 /**
@@ -1472,8 +1447,9 @@ function sectionGroup(name: string, rows: Row[], state: GroupState, summarySlots
 
 /** What a section's right-hand figures are, where the words beside them do not say. */
 const COLUMN_NAMES: Record<string, Slot[]> = {
-  sessions: [{ text: "STATE" }],
-  pacer: [{ text: "STATE" }],
+  // A session's right-hand cell is a state word ("working", "waiting on you"),
+  // which names itself; a header for it only takes a line and, when the card is
+  // narrow, draws as "S...".
   prs: [{ text: "CHECKS" }],
   worktrees: [{ text: "STATE" }],
   skills: [{ text: "VERDICT" }],
@@ -1757,8 +1733,7 @@ function rosterGroups(roster: Roster, options: PaneOptions): Group[] {
     ? [...counts, { text: "   " }, ...strip] : [...counts, ...strip];
   const group = sectionGroup("sessions", rows, partial(rows, roster.state),
                              summarySlots.length ? summarySlots : [{ text: "none", dim: true }],
-                             options,
-                             { columns: [{ text: "STATE", align: "right" }] });
+                             options);
   group.observed = rows.length;
   if (ordered.length && options.actions) {
     group.notes = [[{ text: "Press a session to copy the command that opens it.", dim: true }]];
@@ -2362,17 +2337,30 @@ function runLabel(repo: string | null): string | null {
  * every read. A fixed table is the same table at every read, and a value too
  * long for its cell is cut to it instead of moving the cells after it.
  */
-const SLOT_PROJECT = 22;
-const SLOT_WORKTREE = 26;
+const SLOT_PROJECT = 20;
+const SLOT_WORKTREE = 18;
 // Wide enough for "ELAPSED", the word above the column, and for "23h 59m".
-const SLOT_ELAPSED = 8;
+const SLOT_ELAPSED = 7;
+
+/** The row above the slots, drawn through the same cells so it cannot sit off them. */
+function pacerHeaderRow(): Row {
+  const cells: Slot[] = [
+    { text: "REPO", width: SLOT_PROJECT, align: "left", dim: true },
+    { text: " WORKTREE", width: SLOT_WORKTREE + 1, align: "right", dim: true },
+    { text: " ELAPSED", width: SLOT_ELAPSED + 1, align: "right", dim: true },
+  ];
+  return { key: PACER_PREFIX + "header", title: "", meta: [], slot: cells };
+}
 
 /** One slot as a row of four columns: its number, project, worktree and elapsed. */
 function pacerSlotRow(slot: PacerSlot, now: number): Row {
   const key = PACER_PREFIX + "slot:" + slot.slot;
   // Pacer's own name for the slot, once it sends one: the reserved slot says so
   // rather than being counted in with the ordinary ones.
-  const title = slot.name ?? "Slot " + (slot.slot + 1);
+  // Slot 0 is the one a long run reserves, and it is drawn every read: pacer's own
+  // name says so when it sends one, and the slot number says so when it does not, so
+  // the first row never changes its name between two reads.
+  const title = slot.slot === 0 ? "Long" : slot.name ?? "Slot " + (slot.slot + 1);
   const project = slot.busy ? slot.project ?? "" : "";
   // The lock says busy; the text inside it says who, in the only terms pacer
   // keeps. A slot held by somebody pacer could not name is still held.
@@ -2440,12 +2428,8 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
   // The slots come first: they are the section's live state, and the column
   // names above them are theirs. The switch's own settings follow, then what
   // waits and what went wrong.
-  const rows: Row[] = document.slots.map((slot) => pacerSlotRow(slot, options.now));
-  const columns: Slot[] = [
-    { text: " PROJECT", width: SLOT_PROJECT, align: "left" },
-    { text: " WORKTREE", width: SLOT_WORKTREE + 1, align: "right" },
-    { text: " ELAPSED", width: SLOT_ELAPSED + 1, align: "right" },
-  ];
+  const rows: Row[] = [pacerHeaderRow(),
+                       ...document.slots.map((slot) => pacerSlotRow(slot, options.now))];
   const settings = pacerSettingsRow(document);
   if (settings !== null) {
     // An off the environment holds says why: no press here or on the band's
@@ -2491,7 +2475,7 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
                      dim: waiting.length === 0 });
     }
   }
-  return sectionGroup("pacer", rows, state, summary, options, { columns });
+  return sectionGroup("pacer", rows, state, summary, options);
 }
 
 /**

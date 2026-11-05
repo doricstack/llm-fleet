@@ -77,11 +77,12 @@ test("a card reads as the host's Agents panel does: who, then counts and figures
   // What it measured sits at the right of the bar's line, cost first so a cut
   // line keeps the figure a person looks for.
   assert.deepEqual(row.figures?.map((slot) => slot.text),
-                   ["~$1.25", " \u00b7 25% context", " \u00b7 2.0M tokens", " \u00b7 1h 0m"]);
-  // How far: the steps and the one in hand at the left, and a bar the width of
-  // the card under them.
-  assert.equal(row.bar?.label?.text, "2 / 4 steps \u00b7 Banner");
-  assert.equal(row.bar?.cells, undefined);
+                   ["~$1.25", " \u00b7 25% context", " \u00b7 2.0M tokens", " \u00b7 1h 0m",
+                    " \u00b7 2 / 4 steps \u00b7 Banner"]);
+  // How far: the steps and the one in hand, appended to the figures rather than
+  // drawn as a bar the width of the card, which made every card a line taller.
+  assert.equal(row.bar, undefined);
+  assert.equal(row.figures?.at(-1)?.text, " \u00b7 2 / 4 steps \u00b7 Banner");
   assert.equal(row.detail, undefined);
 });
 
