@@ -543,10 +543,100 @@ function replyLines(job: Job, options: PaneOptions): { lines: RowLine[]; field?:
   };
 }
 
+/** The last part of a path, which is what a program is called by. */
+function baseName(word: string): string {
+  // Both separators: a job on Windows records `C:\work\run.py`, and a name cut
+  // at a backslash is the same name.
+  const parts = word.split(/[\\/]/).filter((part) => part !== "");
+  if (parts.length === 0) {
+    return "";
+  }
+  const last = parts[parts.length - 1];
+  // The state file cuts a long command line, and a name cut in two says
+  // nothing: the folder above it is what is still readable.
+  if (parts.length > 1 && /(…|\.\.\.)$/.test(last)) {
+    return parts[parts.length - 2];
+  }
+  return last;
+}
+
+/**
+ * Programs a command line puts in front of the work rather than doing it: a
+ * shell, the environment one, a scripting host. The test is a shape rather than
+ * a list, so a versioned or dotted name is read as what it is.
+ */
+const INTERPRETER = /^(?:(?:ba|z|da|k)?sh|env|node|py(?:thon)?[\d.]*)$/;
+/** Words that start a shell's own control flow, which names no program. */
+const SHELL_WORDS = new Set(["until", "while", "for", "if", "cd", "echo", "export", "test"]);
+
+/**
+ * What a shell entry in a job's state is doing, in the words a person reads.
+ *
+ * The state file records the whole command line, with its arguments,
+ * redirections and log paths, and drawn as written it put a wall of text under
+ * every session. What the line is for is the name of the work: the program a
+ * shell was handed, or the command a pacer-wrapped run was asked to run. An
+ * empty answer is a command line this cannot name, and the row says only that
+ * a shell is running.
+ */
+export function shortCommand(label: string): string {
+  let text = label.trim();
+  // A leading assignment configures the command rather than naming it, and a
+  // value may be quoted with spaces in it.
+  for (;;) {
+    const assignment = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+/.exec(text);
+    if (assignment === null) {
+      break;
+    }
+    text = text.slice(assignment[0].length);
+  }
+  // A command a runner wrapped is known by what it was asked to run, after the
+  // `--` that separates the runner's own flags from the command.
+  const wrapped = /\brun\b.*?\s--\s(.+)$/s.exec(text);
+  if (wrapped !== null) {
+    text = wrapped[1].trim();
+  }
+  // A line that chains commands is known by the first one: what follows a
+  // separator is another command's work, not this one's argument.
+  const chained = [";", "|", "&&"].map((mark) => text.indexOf(mark))
+    .filter((index) => index >= 0);
+  if (chained.length > 0) {
+    text = text.slice(0, Math.min(...chained));
+  }
+  const words = text.split(/\s+/).filter((word) => word !== "");
+  if (words.length === 0) {
+    return "";
+  }
+  let first = baseName(words[0]);
+  let rest = words.slice(1);
+  if (INTERPRETER.test(first)) {
+    // A flag where a script would be says the host takes its input from the
+    // command itself, and the interpreter is all there is to name.
+    if (rest.length === 0 || rest[0].startsWith("-")) {
+      return first;
+    }
+    first = baseName(rest[0]);
+    rest = rest.slice(1);
+  }
+  if (first === "" || SHELL_WORDS.has(first)) {
+    return "";
+  }
+  // The arguments that say what the command works on: no flags, no paths, no
+  // redirections, and nothing long enough to be a line of its own.
+  const kept = rest
+    .filter((word) => !/^[-\d<>|&;!"'`]/.test(word) && !word.includes("/") && word.length <= 14)
+    .slice(0, 2);
+  return [first, ...kept].join(" ").slice(0, 32);
+}
+
 /**
  * The subagent tasks a working job has started and not finished, one line each,
  * the rest counted. A job between turns lists none: what it started is not
  * running while it waits for its next turn.
+ *
+ * A shell entry is drawn by what it runs rather than by its command line, and
+ * two entries that name the same work are drawn once: a session running the
+ * same script twice is one thing to read, not two identical lines.
  */
 function fanLines(job: Job, options: PaneOptions): RowLine[] {
   if (job.activity === "idle") {
@@ -555,17 +645,31 @@ function fanLines(job: Job, options: PaneOptions): RowLine[] {
   const open = (job.fan ?? []).filter((entry) => entry.startedAt !== undefined
                                                 && entry.doneAt === undefined);
   const listed = Math.max(0, options.geometry.fanLines);
-  const lines: RowLine[] = open.slice(0, listed).map((entry) => {
+  const seen = new Set<string>();
+  const lines: RowLine[] = [];
+  for (const entry of open) {
+    if (lines.length >= listed) {
+      break;
+    }
+    const shelled = entry.kind === "shell";
+    // A line naming no program is a shell's own control flow: a loop polling
+    // for something to finish. That is worth saying in words of its own.
+    const word = shelled ? shortCommand(entry.label) || "a shell loop" : shown(entry.label).text;
+    const kind = shelled ? "running" : shown(entry.kind).text;
+    const said = kind + " " + word;
+    if (seen.has(said)) {
+      continue;
+    }
+    seen.add(said);
     // The state file dates a task in milliseconds, and marks one it started
     // without a time with 0: that one is running, and its age is unknown.
     const started = entry.startedAt as number;
     const age = started > 0 ? [{ text: " \u00b7 " + durationText(Math.max(0, options.now - started / 1000)),
                                  dim: true }] : [];
-    return { slots: [{ text: shown(entry.kind).text, color: "suggestion" },
-                     { text: shown(entry.label).text }, ...age] };
-  });
-  if (open.length > listed) {
-    lines.push({ slots: [{ text: (open.length - listed) + " more running", dim: true }] });
+    lines.push({ slots: [{ text: kind, color: "suggestion" }, { text: word }, ...age] });
+  }
+  if (open.length > lines.length) {
+    lines.push({ slots: [{ text: (open.length - lines.length) + " more running", dim: true }] });
   }
   return lines;
 }
@@ -590,8 +694,8 @@ function withJobActions(row: Row, job: Job, options: PaneOptions): Row {
  * when it finished and what it left as its last word. It has no bar, since a
  * finished job's context share says nothing about anything still to do.
  */
-function finishedRow(job: Job, options: PaneOptions, projectWidth: number): Row {
-  const row = job.agent ? agentRow(job, job.agent, options, projectWidth) : jobRow(job, options, projectWidth);
+function finishedRow(job: Job, options: PaneOptions): Row {
+  const row = job.agent ? agentRow(job, job.agent, options) : jobRow(job, options);
   const meta = row.meta.filter((slot) => !/^ \u00b7 (\d|waiting|mid-turn|between)/.test(slot.text));
   const ended = job.since === null || job.since === undefined ? null : options.now - job.since;
   if (ended !== null) {
@@ -608,18 +712,25 @@ function finishedRow(job: Job, options: PaneOptions, projectWidth: number): Row 
   };
 }
 
-/** How wide the project column is: the longest name it holds, up to a limit. */
-function jobProjectWidth(jobs: Job[]): number {
-  const longest = jobs.reduce((width, job) => Math.max(width, (job.project ?? "").length),
-                              "PROJECT".length);
-  return Math.min(20, longest);
+/**
+ * The project a session works for, as the words a row opens with.
+ *
+ * It used to be a column of its own, drawn to the longest name in the reading:
+ * a session that started or finished moved every row's state word, and the
+ * column stood empty for every session whose folder no repository owns. It is
+ * the first thing the row says instead, where a reader meets it before the
+ * provider and the age.
+ */
+function withProject(job: Job, text: string): string {
+  const project = (job.project ?? "").trim();
+  return project === "" ? text : shown(project).text + " · " + text;
 }
 
-function jobRow(job: Job, options: PaneOptions, projectWidth: number): Row {
+function jobRow(job: Job, options: PaneOptions): Row {
   const name = shown(job.name);
   const question = shown(job.needs);
   const detail = shown(job.detail);
-  const meta: Slot[] = [{ text: shown(job.label).text }];
+  const meta: Slot[] = [{ text: withProject(job, shown(job.label).text) }];
   if (job.session_id) {
     meta.push({ text: " \u00b7 session " + job.session_id.slice(0, 8) });
   }
@@ -644,12 +755,9 @@ function jobRow(job: Job, options: PaneOptions, projectWidth: number): Row {
       : active(job)
         ? [{ text: job.state, color: "success" as const }]
         : [{ text: job.state, dim: true }];
-  // The project a job works for, in its own column, so a row is read without
-  // the folder it happens to run in.
-  const slot: Slot[] = [
-    { text: job.project ?? "", width: projectWidth + 1, align: "left", dim: true },
-    ...saying,
-  ];
+  // The state word, where every row of the section ends: the project leads the
+  // row's words instead of holding a column that was empty for most sessions.
+  const slot: Slot[] = [...saying];
   // What a person opens the row for: where it runs, under which provider, for
   // how long, and the line that puts them in front of it. All of it was read
   // already; none of it earns a line on a row at rest.
@@ -811,9 +919,8 @@ function elapsedOf(job: Job, agent: AgentFigures | undefined, now: number): numb
  * context window its last turn filled, labeled as that, because the two are
  * different measurements and a bar must say which one it is.
  */
-function agentRow(job: Job, agent: AgentFigures, options: PaneOptions,
-                  projectWidth: number): Row {
-  const base = jobRow(job, options, projectWidth);
+function agentRow(job: Job, agent: AgentFigures, options: PaneOptions): Row {
+  const base = jobRow(job, options);
   if (agent.state !== "ready") {
     const reason = agent.state === "empty" ? "No turns recorded yet."
       : "Figures unreadable: " + (agent.reason ?? agent.state) + ".";
@@ -822,7 +929,7 @@ function agentRow(job: Job, agent: AgentFigures, options: PaneOptions,
   }
   const title = agent.title ? shown(agent.title) : null;
   // Who runs it, under the title: the provider, the model and the effort.
-  const meta: Slot[] = [{ text: shown(job.label).text }];
+  const meta: Slot[] = [{ text: withProject(job, shown(job.label).text) }];
   if (agent.model) {
     meta.push({ text: " \u00b7 " + modelName(agent.model) });
   }
@@ -1632,13 +1739,11 @@ function rosterGroups(roster: Roster, options: PaneOptions): Group[] {
   // ones: the reader already holds them to that window and that many.
   const finished = jobs.filter((job) => TERMINAL_STATES.has(job.state))
     .sort((left, right) => (right.since ?? 0) - (left.since ?? 0));
-  const projectWidth = jobProjectWidth(jobs);
   const rows = [
     ...ordered.map((job) => withJobActions(
-      job.agent ? agentRow(job, job.agent, options, projectWidth)
-                : jobRow(job, options, projectWidth),
+      job.agent ? agentRow(job, job.agent, options) : jobRow(job, options),
       job, options)),
-    ...finished.map((job) => finishedRow(job, options, projectWidth)),
+    ...finished.map((job) => finishedRow(job, options)),
   ];
   const counts = combine([
     countSlot(blocked.length, "waiting", "warning"),
@@ -1653,8 +1758,7 @@ function rosterGroups(roster: Roster, options: PaneOptions): Group[] {
   const group = sectionGroup("sessions", rows, partial(rows, roster.state),
                              summarySlots.length ? summarySlots : [{ text: "none", dim: true }],
                              options,
-                             { columns: [{ text: "PROJECT", width: projectWidth + 1, align: "left" },
-                                         { text: "STATE", align: "right" }] });
+                             { columns: [{ text: "STATE", align: "right" }] });
   group.observed = rows.length;
   if (ordered.length && options.actions) {
     group.notes = [[{ text: "Press a session to copy the command that opens it.", dim: true }]];
@@ -2237,29 +2341,34 @@ function runLabel(repo: string | null): string | null {
   if (agent !== null) {
     return "agent " + agent[1].slice(0, 8);
   }
+  // A post-merge check runs in a scratch tree named for the repository and the
+  // commit; the tree suffix says nothing a reader needs and the whole name
+  // would be cut to an ellipsis in its column.
+  const postMerge = /^post-merge-(.+)\.tree$/.exec(repo);
+  if (postMerge !== null) {
+    return shown(postMerge[1]).text;
+  }
   return shown(repo).text;
 }
 
 /** One slot: what is running in it and for how long, or free. */
-/** The columns the slot rows share, so a cell never pushes the one after it. */
-type SlotWidths = { project: number; worktree: number };
-
-// Wide enough for "ELAPSED", the word above the column.
-const ELAPSED_COLUMN = 7;
-
-function slotWidths(slots: PacerSlot[]): SlotWidths {
-  const widest = (heading: string, texts: string[]) =>
-    Math.max(heading.length, ...texts.map((text) => text.length));
-  return {
-    // A folder name longer than this is cut rather than take the row's room.
-    project: Math.min(24, widest("PROJECT", slots.map((slot) => slot.project ?? ""))),
-    worktree: Math.min(26, widest("WORKTREE",
-      slots.map((slot) => runLabel(slot.repo) ?? (slot.busy ? "" : "free")))),
-  };
-}
+/**
+ * The columns the slot rows share, the gap before each included.
+ *
+ * They are fixed rather than measured from what the slots hold. A column drawn
+ * to its widest cell moved every time a run started, finished or changed folder,
+ * and a pane that re-reads pacer every second while a slot is busy never showed
+ * the same table twice: the headers and the values jumped under each other on
+ * every read. A fixed table is the same table at every read, and a value too
+ * long for its cell is cut to it instead of moving the cells after it.
+ */
+const SLOT_PROJECT = 22;
+const SLOT_WORKTREE = 26;
+// Wide enough for "ELAPSED", the word above the column, and for "23h 59m".
+const SLOT_ELAPSED = 8;
 
 /** One slot as a row of four columns: its number, project, worktree and elapsed. */
-function pacerSlotRow(slot: PacerSlot, now: number, widths: SlotWidths): Row {
+function pacerSlotRow(slot: PacerSlot, now: number): Row {
   const key = PACER_PREFIX + "slot:" + slot.slot;
   // Pacer's own name for the slot, once it sends one: the reserved slot says so
   // rather than being counted in with the ordinary ones.
@@ -2267,16 +2376,19 @@ function pacerSlotRow(slot: PacerSlot, now: number, widths: SlotWidths): Row {
   const project = slot.busy ? slot.project ?? "" : "";
   // The lock says busy; the text inside it says who, in the only terms pacer
   // keeps. A slot held by somebody pacer could not name is still held.
-  const worktree = slot.busy ? runLabel(slot.repo) ?? "held" : "free";
+  const run = slot.busy ? runLabel(slot.repo) ?? "held" : "free";
+  // A run in a folder that is no repository is named by its own folder, which
+  // is also what the project cell then holds: one name, drawn once.
+  const worktree = run === project ? "" : run;
   const elapsed = slot.busy && slot.startedAt !== null
     ? durationText(now - slot.startedAt) : "";
   const quiet = slot.busy ? undefined : true;
   // A column after the first carries its own leading gap, so the row and the
   // names above it measure the same line.
   const cells: Slot[] = [
-    { text: project, width: widths.project, align: "left", dim: quiet },
-    { text: " " + worktree, width: widths.worktree + 1, align: "right", dim: quiet },
-    { text: " " + elapsed, width: ELAPSED_COLUMN + 1, align: "right", dim: quiet },
+    { text: project, width: SLOT_PROJECT, align: "left", dim: quiet },
+    { text: " " + worktree, width: SLOT_WORKTREE + 1, align: "right", dim: quiet },
+    { text: " " + elapsed, width: SLOT_ELAPSED + 1, align: "right", dim: quiet },
   ];
   return slot.busy ? { key, title, state: "working", meta: [], slot: cells }
     : { key, title, meta: [], slot: cells };
@@ -2328,12 +2440,11 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
   // The slots come first: they are the section's live state, and the column
   // names above them are theirs. The switch's own settings follow, then what
   // waits and what went wrong.
-  const widths = slotWidths(document.slots);
-  const rows: Row[] = document.slots.map((slot) => pacerSlotRow(slot, options.now, widths));
+  const rows: Row[] = document.slots.map((slot) => pacerSlotRow(slot, options.now));
   const columns: Slot[] = [
-    { text: " PROJECT", width: widths.project, align: "left" },
-    { text: " WORKTREE", width: widths.worktree + 1, align: "right" },
-    { text: " ELAPSED", width: ELAPSED_COLUMN + 1, align: "right" },
+    { text: " PROJECT", width: SLOT_PROJECT, align: "left" },
+    { text: " WORKTREE", width: SLOT_WORKTREE + 1, align: "right" },
+    { text: " ELAPSED", width: SLOT_ELAPSED + 1, align: "right" },
   ];
   const settings = pacerSettingsRow(document);
   if (settings !== null) {

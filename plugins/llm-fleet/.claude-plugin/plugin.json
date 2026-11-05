@@ -1,6 +1,6 @@
 {
   "name": "llm-fleet",
-  "version": "0.4.26",
+  "version": "0.4.27",
   "description": "Every Claude Code session, background job and open pull request on this machine in one live pane, with alerts when one fails or waits for you.",
   "types": "./types/index.d.ts",
   "license": "MIT",
@@ -30,9 +30,9 @@
     "notify": {
       "type": "boolean",
       "title": "Desktop notifications",
-      "description": "Raise a desktop notification when a job fails or waits for you, as well as the toast in the session.",
+      "description": "Raise a desktop notification when a job fails or waits for you. Off by default: a desktop notification puts itself in front of whatever you are working in, so it is asked for rather than given.",
       "required": false,
-      "default": true
+      "default": false
     }
   }
 }

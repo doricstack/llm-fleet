@@ -152,7 +152,7 @@ class SnapshotCase(unittest.TestCase):
                                                                  "collapsed": False}}}})
         pane = snapshot.read_snapshot(config, now=1_700_000_000.0)["pane"]
         self.assertEqual(pane["geometry"], {"minimumColumns": 30, "horizontalReserve": 4,
-                                            "progressCells": 24, "skillRows": 2, "fanLines": 4})
+                                            "progressCells": 24, "skillRows": 2, "fanLines": 2})
         self.assertEqual(pane["sections"]["sessions"]["title"], "Sessions")
 
     def test_how_alerts_are_raised_travels_with_the_reading(self):
@@ -176,7 +176,7 @@ class SnapshotCase(unittest.TestCase):
         self.assertEqual((defaults["toast"], defaults["notify"], defaults["toastMs"],
                           defaults["snapshotMs"], defaults["synthesisMs"],
                           defaults["snapshotSeconds"], defaults["liveMs"]),
-                         (True, True, 8000, 3000, 30000, 20, 1000))
+                         (True, False, 8000, 3000, 30000, 20, 1000))
         tuned = snapshot.read_snapshot(self.config({"cache": {"snapshotSeconds": 45},
                                                     "refresh": {"liveMs": 2500}}),
                                        now=1_700_000_000.0)["alerts"]
@@ -334,7 +334,7 @@ class SnapshotCase(unittest.TestCase):
     def test_the_reply_bounds_and_the_task_lines_travel_with_the_reading(self):
         defaults = snapshot.pane_document(self.config({}))
         self.assertEqual((defaults["replyMaxChars"], defaults["replyPendingSeconds"],
-                          defaults["geometry"]["fanLines"]), (4000, 120, 4))
+                          defaults["geometry"]["fanLines"]), (4000, 120, 2))
         chosen = snapshot.pane_document(self.config({"pane": {"replyMaxChars": 12, "fanLines": 0,
                                                                "replyPendingSeconds": 30}}))
         self.assertEqual((chosen["replyMaxChars"], chosen["replyPendingSeconds"],

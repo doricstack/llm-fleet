@@ -64,7 +64,7 @@ Three options live in `/config` under the plugin, because they are needed before
 
 - **Python interpreter**: the interpreter the readers run under, `python3` by default.
 - **Configuration file**: a full path to your configuration when it is not in the default place.
-- **Desktop notifications**: on by default; adds a desktop notification to the in-session toast.
+- **Desktop notifications**: off by default; turn it on to add a desktop notification to the in-session toast. It is asked for rather than given, because a notification puts itself in front of whatever you are working in.
 
 Everything else is in the configuration file. Each section can be shown or hidden (`pane.sections.<name>.visible`), folded at the start (`collapsed`), and capped at a row count (`maxRows`), and the order is the one you set. Sessions, background jobs, agent cards and this session's own cost, context and limits are on from the start. Pull requests, worktrees, pacer, skill scans and a recorded statusline payload are sources you switch on, and the doctor names the key each one needs. Speech is off until you set `speech.enabled` and a speech command. A key the schema does not know is refused by name rather than ignored. The full list of settings, with defaults, is in [the configuration reference](https://github.com/doricstack/llm-fleet/blob/main/docs/configuration.md).
 

@@ -260,7 +260,7 @@ test("a record section keeps the defaults of the sections it does not mention", 
 
 test("the reply bounds and task lines have defaults and floors", () => {
   const pane = resolve({}).pane as contract.JsonObject;
-  assert.deepEqual([pane.replyMaxChars, pane.replyPendingSeconds, pane.fanLines], [4000, 120, 4]);
+  assert.deepEqual([pane.replyMaxChars, pane.replyPendingSeconds, pane.fanLines], [4000, 120, 2]);
   // A reply is held by a marker no time takes back, so there is no claim time.
   assert.equal("replyClaimSeconds" in pane, false);
   assert.equal((resolve({ pane: { fanLines: 0 } }).pane as contract.JsonObject).fanLines, 0);

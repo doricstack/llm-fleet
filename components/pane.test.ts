@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { DEFAULT_KEYS, HIDE_PREFIX, SHOW_ALL_PREFIX, allErrors, paneFrom, prUrl, replyKey,
-         replyText, unreadableSources,
+         replyText, shortCommand, unreadableSources,
          worktreeNextStep, worktreeOwnerNote, type PaneOptions }
   from "../plugins/llm-fleet/components/pane.ts";
 import { GEOMETRY } from "../plugins/llm-fleet/components/options.ts";
@@ -191,9 +191,9 @@ test("every section names the figure its rows end in", () => {
   // its right-hand column holds. Load names two figures in their own widths.
   const built = paneFrom(snapshot(), options());
   const named = new Map(built.groups.map((section) => [section.title, section.columns]));
-  // A session names the project it works for, then its state.
+  // A session names its state: the project it works for opens the row's words.
   assert.deepEqual(named.get("Background sessions")?.map((cell) => cell.text),
-                   ["PROJECT", "STATE"]);
+                   ["STATE"]);
   // Pacer names its slot columns, because its rows end in three figures.
   assert.deepEqual(named.get("Pacer")?.map((cell) => cell.text),
                    [" PROJECT", " WORKTREE", " ELAPSED"]);
@@ -365,23 +365,40 @@ test("a slot draws pacer's own name when it sends one", () => {
   assert.equal(older.rows[0]?.title, "Slot 1");
 });
 
-test("a slot's columns are shared by every row, so no cell pushes the next", () => {
-  const section = group(pacerPane(pacerReading({ slots: [
+test("the slot columns hold their place however the slots change", () => {
+  const crowded = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: true, pid: 1, repo: "pr1334-r8fix", project: "shared-tools",
       startedAt: NOW - 3600 },
     { slot: 1, busy: true, pid: 2, repo: "agent-af95b91b2204125c8",
       project: "self-service-workbench", startedAt: NOW - 60 }] })), "Pacer");
-  const widths = section.rows.slice(0, 2).map((row) =>
-    (row.slot ?? []).map((cell) => cell.width));
-  assert.deepEqual(widths[0], widths[1]);
-  // The columns hold the longest cell each has, and the header lines up with them.
-  assert.deepEqual(section.columns?.map((cell) => cell.width),
-                   (section.rows[0]?.slot ?? []).map((cell) => cell.width));
-  assert.ok((section.rows[0]?.slot[0]?.width ?? 0) >= "self-service-workbench".length);
-  assert.ok((section.rows[0]?.slot[1]?.width ?? 0) >= "agent af95b91b".length + 1);
+  const quiet = group(pacerPane(pacerReading({ slots: [
+    { slot: 0, busy: false, pid: null, repo: null, startedAt: null }] })), "Pacer");
+  const widths = (section: typeof crowded) => (section.rows[0]?.slot ?? []).map((cell) => cell.width);
+  // The columns are the same on a busier read, and the header lines up with
+  // them: a pane that re-reads pacer while a slot is busy never moves a cell.
+  assert.deepEqual(widths(crowded), widths(quiet));
+  assert.deepEqual(crowded.columns?.map((cell) => cell.width), widths(crowded));
+  // Every row of the section shares them, so no cell pushes the one after it.
+  assert.deepEqual((crowded.rows[1]?.slot ?? []).map((cell) => cell.width), widths(crowded));
   // A worktree named after an agent says so, and the project is what it works on.
-  assert.deepEqual((section.rows[1]?.slot ?? []).map((cell) => cell.text.trim()),
+  assert.deepEqual((crowded.rows[1]?.slot ?? []).map((cell) => cell.text.trim()),
                    ["self-service-workbench", "agent af95b91b", "1m"]);
+});
+
+test("a run whose folder names it twice is drawn once", () => {
+  // A folder outside any repository is called by its own name, so pacer's repo
+  // and the reader's project are the same word: the row says it in one cell.
+  const same = group(pacerPane(pacerReading({ slots: [
+    { slot: 0, busy: true, pid: 1, repo: "w4", project: "w4", name: "Long (reserved)",
+      startedAt: NOW - 60 }] })), "Pacer");
+  assert.deepEqual((same.rows[0]?.slot ?? []).map((cell) => cell.text.trim()),
+                   ["w4", "", "1m"]);
+  // A post-merge check is named for what it checks, not for its scratch tree.
+  const post = group(pacerPane(pacerReading({ slots: [
+    { slot: 1, busy: true, pid: 2, repo: "post-merge-example-repo-c0c5f474.tree",
+      project: "example-repo", startedAt: NOW - 60 }] })), "Pacer");
+  assert.deepEqual((post.rows[0]?.slot ?? []).map((cell) => cell.text.trim()),
+                   ["example-repo", "example-repo-c0c5f474", "1m"]);
 });
 
 test("a busy slot's elapsed time counts on between reads", () => {
@@ -670,19 +687,19 @@ test("a worktree row that was not rechecked says so and keeps its own age", () =
   assert.equal(row?.note?.text.includes("not rechecked since 10m ago"), true);
 });
 
-test("a session row names the project it works for, in its own column", () => {
+test("a session row opens with the project it works for", () => {
   const pane = paneFrom(snapshot({
     roster: { state: "ready", jobs: [{ ...JOB, project: "workbench" }], interactive: {},
               errors: [], providers: {}, sources: { jobs: "ready", interactive: "ready" } },
   }), options());
-  const sessions = group(pane, "Background sessions");
-  const row = sessions.rows.find((entry) => entry.key === "job:abc");
-  // The project cell comes first, and its column is shared so the state words line up.
-  assert.equal(row?.slot?.[0]?.text, "workbench");
-  assert.equal(row?.slot?.[0]?.align, "left");
-  const widths = sessions.rows.map((entry) => entry.slot?.[0]?.width).filter((width) => width !== undefined);
-  assert.equal(new Set(widths).size, 1);
-  assert.ok((widths[0] ?? 0) >= "PROJECT".length);
+  const row = group(pane, "Background sessions").rows.find((entry) => entry.key === "job:abc");
+  // The project leads the words under the title, ahead of the provider.
+  assert.equal(row?.meta?.[0]?.text.startsWith("workbench · "), true,
+               JSON.stringify(row?.meta?.map((slot) => slot.text)));
+  // The right-hand cell is the state word alone: it held a project column, and
+  // that column moved under every row whenever a session started or finished.
+  assert.deepEqual(row?.slot?.map((cell) => cell.text), ["Waiting for you"]);
+  assert.equal(row?.slot?.[0]?.width, undefined);
 });
 
 test("a waiting job shows what it asks and what it suggests", () => {
@@ -1712,8 +1729,7 @@ test("a working job lists the subagent tasks it has open, and counts the rest", 
   const lines = group(pane, "Background sessions").rows[0]?.lines ?? [];
   assert.deepEqual(lines.map((line) => line.slots.map((slot) => slot.text)),
                    [["agent", "Read the tests", " · 2m"], ["agent", "task 1", " · 10s"],
-                    ["agent", "task 2", " · 10s"], ["agent", "task 3", " · 10s"],
-                    ["1 more running"]]);
+                    ["3 more running"]]);
   assert.equal(lines[0]?.slots[0]?.color, "suggestion");
   // A job between turns runs nothing it started.
   const idle = paneFrom(snapshot({ roster: roster([{ ...LIVE, activity: "idle", fan }]) }), options());
@@ -1730,6 +1746,41 @@ test("how many subagent tasks are listed is the configured number, the rest coun
   assert.deepEqual(lines(1).map((line) => line.slots[0]?.text), ["agent", "2 more running"]);
   assert.deepEqual(lines(0).map((line) => line.slots[0]?.text), ["3 more running"]);
   assert.deepEqual(lines(3).map((line) => line.slots[1]?.text), ["task 1", "task 2", "task 3"]);
+});
+
+test("a shell entry is named by what it runs, not by its command line", () => {
+  // The state file records the whole line: arguments, redirections and log
+  // paths. What the row is read for is the name of the work.
+  assert.equal(shortCommand('bash /private/tmp/claude-501/mut2/runfinal.sh 1 2 > /private/tmp/x.log 2>&1; echo "exit $?"'),
+               "runfinal.sh");
+  assert.equal(shortCommand("~/.tools/scripts/pacer.py run --long --workers 2 -- make test > /tmp/make-test.log 2>&1"),
+               "make test");
+  assert.equal(shortCommand("MUTATION_SLICE_TIMEOUT=14400 /work/apps/example/venv/bin/python /private/tmp/mut2/nextfinal.py 2>&1 | tail -30"),
+               "nextfinal.py");
+  // The state file cuts a long line, and a path cut in two names nothing: the
+  // folder above it is what is still readable.
+  assert.equal(shortCommand("X=1 venv/bin/pacer.py run --long --workers 1 -- venv-knowledge-mcp/bi\u2026"),
+               "venv-knowledge-mcp");
+  // A job on Windows records its own separator.
+  assert.equal(shortCommand('C:\\work\\tools\\run.ps1'), "run.ps1");
+  // A command line this cannot name says so by saying nothing: the row then
+  // reports only that a shell is running.
+  assert.equal(shortCommand("until ! kill -0 66063 2>/dev/null; do sleep 60; done"), "");
+  assert.equal(shortCommand(""), "");
+});
+
+test("two shell entries that run the same thing are drawn once", () => {
+  const started = (seconds: number) => (NOW - seconds) * 1000;
+  const fan = [
+    { kind: "shell", label: "bash /tmp/run.sh 1 2 > /tmp/a.log", startedAt: started(90) },
+    { kind: "shell", label: "bash /tmp/run.sh 3 4 > /tmp/b.log", startedAt: started(60) },
+    { kind: "shell", label: "until ! kill -0 66063; do sleep 60; done", startedAt: started(30) },
+  ];
+  const pane = paneFrom(snapshot({ roster: roster([{ ...LIVE, fan }]) }), options());
+  const lines = group(pane, "Background sessions").rows[0]?.lines ?? [];
+  assert.deepEqual(lines.map((line) => line.slots.map((slot) => slot.text)),
+                   [["running", "run.sh", " · 2m"], ["running", "a shell loop", " · 30s"],
+                    ["1 more running"]]);
 });
 
 test("a subagent task started without a time is drawn running with no age", () => {

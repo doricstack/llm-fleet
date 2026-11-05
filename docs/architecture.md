@@ -660,7 +660,10 @@ band is where a run nobody can start is readable, and a refusal is not a
 question waiting for an answer. Toasts go to the session with the last submitted
 prompt for 30 minutes. A machine-wide event claim deduplicates native
 notifications.
-Only a terminal session claims native notifications in the current implementation.
+Native notifications are off until the person turns them on, in the plugin's
+option or in `alerts.notify`: a notification covers whatever they are working
+in, so it is asked for rather than given. Only a terminal session claims native
+notifications in the current implementation.
 Waiting-job alerts can also speak if speech is enabled.
 
 Speech now invokes a local Kokoro synthesizer, reads its WAV, and plays the bytes

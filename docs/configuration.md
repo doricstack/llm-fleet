@@ -28,7 +28,7 @@
 | --- | --- | --- |
 | Python interpreter (`python`) | `python3` | The interpreter every reader runs under: a name on the PATH or a full path, Python 3.11 or newer. A value the session cannot start is named by `/llm-fleet doctor` with this option. |
 | Configuration file (`configPath`) | empty | A full path to the configuration, passed to every reader as `$FLEET_CONFIG`. Empty reads the default place. A relative path is refused by name. |
-| Desktop notifications (`notify`) | `true` | Raises a desktop notification beside the in-session toast when a job fails or waits. |
+| Desktop notifications (`notify`) | `false` | Raises a desktop notification when a job fails or waits. Off unless asked for: a notification covers whatever the person is working in. |
 
 | ID | Context | Statement or required action |
 | --- | --- | --- |
@@ -187,7 +187,7 @@
 | `pane.repliedLimit` | positive integer | Last 50 reply keys retained | `50`; a reply is remembered by its job and the hash of the whole question, so a new question offers the field again |
 | `pane.replyMaxChars` | positive integer | Not present | `4000`; a longer reply is refused with a toast naming the limit, never cut |
 | `pane.replyPendingSeconds` | positive integer | Not present | `120`; how long a reply recorded as on its way but never confirmed sent waits before its row says it may not have been sent and offers Send again; the alerts helper refuses to clear one younger than this |
-| `pane.fanLines` | nonnegative integer | Not present | `4`; a working job's open subagent tasks listed under it, the rest counted; `0` counts them all |
+| `pane.fanLines` | nonnegative integer | Not present | `2`; a working job's open subagent tasks listed under it, the rest counted; `0` counts them all |
 | `keys.tipsEnabled` | boolean | `true`, persisted | `true` |
 | `keys.tips` | string array | Five editing and diff tips | Same actions in portable wording; empty disables rotation |
 | `keys.close`, `keys.collapse`, `keys.expand` | key strings | `x`, `c`, `e`; Escape closes | Same keys; reject conflicting bindings and digits |
@@ -243,7 +243,7 @@ A command that is not on the PATH reads as unavailable; one that exits nonzero, 
 | --- | --- | --- | --- |
 | `theme.failure`, `theme.waiting`, `theme.working`, `theme.idle` | host color tokens: `text`, `subtle`, `inactive`, `success`, `error`, `warning`, `merged`, `claude`, `suggestion`, `planMode` | `error`, `warning`, `success`, `subtle` | Same; each is what the pane and the band draw that tone as, everywhere the tone appears, desktop drawings included. The tones are levels, not single states: `failure` is anything alarming (a failed run, a context nearly full), `waiting` anything that wants attention (a job waiting on you, a stale source, context running low), `working` anything healthy and live, and `idle` everything quiet, from an idle job to a card's resting border and a low-effort label. Swapping `failure` and `working` for a red-green palette is one edit. Running work draws as `working` |
 | `theme.worktrees` | state-to-tone map: `failure`, `waiting`, `working`, `idle` | Active success; held/unknown warning; merged/preserved subtle | Active `working`; held and unknown `waiting`; merged and preserved `idle`. The tone colors the words under a worktree's title, and the four tone settings decide how that tone looks |
-| `alerts.notify` | boolean | Plugin option defaults true | `true`; terminal native notifications only until host capability verified |
+| `alerts.notify` | boolean | Plugin option defaults false | `false`; a desktop notification puts itself over whatever the person is working in, so it is asked for rather than given. `true` raises one per machine for what the band has not been dismissed from |
 | `alerts.toast` | boolean | Focused-session toasts | `true` |
 | `alerts.tones` | event-to-asset map or null | No tone asset list implemented | `null`; silence, no fabricated asset path |
 | `alerts.tabTint.enabled` | boolean | iTerm only, tmux passthrough required | `true` on supported terminal; otherwise no tint |

@@ -183,7 +183,7 @@
     {"path": "pane.repliedLimit", "type": "integer", "default": 50, "minimum": 1},
     {"path": "pane.replyMaxChars", "type": "integer", "default": 4000, "minimum": 1},
     {"path": "pane.replyPendingSeconds", "type": "integer", "default": 120, "minimum": 1},
-    {"path": "pane.fanLines", "type": "integer", "default": 4, "minimum": 0},
+    {"path": "pane.fanLines", "type": "integer", "default": 2, "minimum": 0},
 
     {"path": "band.hiddenLimit", "type": "integer", "default": 200, "minimum": 1},
     {"path": "band.waitingJobSeconds", "type": "integer", "default": 86400, "minimum": 1},
@@ -213,7 +213,7 @@
      "default": {"active": "working", "held": "waiting", "unknown": "waiting",
                  "merged": "idle", "preserved": "idle"}},
 
-    {"path": "alerts.notify", "type": "boolean", "default": true},
+    {"path": "alerts.notify", "type": "boolean", "default": false},
     {"path": "alerts.toast", "type": "boolean", "default": true},
     {"path": "alerts.tones", "type": "map", "valueType": "string", "default": null,
      "nullable": true},

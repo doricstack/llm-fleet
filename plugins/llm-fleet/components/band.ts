@@ -386,6 +386,16 @@ const BUTTON_CHROME = 4;
 /** The cells between two parts of the band's line. */
 const PART_GAP = 2;
 
+/** How many cells the host draws a button in: its label and the chrome around it. */
+function buttonCells(label: string): number {
+  return label.length + BUTTON_CHROME;
+}
+
+/** How many cells a chip draws: its word with a cell of fill at each side. */
+function chipCells(value: string): number {
+  return value.length + 2;
+}
+
 /** One button, as the host draws a press: the address it comes back on, and its word. */
 function button(key: string, label: string, onPress: () => unknown, primary = false): Node {
   return { type: "Button",
@@ -408,12 +418,12 @@ export function bandTree(input: BandInput): Node {
   // What the line takes as the terminal draws it: a button is its label in
   // "[ " and " ]", a chip is its word with a cell of fill at each side, and
   // every part after the first sits two cells from the one before.
-  let used = toggle.length + BUTTON_CHROME;
+  let used = buttonCells(toggle);
   if (input.onSpeak !== undefined) {
     const speaking = input.speaking === true;
     const word = speakLabel(speaking, input.surface);
     parts.push(button(BAND_SPEAK, word, input.onSpeak, speaking));
-    used += PART_GAP + word.length + BUTTON_CHROME;
+    used += PART_GAP + buttonCells(word);
   }
   // Pacer's switch sits beside the voice's, and only while the machine runs
   // pacer: a person who does not run that tooling never sees the gear.
@@ -429,7 +439,7 @@ export function bandTree(input: BandInput): Node {
     const word = gear.label(false);
     gearAt = parts.length;
     parts.push(button(gear.key, word, gear.press));
-    used += PART_GAP + word.length + BUTTON_CHROME;
+    used += PART_GAP + buttonCells(word);
   }
   const figures: [number, string, Color, "working" | "waiting" | "failed"][] =
     input.counts === null ? [] : [
@@ -437,6 +447,11 @@ export function bandTree(input: BandInput): Node {
       [input.counts.waiting, "waiting", "warning", "waiting"],
       [input.counts.failed, "failed", "error", "failed"],
     ];
+  // A figure a press opens the pane from is a button, and the host draws a
+  // button wider than the chip inside it: counting it as a chip left the line
+  // two cells short of what it draws, for every figure on it.
+  const figureStart = parts.length;
+  const figureCells: number[] = [];
   for (const [count, word, color, focus] of figures) {
     if (count > 0) {
       const label = count + " " + word;
@@ -447,7 +462,10 @@ export function bandTree(input: BandInput): Node {
         : { type: "Button", props: { key: BAND_FOCUS + focus, label,
                                      onPress: () => input.onOpen?.(focus) },
             children: pressable([drawn]) });
-      used += PART_GAP + label.length + 2;
+      const cells = PART_GAP + (input.onOpen === undefined
+        ? chipCells(label) : buttonCells(label));
+      figureCells.push(cells);
+      used += cells;
     }
   }
   if (input.counts !== null && figures.every(([count]) => count === 0)) {
@@ -462,17 +480,23 @@ export function bandTree(input: BandInput): Node {
   if (spend !== null && spend !== "") {
     spendAt = parts.length;
     parts.push(chip(spend, "subtle"));
-    used += PART_GAP + spend.length + 2;
+    used += PART_GAP + chipCells(spend);
   }
   if (input.counts === null && input.note) {
-    parts.push(text({ dimColor: true }, input.note));
-    used += PART_GAP + input.note.length;
+    // The note is the last part and the least of them, so it is cut to the
+    // room that is left rather than drawing the line past its width.
+    const note = fit(input.note, Math.max(0, input.width - used - PART_GAP));
+    if (note !== "") {
+      parts.push(text({ dimColor: true }, note));
+      used += PART_GAP + note.length;
+    }
   }
   const dismiss = input.items.length > 0;
+  let dismissDrawn = dismiss;
   // A band too narrow for the whole line gives up the product's name first,
   // then the speech switch's state word: the verb still says which way a press
   // goes, and nothing a person needs to read is cut.
-  const dismissWidth = dismiss ? PART_GAP + "Dismiss".length + BUTTON_CHROME : 0;
+  const dismissWidth = dismiss ? PART_GAP + buttonCells("Dismiss") : 0;
   let fixed = used + dismissWidth;
   if (fixed > input.width) {
     const short = fleetLabel(input.open, input.surface, true);
@@ -498,12 +522,40 @@ export function bandTree(input: BandInput): Node {
   // decides it is the room the item needs, not only whether the fixed parts
   // overflow: a line where the figures fit and the item does not gives the chip
   // up too, so the item is drawn where it otherwise would not be.
-  let room = input.width - used - PART_GAP - dismissWidth;
-  const crowded = input.items.length > 0 ? room <= 8 : used + dismissWidth > input.width;
+  //
+  // The item is a press when the pane can be opened from it, and a press is a
+  // button the host draws with chrome around its word: that chrome is budgeted
+  // here, because an item long enough to take all the room left is exactly the
+  // case where leaving it out draws the line past its width. The host then
+  // squeezes the item's label into a column one cell wide, which is the tall
+  // broken panel a long item used to produce.
+  const itemChrome = input.onOpen === undefined ? 0 : BUTTON_CHROME;
+  let room = input.width - used - PART_GAP - dismissWidth - itemChrome;
+  const crowded = input.items.length > 0 ? room <= 8
+    : used + dismissWidth + itemChrome > input.width;
   if (spendAt >= 0 && crowded) {
     parts.splice(spendAt, 1);
-    used -= PART_GAP + (spend as string).length + 2;
-    room = input.width - used - PART_GAP - dismissWidth;
+    used -= PART_GAP + chipCells(spend as string);
+    room = input.width - used - PART_GAP - dismissWidth - itemChrome;
+  }
+  // What the line draws without the item: the switches, the figures and
+  // Dismiss. The item was cut to nothing above when that did not fit, so from
+  // here Dismiss goes first (it acts on an item the line has no room to show),
+  // then figures from the least urgent end. The fleet's switch is never given
+  // up, and the line is one row at every width.
+  if (used + dismissWidth > input.width) {
+    dismissDrawn = false;
+    // The room it was holding is free again, or the figures after it are
+    // dropped to make room for a button that is no longer drawn.
+    used -= dismissWidth;
+  }
+  let dropped = 0;
+  while (used > input.width && dropped < figureCells.length) {
+    used -= figureCells[dropped] as number;
+    dropped += 1;
+  }
+  if (dropped > 0) {
+    parts.splice(figureStart, dropped);
   }
   const [first, ...others] = input.items;
   if (first !== undefined && room > 8) {
@@ -527,7 +579,7 @@ export function bandTree(input: BandInput): Node {
                           children: pressable(words) }]));
   }
   const left = box({ flexDirection: "row", gap: 2, flexShrink: 1 }, parts);
-  const row = dismiss
+  const row = dismissDrawn
     ? box({ flexDirection: "row", justifyContent: "space-between", gap: 2 }, [
         left,
         button(BAND_DISMISS, "Dismiss", input.onDismiss),

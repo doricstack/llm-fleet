@@ -84,7 +84,7 @@ export const GEOMETRY: PaneGeometry = {
   horizontalReserve: 0,
   progressCells: 16,
   skillRows: 5,
-  fanLines: 4,
+  fanLines: 2,
 };
 
 /** One positive integer the configuration declares, or the packaged default. */

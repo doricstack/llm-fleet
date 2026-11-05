@@ -19,6 +19,7 @@ import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_ITEM, BAND_PACER, BAND_SP
 import { renderedText } from "../plugins/llm-fleet/components/layout.ts";
 import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
 import type { Node } from "../plugins/llm-fleet/components/host.ts";
+import { nodeLines } from "./review.ts";
 
 const AT = 1_790_000_000;
 
@@ -531,6 +532,102 @@ test("the band's line fits the width it is given, gaps and button chrome counted
       assert.ok(drawnWidth(tree) <= width, `width ${width}: drew ${drawnWidth(tree)}`);
     }
   }
+});
+
+/**
+ * An item longer than any band line: the shape a long pull request title or a
+ * long skill issue arrives in. It is drawn as a press by the live band, which
+ * is what turns its words into a button the host adds chrome around.
+ */
+const LONG_ITEM = { key: "job:long:blocked", level: "warning" as const,
+                    text: "K - M C P - C C - N " + "check-name ".repeat(20) };
+
+/** The band at one width, with the presses the live band carries. */
+function longBand(width: number): Node {
+  return bandTree({ items: [LONG_ITEM], counts: { working: 1, waiting: 1, failed: 0 },
+                    open: false, width, onToggle: noop, onDismiss: noop, onOpen: noop });
+}
+
+/**
+ * What the band draws at a width: its rule line and one row, each no wider than
+ * the width it was given.
+ *
+ * The line count and the words come from the review renderer, which walks the
+ * real tree. The row's width is measured with the cells the host adds around a
+ * button, because that is where a long item used to push the line past its
+ * width: the text was cut, and the chrome around the cut was not, so the host
+ * squeezed the item's label into a column one character wide.
+ */
+function assertTwoLinesWithin(tree: Node, width: number): string[] {
+  const lines = nodeLines(tree, width, false);
+  assert.equal(lines.length, 2, `width ${width}: drew ${lines.length} lines: ` +
+                                JSON.stringify(lines));
+  const row = tree.children[1] as Node;
+  assert.ok(drawnWidth(row) <= width, `width ${width}: the row drew ${drawnWidth(row)} cells`);
+  for (const line of lines) {
+    assert.ok(line.length <= width, `width ${width}: a line drew ${line.length} cells: ${line}`);
+  }
+  return lines;
+}
+
+test("a 200-character item does not break the band at width 40", () => {
+  const width = 40;
+  const tree = longBand(width);
+  const lines = assertTwoLinesWithin(tree, width);
+  const drawn = lines.join("\n");
+  // The item has no room left after the switch and the figures, so it is cut to
+  // nothing rather than squeezing them. Its press is not drawn either.
+  assert.equal(drawn.includes("K - M C P"), false, drawn);
+  assert.notEqual(pressable(tree, BAND_TOGGLE), undefined);
+  assert.equal(drawn.includes("1 working"), true, drawn);
+  assert.equal(drawn.includes("1 waiting"), true, drawn);
+});
+
+test("a 200-character item does not break the band at width 60", () => {
+  const width = 60;
+  const tree = longBand(width);
+  const drawn = assertTwoLinesWithin(tree, width).join("\n");
+  assert.notEqual(pressable(tree, BAND_TOGGLE), undefined);
+  assert.equal(drawn.includes("1 working"), true, drawn);
+  assert.equal(drawn.includes("1 waiting"), true, drawn);
+  // The item still has no room beside the figures and Dismiss: it is given up
+  // before any of them, and the press that would carry it is not drawn.
+  assert.equal(drawn.includes("K - M C P"), false, drawn);
+  assert.equal(drawn.includes("Dismiss"), true, drawn);
+});
+
+test("a 200-character item does not break the band at width 80", () => {
+  const width = 80;
+  const tree = longBand(width);
+  const drawn = assertTwoLinesWithin(tree, width).join("\n");
+  assert.notEqual(pressable(tree, BAND_ITEM + LONG_ITEM.key), undefined);
+  assert.equal(drawn.includes("K - M C ..."), true, drawn);
+  // The cut falls on the item, never on the switch, the figures or Dismiss.
+  assert.notEqual(pressable(tree, BAND_TOGGLE), undefined);
+  assert.equal(drawn.includes("1 working"), true, drawn);
+  assert.equal(drawn.includes("1 waiting"), true, drawn);
+  assert.equal(drawn.includes("Dismiss"), true, drawn);
+});
+
+test("a 200-character item does not break the band at width 100", () => {
+  const width = 100;
+  const tree = longBand(width);
+  const drawn = assertTwoLinesWithin(tree, width).join("\n");
+  assert.notEqual(pressable(tree, BAND_ITEM + LONG_ITEM.key), undefined);
+  assert.equal(drawn.includes("K - M C P - C C - N"), true, drawn);
+  assert.equal(drawn.includes(LONG_ITEM.text), false, drawn);
+  assert.equal(drawn.includes("Dismiss"), true, drawn);
+});
+
+test("a 200-character item does not break the band at width 140", () => {
+  const width = 140;
+  const tree = longBand(width);
+  const drawn = assertTwoLinesWithin(tree, width).join("\n");
+  assert.notEqual(pressable(tree, BAND_ITEM + LONG_ITEM.key), undefined);
+  assert.equal(drawn.includes("K - M C P - C C - N"), true, drawn);
+  assert.equal(drawn.includes(LONG_ITEM.text), false, drawn);
+  assert.equal(drawn.includes("1 working"), true, drawn);
+  assert.equal(drawn.includes("Dismiss"), true, drawn);
 });
 
 test("the band draws a rule across its width above the buttons, and keeps the line under it", () => {

@@ -890,7 +890,7 @@ class LayoutTests(ConfigTestCase):
     def test_the_reply_bounds_and_task_lines_have_defaults_and_floors(self):
         pane = self.load({})["pane"]
         self.assertEqual((pane["replyMaxChars"], pane["replyPendingSeconds"], pane["fanLines"]),
-                         (4000, 120, 4))
+                         (4000, 120, 2))
         # A reply is held by a marker no time takes back, so there is no claim time.
         self.assertNotIn("replyClaimSeconds", pane)
         # No task lines at all is a choice: the tasks are then only counted.
