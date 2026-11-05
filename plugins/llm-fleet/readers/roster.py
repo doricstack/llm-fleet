@@ -17,9 +17,10 @@ import tempfile
 import time
 from typing import Any, Mapping
 
+
 from .agents import bucket_layout, read_agent
 from .alerts import read_owned_json, reply_marker, state_root, write_json
-from .jobs import job_activity, job_entered_at, job_question, short_path
+from .jobs import job_activity, job_entered_at, job_question, project_name, short_path
 from .rates import with_live_rates
 from .runtime import (CACHE_BYTES, ReaderFailure, child_environment, printable, read_bounded_json,
                       resolve_command, run_json, shell_command, valid_job_id, write_private_json)
@@ -313,6 +314,7 @@ def _rows_to_jobs(rows: list[Any], provider: dict[str, Any], config: Mapping[str
             "name": printable(row.get("name") or row.get("id") or "unnamed")[:limit],
             "state": str(row.get("state") or "unknown"),
             "cwd": short_path(row.get("cwd") or "", home),
+            "project": project_name(row.get("cwd"), limit),
             "started_at": started / 1000 if isinstance(started, (int, float)) else None,
             "provider": provider["id"],
             "label": provider["label"],

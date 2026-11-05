@@ -46,6 +46,7 @@ A session started before the update has no pane until it restarts. From a checko
 - A section heading folds it, and the keys section lists every binding the pane draws.
 - The skills heading counts the findings in your own skills, apart from the ones under plugin installs, synced copies and built-ins, which it states beside that number. It counts what the scan found rather than the rows the pane had room to draw, so a count never shrinks to the size of the section.
 - On the band above the prompt, the figures open the pane narrowed to their state, what this session has spent sits beside them on a chip, and the item the band leads with opens the pane where its row lives. A skill finding reaches the band only when it is in one of your own skills; one under a plugin install or another tool's folder stays in the pane.
+- The Pacer section draws every slot as a row of columns: the slot's own name, the project the run works for, its worktree, and how long it has been running. A slot pacer reserves is named rather than numbered. The project is read from the folder the run started in; a slot whose folder cannot be read shows its Worktree and no project rather than a guess.
 - What a row offers is copied or opened from its title: a job's attach line, a worktree's cleanup line, a pull request's page, a skill report command.
 
 ## Commands

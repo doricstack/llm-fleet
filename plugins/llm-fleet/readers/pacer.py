@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+from pathlib import Path
 import json
 import os
 import subprocess
@@ -36,6 +37,7 @@ if __package__ in (None, ""):
 
 from config.loader import ConfigError, load_config
 from readers.custom import run_bounded_json
+from readers.load import project_of, working_directories
 from readers.runtime import child_environment, cut, resolve_command
 
 SOURCE = "pacer"
@@ -49,6 +51,9 @@ MAX_WAITING = 50
 MAX_OUTSIDE = 64
 # The most of a refused switch's own words read before they are cut.
 SAID_BYTES = 4096
+# How long the one call that reads a slot's folder is given. It answers from the
+# kernel's process table, so a call that takes longer is a machine in trouble.
+ROOT_SECONDS = 3.0
 
 
 def _source(config: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -106,7 +111,51 @@ def _moment(value: Any) -> float | None:
     return moment.timestamp() if moment.tzinfo is not None else None
 
 
-def _slot(entry: Any, limit: int) -> dict[str, Any] | None:
+def _roots(document: Mapping[str, Any],
+           environment: Mapping[str, str]) -> dict[int, Path]:
+    """The folder each busy slot's run started in, by pid.
+
+    Pacer publishes the folder's name only, so the folder is read from the
+    process itself, one bounded lsof call for every pid at once, through the
+    same reader the load section uses. A holder pacer already names a folder
+    for is taken as written. A platform without lsof answers nothing, and a
+    slot then shows no project rather than a guess.
+    """
+    held: dict[int, Path] = {}
+    wanted: list[int] = []
+    for entry in document.get("slots") or []:
+        if not isinstance(entry, Mapping):
+            continue
+        holder = entry.get("holder") if entry.get("busy") else None
+        if not isinstance(holder, Mapping):
+            continue
+        pid = _count(holder.get("pid"))
+        if pid is None:
+            continue
+        named = holder.get("cwd") or holder.get("root")
+        if isinstance(named, str) and named.strip():
+            held[pid] = Path(named.strip())
+        else:
+            wanted.append(pid)
+    if wanted:
+        for pid, directory in working_directories(wanted, environment, ROOT_SECONDS).items():
+            held.setdefault(pid, directory)
+    return held
+
+
+def _project(pid: int | None, roots: Mapping[int, Path]) -> str | None:
+    """The project a run's folder belongs to, and the folder's own name for a
+    copy outside any repository, which is what a scratch build is."""
+    directory = roots.get(pid) if pid is not None else None
+    if directory is None:
+        return None
+    found = project_of(directory)
+    if found is not None:
+        return found[0]
+    return directory.name or None
+
+
+def _slot(entry: Any, limit: int, roots: Mapping[int, str]) -> dict[str, Any] | None:
     """One slot, or None when it carries no number or no busy flag.
 
     The holder is the text pacer wrote into the lock file, and the lock, not the
@@ -121,8 +170,11 @@ def _slot(entry: Any, limit: int) -> dict[str, Any] | None:
         return None
     holder = entry.get("holder") if busy else None
     holder = holder if isinstance(holder, Mapping) else {}
-    return {"slot": number, "busy": busy, "pid": _count(holder.get("pid")),
+    pid = _count(holder.get("pid"))
+    return {"slot": number, "busy": busy, "pid": pid,
+            "name": cut(entry.get("name"), 24),
             "repo": cut(holder.get("repo"), limit),
+            "project": cut(_project(pid, roots), limit),
             "startedAt": _moment(holder.get("started_at"))}
 
 
@@ -186,7 +238,8 @@ def _outside(value: Any, limit: int) -> list[dict[str, Any]] | None:
     return processes
 
 
-def parse_status(document: Any, limit: int) -> dict[str, Any]:
+def parse_status(document: Any, limit: int,
+                 environment: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Pacer's status as the pane reads it, or a failed document naming what is wrong."""
     if not isinstance(document, Mapping):
         return _empty("failed", "the status is not an object")
@@ -206,7 +259,9 @@ def parse_status(document: Any, limit: int) -> dict[str, Any]:
     listed = document.get("slots")
     if not isinstance(listed, list) or len(listed) > MAX_SLOTS:
         return _empty("failed", "the status has no slots list")
-    slots = [slot for slot in (_slot(entry, limit) for entry in listed) if slot is not None]
+    roots = _roots(document, environment)
+    slots = [slot for slot in (_slot(entry, limit, roots) for entry in listed)
+             if slot is not None]
     # A slot dropped or never listed would be counted as free in "N of M busy".
     if len(slots) != len(listed):
         return _empty("failed", "the status has a slot the pane cannot read")
@@ -270,7 +325,7 @@ def read_pacer(config: Mapping[str, Any], *,
                                       int(config["limits"]["jobStateBytes"]))
     if reason is not None:
         return _empty("failed", reason)
-    return parse_status(output, limit)
+    return parse_status(output, limit, environment)
 
 
 def set_pacer(config: Mapping[str, Any], on: bool, *,

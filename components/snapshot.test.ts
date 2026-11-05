@@ -476,7 +476,7 @@ test("a pacer document keeps what was sent and names what was not", () => {
     errors: [] } }, NOW);
   assert.equal(read.pacer?.state, "ready");
   assert.deepEqual(read.pacer?.slots, [{ slot: 0, busy: true, pid: 9, repo: "r",
-                                         startedAt: NOW - 5 }]);
+                                         name: null, project: null, startedAt: NOW - 5 }]);
   assert.deepEqual(read.pacer?.waiting, [{ pid: 1, repo: "w", since: NOW - 9 }]);
   assert.deepEqual(read.pacer?.recent?.map((run) => run.repo), ["x"]);
   // Lists the reader did not send stay null: nobody counted is not nobody.

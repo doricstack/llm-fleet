@@ -89,6 +89,8 @@ export type Job = {
   name: string;
   state: string;
   cwd: string;
+  /** The project the job's folder belongs to, when the reader could read it. */
+  project?: string | null;
   started_at: number | null;
   provider: string;
   label: string;
@@ -366,6 +368,10 @@ export type PacerSlot = {
   busy: boolean;
   pid: number | null;
   repo: string | null;
+  /** What pacer calls this slot, such as "Long (reserved)"; null before it named one. */
+  name?: string | null;
+  /** The project the run's folder belongs to, when the reader could read it. */
+  project?: string | null;
   /** Epoch seconds the holder took the slot, when it said. */
   startedAt: number | null;
 };

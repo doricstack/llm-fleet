@@ -17,6 +17,7 @@ import stat
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .load import project_of
 from .runtime import READ_FLAGS, cut, printable, read_bounded_json, read_json_handle, valid_job_id
 
 
@@ -246,3 +247,18 @@ def short_path(path: Any, home: Path) -> str:
     if text.startswith(prefix + os.sep):
         return "~" + text[len(prefix):]
     return text
+
+
+def project_name(path: Any, limit: int) -> str | None:
+    """The project a job's folder belongs to, and the folder's own name outside a repository.
+
+    A job started in a worktree is working on the repository that owns it, and
+    the worktree's name is already the Worktree column; a folder no repository
+    holds is called by its own name.
+    """
+    if not isinstance(path, str) or not path.strip():
+        return None
+    directory = Path(path)
+    found = project_of(directory)
+    name = found[0] if found is not None else directory.name
+    return cut(name, limit) if name else None

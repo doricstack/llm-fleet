@@ -400,6 +400,7 @@ function jobsOf(document: unknown): Job[] {
     name: text(entry.name, "unnamed"),
     state: text(entry.state, "unknown"),
     cwd: text(entry.cwd),
+    project: maybeText(entry.project),
     started_at: maybeCount(entry.started_at),
     provider: text(entry.provider),
     label: text(entry.label, text(entry.provider)),
@@ -681,6 +682,7 @@ function pacerSlot(value: unknown): PacerSlot | null {
   }
   return { slot: wholeCount(value.slot) as number, busy: value.busy,
            pid: wholeCount(value.pid), repo: maybeText(value.repo),
+           name: maybeText(value.name), project: maybeText(value.project),
            startedAt: seconds(value.startedAt) };
 }
 

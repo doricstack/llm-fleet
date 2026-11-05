@@ -590,8 +590,8 @@ function withJobActions(row: Row, job: Job, options: PaneOptions): Row {
  * when it finished and what it left as its last word. It has no bar, since a
  * finished job's context share says nothing about anything still to do.
  */
-function finishedRow(job: Job, options: PaneOptions): Row {
-  const row = job.agent ? agentRow(job, job.agent, options) : jobRow(job, options);
+function finishedRow(job: Job, options: PaneOptions, projectWidth: number): Row {
+  const row = job.agent ? agentRow(job, job.agent, options, projectWidth) : jobRow(job, options, projectWidth);
   const meta = row.meta.filter((slot) => !/^ \u00b7 (\d|waiting|mid-turn|between)/.test(slot.text));
   const ended = job.since === null || job.since === undefined ? null : options.now - job.since;
   if (ended !== null) {
@@ -608,7 +608,14 @@ function finishedRow(job: Job, options: PaneOptions): Row {
   };
 }
 
-function jobRow(job: Job, options: PaneOptions): Row {
+/** How wide the project column is: the longest name it holds, up to a limit. */
+function jobProjectWidth(jobs: Job[]): number {
+  const longest = jobs.reduce((width, job) => Math.max(width, (job.project ?? "").length),
+                              "PROJECT".length);
+  return Math.min(20, longest);
+}
+
+function jobRow(job: Job, options: PaneOptions, projectWidth: number): Row {
   const name = shown(job.name);
   const question = shown(job.needs);
   const detail = shown(job.detail);
@@ -630,13 +637,19 @@ function jobRow(job: Job, options: PaneOptions): Row {
   } else if (job.activity === "idle") {
     meta.push({ text: " \u00b7 between turns" });
   }
-  const slot: Slot[] = waiting(job)
-    ? [{ text: "Waiting for you", color: "warning" }]
+  const saying = waiting(job)
+    ? [{ text: "Waiting for you", color: "warning" as const }]
     : working(job)
-      ? [{ text: "Working", color: "success" }]
+      ? [{ text: "Working", color: "success" as const }]
       : active(job)
-        ? [{ text: job.state, color: "success" }]
+        ? [{ text: job.state, color: "success" as const }]
         : [{ text: job.state, dim: true }];
+  // The project a job works for, in its own column, so a row is read without
+  // the folder it happens to run in.
+  const slot: Slot[] = [
+    { text: job.project ?? "", width: projectWidth + 1, align: "left", dim: true },
+    ...saying,
+  ];
   // What a person opens the row for: where it runs, under which provider, for
   // how long, and the line that puts them in front of it. All of it was read
   // already; none of it earns a line on a row at rest.
@@ -798,8 +811,9 @@ function elapsedOf(job: Job, agent: AgentFigures | undefined, now: number): numb
  * context window its last turn filled, labeled as that, because the two are
  * different measurements and a bar must say which one it is.
  */
-function agentRow(job: Job, agent: AgentFigures, options: PaneOptions): Row {
-  const base = jobRow(job, options);
+function agentRow(job: Job, agent: AgentFigures, options: PaneOptions,
+                  projectWidth: number): Row {
+  const base = jobRow(job, options, projectWidth);
   if (agent.state !== "ready") {
     const reason = agent.state === "empty" ? "No turns recorded yet."
       : "Figures unreadable: " + (agent.reason ?? agent.state) + ".";
@@ -1618,10 +1632,13 @@ function rosterGroups(roster: Roster, options: PaneOptions): Group[] {
   // ones: the reader already holds them to that window and that many.
   const finished = jobs.filter((job) => TERMINAL_STATES.has(job.state))
     .sort((left, right) => (right.since ?? 0) - (left.since ?? 0));
+  const projectWidth = jobProjectWidth(jobs);
   const rows = [
     ...ordered.map((job) => withJobActions(
-      job.agent ? agentRow(job, job.agent, options) : jobRow(job, options), job, options)),
-    ...finished.map((job) => finishedRow(job, options)),
+      job.agent ? agentRow(job, job.agent, options, projectWidth)
+                : jobRow(job, options, projectWidth),
+      job, options)),
+    ...finished.map((job) => finishedRow(job, options, projectWidth)),
   ];
   const counts = combine([
     countSlot(blocked.length, "waiting", "warning"),
@@ -1635,7 +1652,9 @@ function rosterGroups(roster: Roster, options: PaneOptions): Group[] {
     ? [...counts, { text: "   " }, ...strip] : [...counts, ...strip];
   const group = sectionGroup("sessions", rows, partial(rows, roster.state),
                              summarySlots.length ? summarySlots : [{ text: "none", dim: true }],
-                             options);
+                             options,
+                             { columns: [{ text: "PROJECT", width: projectWidth + 1, align: "left" },
+                                         { text: "STATE", align: "right" }] });
   group.observed = rows.length;
   if (ordered.length && options.actions) {
     group.notes = [[{ text: "Press a session to copy the command that opens it.", dim: true }]];
@@ -2222,19 +2241,45 @@ function runLabel(repo: string | null): string | null {
 }
 
 /** One slot: what is running in it and for how long, or free. */
-function pacerSlotRow(slot: PacerSlot, now: number): Row {
+/** The columns the slot rows share, so a cell never pushes the one after it. */
+type SlotWidths = { project: number; worktree: number };
+
+// Wide enough for "ELAPSED", the word above the column.
+const ELAPSED_COLUMN = 7;
+
+function slotWidths(slots: PacerSlot[]): SlotWidths {
+  const widest = (heading: string, texts: string[]) =>
+    Math.max(heading.length, ...texts.map((text) => text.length));
+  return {
+    // A folder name longer than this is cut rather than take the row's room.
+    project: Math.min(24, widest("PROJECT", slots.map((slot) => slot.project ?? ""))),
+    worktree: Math.min(26, widest("WORKTREE",
+      slots.map((slot) => runLabel(slot.repo) ?? (slot.busy ? "" : "free")))),
+  };
+}
+
+/** One slot as a row of four columns: its number, project, worktree and elapsed. */
+function pacerSlotRow(slot: PacerSlot, now: number, widths: SlotWidths): Row {
   const key = PACER_PREFIX + "slot:" + slot.slot;
-  const title = "Slot " + (slot.slot + 1);
-  if (!slot.busy) {
-    return { key, title, meta: [], slot: [{ text: "free", dim: true }] };
-  }
+  // Pacer's own name for the slot, once it sends one: the reserved slot says so
+  // rather than being counted in with the ordinary ones.
+  const title = slot.name ?? "Slot " + (slot.slot + 1);
+  const project = slot.busy ? slot.project ?? "" : "";
   // The lock says busy; the text inside it says who, in the only terms pacer
   // keeps. A slot held by somebody pacer could not name is still held.
-  const holder = runLabel(slot.repo);
-  const meta: Slot[] = slot.startedAt === null
-    ? [{ text: holder === null ? "holder not named" : "start not recorded", dim: true }]
-    : [{ text: "running " + durationText(now - slot.startedAt), dim: true }];
-  return { key, title, state: "working", meta, slot: [{ text: holder ?? "held" }] };
+  const worktree = slot.busy ? runLabel(slot.repo) ?? "held" : "free";
+  const elapsed = slot.busy && slot.startedAt !== null
+    ? durationText(now - slot.startedAt) : "";
+  const quiet = slot.busy ? undefined : true;
+  // A column after the first carries its own leading gap, so the row and the
+  // names above it measure the same line.
+  const cells: Slot[] = [
+    { text: project, width: widths.project, align: "left", dim: quiet },
+    { text: " " + worktree, width: widths.worktree + 1, align: "right", dim: quiet },
+    { text: " " + elapsed, width: ELAPSED_COLUMN + 1, align: "right", dim: quiet },
+  ];
+  return slot.busy ? { key, title, state: "working", meta: [], slot: cells }
+    : { key, title, meta: [], slot: cells };
 }
 
 /** One finished run: passed, refused, stopped by a signal, or the exit it failed with. */
@@ -2280,10 +2325,16 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
   if (state !== "ready") {
     return sectionGroup("pacer", [], state, [], options);
   }
-  // The switch itself lives in the band, beside the other machine-wide
-  // controls. A section that repeats it offers two places to press for one
-  // decision, so this section states what pacer reports and nothing more.
-  const rows: Row[] = [];
+  // The slots come first: they are the section's live state, and the column
+  // names above them are theirs. The switch's own settings follow, then what
+  // waits and what went wrong.
+  const widths = slotWidths(document.slots);
+  const rows: Row[] = document.slots.map((slot) => pacerSlotRow(slot, options.now, widths));
+  const columns: Slot[] = [
+    { text: " PROJECT", width: widths.project, align: "left" },
+    { text: " WORKTREE", width: widths.worktree + 1, align: "right" },
+    { text: " ELAPSED", width: ELAPSED_COLUMN + 1, align: "right" },
+  ];
   const settings = pacerSettingsRow(document);
   if (settings !== null) {
     // An off the environment holds says why: no press here or on the band's
@@ -2296,7 +2347,6 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
     }
     rows.push(settings);
   }
-  rows.push(...document.slots.map((slot) => pacerSlotRow(slot, options.now)));
   const outside = pacerOutsideRow(document);
   if (outside !== null) {
     rows.push(outside);
@@ -2330,7 +2380,7 @@ function pacerGroup(document: Pacer | undefined, options: PaneOptions): Group | 
                      dim: waiting.length === 0 });
     }
   }
-  return sectionGroup("pacer", rows, state, summary, options);
+  return sectionGroup("pacer", rows, state, summary, options, { columns });
 }
 
 /**

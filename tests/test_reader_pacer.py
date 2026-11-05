@@ -12,6 +12,8 @@ in any way is a failed source, never an idle machine.
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -149,10 +151,11 @@ class ReadyTests(PacerCase):
         self.assertEqual(result["slotCount"], 4)
         self.assertEqual(result["workersPerRun"], 6)
         self.assertEqual(result["slots"][0], {"slot": 0, "busy": True, "pid": 4242,
-                                              "repo": "llm-fleet-private",
-                                              "startedAt": STARTED})
+                                              "repo": "llm-fleet-private", "name": None,
+                                              "project": None, "startedAt": STARTED})
         self.assertEqual(result["slots"][1], {"slot": 1, "busy": False, "pid": None,
-                                              "repo": None, "startedAt": None})
+                                              "repo": None, "name": None, "project": None,
+                                              "startedAt": None})
         self.assertEqual(sum(1 for slot in result["slots"] if slot["busy"]), 1)
 
     def test_the_switch_is_read_with_where_its_answer_came_from(self):
@@ -382,6 +385,107 @@ class SwitchTests(PacerCase):
         result = pacer.set_pacer(self.config(enabled=False), False)
         self.assertEqual(result["state"], "disabled")
         self.assertEqual(self.calls(), [])
+
+
+class ProjectTests(PacerCase):
+    """Which project an occupied slot is running for: the row says it, the reader reads it."""
+
+    def test_a_slot_names_the_project_its_run_started_in(self):
+        # A real process in a real folder: the slot's pid is the only thing
+        # pacer publishes, and the folder is read from the process, not guessed
+        # from its name. A platform with no lsof cannot answer, so it says so
+        # rather than failing a read that is only unavailable there.
+        if shutil.which("lsof") is None:
+            self.skipTest("no lsof on this platform")
+        project = self.root / "my-project"
+        project.mkdir()
+        worker = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                  cwd=str(project))
+        try:
+            self.given(status=status(slots=[
+                {"slot": 0, "busy": True,
+                 "holder": {"pid": worker.pid, "repo": "feat-one",
+                            "started_at": "2026-10-20T10:00:00Z"}},
+                {"slot": 1, "busy": False, "holder": None},
+                {"slot": 2, "busy": False, "holder": None},
+                {"slot": 3, "busy": False, "holder": None}]))
+            self.assertEqual(self.read()["slots"][0]["project"], "my-project")
+        finally:
+            worker.terminate()
+            worker.wait(timeout=10)
+
+    def test_a_root_pacer_reports_is_read_rather_than_looked_up(self):
+        # When pacer names the folder, that word is the answer: the pid is not
+        # asked, so a run whose process has left still says where it ran.
+        self.given(status=status(slots=[
+            {"slot": 0, "busy": True,
+             "holder": {"pid": 999999, "repo": "feat-one", "cwd": "/work/from-pacer",
+                        "started_at": "2026-10-20T10:00:00Z"}},
+            {"slot": 1, "busy": False, "holder": None},
+            {"slot": 2, "busy": False, "holder": None},
+            {"slot": 3, "busy": False, "holder": None}]))
+        self.assertEqual(self.read()["slots"][0]["project"], "from-pacer")
+
+    def test_a_project_past_the_limit_is_cut_like_every_other_field(self):
+        # The folder is another tool's word: it reaches the pane bounded, not
+        # whatever length a person happened to name it.
+        long_name = "p" * 400
+        self.given(status=status(slots=[
+            {"slot": 0, "busy": True,
+             "holder": {"pid": 999999, "repo": "feat-one", "cwd": "/work/" + long_name,
+                        "started_at": "2026-10-20T10:00:00Z"}},
+            {"slot": 1, "busy": False, "holder": None},
+            {"slot": 2, "busy": False, "holder": None},
+            {"slot": 3, "busy": False, "holder": None}]))
+        project = self.read()["slots"][0]["project"]
+        self.assertIsNotNone(project)
+        self.assertLessEqual(len(project), 200)
+
+    def test_a_slot_keeps_the_name_pacer_gave_it(self):
+        # The reserved slot is named rather than numbered, and the number stays
+        # for the pane's own keys.
+        self.given(status=status(slots=[
+            {"slot": 0, "busy": True, "name": "Long (reserved)",
+             "holder": {"pid": 999999, "repo": "long-run",
+                        "started_at": "2026-10-20T10:00:00Z"}},
+            {"slot": 1, "busy": False, "holder": None},
+            {"slot": 2, "busy": False, "holder": None},
+            {"slot": 3, "busy": False, "holder": None}]))
+        first = self.read()["slots"][0]
+        self.assertEqual(first["name"], "Long (reserved)")
+        self.assertEqual(first["slot"], 0)
+
+    def test_a_slot_whose_folder_cannot_be_read_names_no_project(self):
+        # A pid that belongs to nothing is not a project called nothing.
+        self.given(status=status(slots=[
+            {"slot": 0, "busy": True,
+             "holder": {"pid": 999999, "repo": "feat-one",
+                        "started_at": "2026-10-20T10:00:00Z"}},
+            {"slot": 1, "busy": False, "holder": None},
+            {"slot": 2, "busy": False, "holder": None},
+            {"slot": 3, "busy": False, "holder": None}]))
+        self.assertIsNone(self.read()["slots"][0]["project"])
+
+    def test_a_worktree_names_the_project_it_belongs_to(self):
+        # A run in a worktree is working on the repository, and the worktree's
+        # own name is already the Worktree column: the folder is asked which
+        # repository owns it rather than read as a name.
+        project = self.root / "workbench"
+        project.mkdir()
+        (project / ".git").mkdir()
+        worktree = self.root / "elsewhere" / "perf-zod"
+        worktree.mkdir(parents=True)
+        (worktree / ".git").write_text(
+            "gitdir: " + str(project / ".git" / "worktrees" / "perf-zod") + "\n",
+            encoding="utf-8")
+        self.assertEqual(pacer._project(7, {7: worktree}), "workbench")
+        # A folder outside any repository is its own name, which is what a
+        # scratch copy of a tree is.
+        scratch = self.root / "mut2" / "w2"
+        scratch.mkdir(parents=True)
+        self.assertEqual(pacer._project(8, {8: scratch}), "w2")
+        # A pid nobody can place is no project, not one called nothing.
+        self.assertIsNone(pacer._project(9, {}))
 
 
 if __name__ == "__main__":

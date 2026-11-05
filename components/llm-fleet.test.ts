@@ -5487,10 +5487,12 @@ test("a busy slot's elapsed time counts on between reads of pacer's status", asy
   await driven.run();
   await drain();
   const now = renderedText(await driven.render() as never).join("\n");
-  assert.equal(now.includes("running 23s"), true, now);
+  // The elapsed time sits in its own column, so the word "running" is the
+  // column name above it rather than part of the value.
+  assert.equal(now.includes("23s"), true, now);
   driven.advance(10);
   const later = renderedText(await driven.render() as never).join("\n");
-  assert.equal(later.includes("running 33s"), true, later);
+  assert.equal(later.includes("33s"), true, later);
   assert.equal(driven.calls.argv.length, 0);
 });
 
