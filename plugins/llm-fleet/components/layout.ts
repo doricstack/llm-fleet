@@ -189,6 +189,23 @@ export type Row = {
   state?: string;
   meta: Slot[];
   slot: Slot[];
+  /**
+   * Cells drawn at the left of the first line, after the title.
+   *
+   * A table whose first column is the row's title and whose second is a value
+   * belonging to it draws that value here rather than with the figures at the
+   * right: the cell stays beside the name it qualifies, while the figures that
+   * follow it keep the row's right edge.
+   */
+  lead?: Slot[];
+  /**
+   * The cells the title column holds, when the title is a table's first column.
+   *
+   * The title is padded or cut to this width, so the lead cells after it start
+   * at the same cell on every row, the header included. Absent, the title is
+   * drawn at the width of its own text.
+   */
+  titleWidth?: number;
   /** A line of its own, such as what a waiting job asks. */
   detail?: string;
   bar?: Bar;
@@ -635,9 +652,12 @@ export function renderRow(row: Row, width: number, narrowAt: number,
   const inner = Math.max(8, resting - offset);
   const stacked = resting < narrowAt;
   // The figures stand at the right when the row has them; a row without any
-  // states its slot there instead.
+  // states its slot there instead. A row that draws its own cells at the left
+  // has already given its first value that side, and the right cells are a
+  // table rather than one headline figure, so the first of them is left plain.
   const rightSlots = row.figures && row.figures.length ? row.figures
-    : row.slot.map((part, index) => index === 0 ? { ...part, bold: true } : part);
+    : row.lead?.length ? row.slot
+      : row.slot.map((part, index) => index === 0 ? { ...part, bold: true } : part);
   const fill = titleChip(row.state ?? "");
   // The figures take their room before the title does: a state or a verdict is
   // what the row is read for, and a title cut to keep it is still a title. What
@@ -664,13 +684,33 @@ export function renderRow(row: Row, width: number, narrowAt: number,
   // hover card with the rest of what it says.
   const metaWanted = row.meta.length > 0 && !stacked
     && row.title.length <= Math.floor(resting * 0.55) ? 12 : 0;
+  // A table's first column is its title, held to one width so that the cells
+  // after it start at the same place on every row. A row that names no width
+  // draws its title at the width of its own text, as everything else does.
+  const titleWanted = row.titleWidth ?? row.title.length;
+  // The lead cells are anchored at the left, after the title, rather than with
+  // the figures at the right. They take their room before the middle text: a
+  // caller that puts a cell here is drawing a column, and a column that moved
+  // under the text beside it would be worse than a shorter piece of context.
+  const leadRoom = Math.max(0, stacked
+    ? inner - 2 - rightWidth - 1
+    : inner - 2 - 1 - rightWidth - dotsWidth - titleWanted - (fill ? 2 : 0) - 1);
+  const lead = row.lead?.length ? fitSlots(row.lead, leadRoom) : [];
+  const leadWidth = slotsWidth(lead);
   const titleRoom = stacked ? resting - 2
-    : Math.max(MIN_TITLE, Math.min(row.title.length + (fill ? 2 : 0),
-        resting - 2 - 1 - rightWidth - dotsWidth - (metaWanted ? metaWanted + 1 : 0)));
+    : Math.max(MIN_TITLE, Math.min(titleWanted + (fill ? 2 : 0),
+        resting - 2 - 1 - rightWidth - dotsWidth - (leadWidth ? leadWidth + 1 : 0)
+          - (metaWanted ? metaWanted + 1 : 0)));
   const name = fit(row.title, titleRoom - (fill ? 2 : 0));
-  const title = titleNode(row, name, fill);
-  const titleWidth = name.length + (fill ? 2 : 0);
-  const metaRoom = inner - 2 - 1 - rightWidth - dotsWidth - titleWidth;
+  // The title's cells, then its text padded or cut to them: the lead cells
+  // after it are a column, so their start cannot depend on this row's label.
+  const titleCells = row.titleWidth === undefined ? name.length
+    : Math.min(row.titleWidth, titleRoom - (fill ? 2 : 0));
+  const label = fit(name, titleCells).padEnd(titleCells);
+  const title = titleNode(row, label, fill);
+  const titleWidth = label.length + (fill ? 2 : 0);
+  const metaRoom = Math.max(0, inner - 2 - 1 - rightWidth - dotsWidth - titleWidth
+    - (leadWidth ? leadWidth + 1 : 0));
   const meta = stacked || metaRoom < 6 ? [] : fitSlots(row.meta, metaRoom);
   const rightLine = dots
     ? box({ flexDirection: "row", gap: 1 }, right.length ? [dots.node, line(right)] : [dots.node])
@@ -686,6 +726,7 @@ export function renderRow(row: Row, width: number, narrowAt: number,
       box({ flexDirection: "row", gap: 1 }, [
         statusDot(row.state ?? ""),
         title,
+        ...(lead.length ? [line(lead)] : []),
         ...(meta.length ? [line(meta, { dimColor: true })] : []),
       ]),
       rightDrawn,
@@ -727,9 +768,15 @@ export function renderRow(row: Row, width: number, narrowAt: number,
       ]);
   };
   const lines: Node[] = [railed(rail ? rail.first : null, first)];
-  if (stacked && (right.length || dots)) {
+  if (stacked && (right.length || dots || lead.length)) {
+    // A narrow row puts the figures under the title. The lead cells belong with
+    // them rather than with the title, where they would be the first thing the
+    // width threw away.
+    const figures = lead.length
+      ? box({ flexDirection: "row", gap: 1 }, [line(lead), rightDrawn])
+      : rightDrawn;
     lines.push(railed(rail ? rail.rest : null, box({ marginLeft: 2, flexDirection: "row" },
-                                                    [rightDrawn])));
+                                                    [figures])));
   }
   if (second) {
     lines.push(railed(rail ? rail.rest : null, box({ marginLeft: 2, flexDirection: "row" },
@@ -810,7 +857,8 @@ export function renderRow(row: Row, width: number, narrowAt: number,
  */
 function hoverWords(row: Row, right: Slot[]): string {
   const figures = right.map((slot) => slot.text).join("").trim();
-  return (row.title + row.meta.map((slot) => slot.text).join("")
+  const lead = (row.lead ?? []).map((slot) => slot.text).join("").trim();
+  return (row.title + (lead ? "  " + lead : "") + row.meta.map((slot) => slot.text).join("")
           + (figures ? "  " + figures : "")).trim();
 }
 
@@ -1308,10 +1356,17 @@ export function fitSlots(slots: Slot[], room: number, chips = false): Slot[] {
   const mark = " " + TRUNCATION;
   // A slot that holds a column is padded to that column before anything is
   // measured, so what follows starts where the column ends rather than where
-  // this row's figure happened to stop.
-  const placed = (slot: Slot): Slot => slot.width === undefined ? slot
-    : { ...slot, text: slot.align === "left"
-        ? slot.text.padEnd(slot.width) : slot.text.padStart(slot.width) };
+  // this row's figure happened to stop. A value longer than the column is cut
+  // to it first: padding alone left it whole, and every cell after it moved
+  // right by the overhang on that row alone.
+  const placed = (slot: Slot): Slot => {
+    if (slot.width === undefined) {
+      return slot;
+    }
+    const text = slot.text.length > slot.width ? fit(slot.text, slot.width) : slot.text;
+    return { ...slot, text: slot.align === "left"
+      ? text.padEnd(slot.width) : text.padStart(slot.width) };
+  };
   for (const [index, slot] of slots.entries()) {
     const column = placed(slot).text;
     const shown = index === 0 || column.startsWith(" ") ? column : " " + column;

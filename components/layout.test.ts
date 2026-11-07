@@ -697,6 +697,28 @@ test("a slot drawn in a column of its own width keeps the next column in place",
   assert.equal(left[0]?.text, "3 MB    ");
 });
 
+test("a value longer than its column is cut to it, not pushed into the next", () => {
+  // A column's width is a claim that the cell after it starts there. Padding
+  // alone does not keep that claim for a value longer than the column: padEnd
+  // leaves it whole, and every cell after it moves right by the overhang.
+  const slots = [{ text: "self-service-workbench", width: 20, align: "left" as const },
+                 { text: "next", width: 6, align: "right" as const }];
+  const fitted = fitSlots(slots, 100);
+  assert.equal(fitted[0]?.text.length, 20);
+  assert.equal(fitted[0]?.text.endsWith("..."), true);
+  // A short value and a long one leave the second column the same width.
+  const short = fitSlots([{ text: "llm-fleet", width: 20, align: "left" as const },
+                          slots[1]!], 100);
+  assert.deepEqual(fitted.map((slot) => slot.text.length),
+                   short.map((slot) => slot.text.length));
+  assert.equal(fitted[1]?.text, short[1]?.text);
+  // A right-aligned column cuts from the same end: the value fills the cell and
+  // still ends where the column does, rather than overhanging on the right.
+  const right = fitSlots([{ text: "a-very-long-worktree-name", width: 10, align: "right" }], 100);
+  assert.equal(right[0]?.text.length, 10);
+  assert.equal(right[0]?.text.endsWith("..."), true);
+});
+
 test("a segment cut for room ends on a whole word rather than half of one", () => {
   // A segment can hold more than one fact, and the strip's last one holds a
   // duration and the word after it. Cutting on the character sliced that word

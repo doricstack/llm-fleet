@@ -198,8 +198,9 @@ test("every section names the figure its rows end in", () => {
   // the same cells as the values, so the names cannot sit off the columns.
   const pacer = built.groups.find((section) => section.title === "Pacer");
   assert.equal(named.get("Pacer"), undefined);
+  assert.deepEqual(pacer?.rows[0]?.lead?.map((cell) => cell.text.trim()), ["REPO"]);
   assert.deepEqual(pacer?.rows[0]?.slot?.map((cell) => cell.text.trim()),
-                   ["REPO", "WORKTREE", "ELAPSED"]);
+                   ["WORKTREE", "ELAPSED"]);
   assert.deepEqual(named.get("Pull requests"), [{ text: "CHECKS" }]);
   assert.deepEqual(named.get("Worktrees"), [{ text: "STATE" }]);
   assert.deepEqual(named.get("Skills"), [{ text: "VERDICT" }]);
@@ -338,19 +339,24 @@ test("the pacer section draws its slots as columns, then its settings", () => {
   assert.deepEqual(built.groups.map((entry) => entry.title), ["This session", "Pacer"]);
   const section = group(built, "Pacer");
   // The column names lead, drawn through the same cells as the values so they
-  // cannot sit off them; the slots follow, then the switch and the rest.
+  // cannot sit off them; the slots follow, then the switch and the rest. The
+  // repo is a lead cell: it is anchored left, beside the label, rather than
+  // carried to the right edge with the worktree and the time.
   assert.deepEqual(section.rows.map((row) => row.title),
                    ["", "Long", "Slot 2", "Slot 3", "Slot 4", "Settings"]);
+  assert.deepEqual(section.rows[0]?.lead?.map((cell) => cell.text), ["REPO"]);
   assert.deepEqual(section.rows[0]?.slot.map((cell) => cell.text),
-                   ["REPO", " WORKTREE", " ELAPSED"]);
+                   [" WORKTREE", " ELAPSED"]);
   // A held slot: the repo it runs for, its worktree and how long it has run,
   // each in its own column, under the names above them.
+  assert.deepEqual(section.rows[1]?.lead?.map((cell) => cell.text), ["llm-fleet"]);
   assert.deepEqual(section.rows[1]?.slot.map((cell) => cell.text),
-                   ["llm-fleet", " llm-fleet-private", " 10m"]);
+                   [" llm-fleet-private", " 10m"]);
   assert.equal(section.rows[1]?.state, "working");
   // A free slot keeps the columns and says free in the worktree's.
+  assert.deepEqual(section.rows[2]?.lead?.map((cell) => cell.text.trim()), [""]);
   assert.deepEqual(section.rows[2]?.slot.map((cell) => cell.text.trim()),
-                   ["", "free", ""]);
+                   ["free", ""]);
   assert.equal(section.rows[2]?.state, undefined);
   // Pacer's live settings travel with each read, so a change made while the
   // pane is open is drawn on the next one.
@@ -385,7 +391,7 @@ test("the slot columns hold their place however the slots change", () => {
   const quiet = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: false, pid: null, repo: null, startedAt: null }] })), "Pacer");
   const widths = (row: typeof crowded.rows[number] | undefined) =>
-    (row?.slot ?? []).map((cell) => cell.width);
+    [...(row?.lead ?? []), ...(row?.slot ?? [])].map((cell) => cell.width);
   // The columns are the same on a busier read, and the names sit in a row of the
   // same widths: a pane that re-reads pacer while a slot is busy moves no cell.
   assert.deepEqual(widths(crowded.rows[1]), widths(quiet.rows[1]));
@@ -393,8 +399,55 @@ test("the slot columns hold their place however the slots change", () => {
   // Every slot row shares them, so no cell pushes the one after it.
   assert.deepEqual(widths(crowded.rows[2]), widths(crowded.rows[1]));
   // A worktree named after an agent says so, and the repo is what it works on.
+  assert.deepEqual((crowded.rows[2]?.lead ?? []).map((cell) => cell.text.trim()),
+                   ["self-service-workbench"]);
   assert.deepEqual((crowded.rows[2]?.slot ?? []).map((cell) => cell.text.trim()),
-                   ["self-service-workbench", "agent af95b91b", "1m"]);
+                   ["agent af95b91b", "1m"]);
+});
+
+test("the pacer table holds its columns when the labels and repo names differ", () => {
+  // The label is the table's first column, the repo starts at the same cell
+  // after it whatever the label says, the worktree is anchored at the right and
+  // the elapsed cell holds the row's last cells. A repo longer than its column
+  // is cut there rather than pushing the two cells after it.
+  const section = group(pacerPane(pacerReading({ slots: [
+    { slot: 0, busy: true, pid: 1, repo: "llm-fleet-private", project: "llm-fleet",
+      startedAt: NOW - 60 },
+    { slot: 1, busy: true, pid: 2, repo: "self-service-workbench-x",
+      project: "self-service-workbench", startedAt: NOW - 60 }] })), "Pacer");
+  const width = 120;
+  const drawn = (row: typeof section.rows[number] | undefined) =>
+    renderedText(renderRow(row as Row, width, NARROW_AT));
+  const rows = [section.rows[0], section.rows[1], section.rows[2]].map(drawn);
+  // The first line is the dot, the label's column, the repo, the worktree and
+  // the elapsed cell, one text each.
+  assert.deepEqual(rows.map((line) => line.length), [5, 5, 5],
+                   JSON.stringify(rows));
+  // A table's first column is one width on every row, the header included, so
+  // the repo starts at the same cell after it: the dot and its gap, the label,
+  // and the gap before the repo.
+  const labels = rows.map((line) => line[1] ?? "");
+  const columns = labels.map((label) => 1 + 1 + label.length + 1);
+  assert.equal(new Set(columns).size, 1, "repo columns: " + JSON.stringify(columns));
+  // It is left-anchored, near the label rather than at the row's far edge.
+  assert.equal(Math.max(...columns) < width / 2, true,
+               "repo columns: " + JSON.stringify(columns));
+  // The header's word and the values below it are in cells of one width, and
+  // the word is drawn at the same end of its cell as the values.
+  const repos = rows.map((line) => line[2] ?? "");
+  assert.equal(new Set(repos.map((repo) => repo.length)).size, 1, JSON.stringify(repos));
+  assert.equal(repos[0]?.startsWith("REPO"), true);
+  assert.equal(repos[0]?.trimEnd(), "REPO");
+  // The long repo is cut to its cell rather than moving what follows it.
+  assert.equal(repos[2]?.endsWith("..."), true);
+  assert.equal(repos[2]?.length, repos[1]?.length);
+  // The worktree is right-anchored: its value ends at the same cell on every
+  // row, a fixed elapsed cell short of the row's end, and its cell keeps no
+  // trailing space.
+  const trees = rows.map((line) => line[3] ?? "");
+  const ends = rows.map((line) => width - (line[4]?.length ?? 0));
+  assert.equal(new Set(ends).size, 1, "worktree ends: " + JSON.stringify(ends));
+  assert.equal(trees.every((tree) => tree === tree.trimEnd()), true, JSON.stringify(trees));
 });
 
 test("a run whose folder names it twice is drawn once", () => {
@@ -403,14 +456,17 @@ test("a run whose folder names it twice is drawn once", () => {
   const same = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: true, pid: 1, repo: "w4", project: "w4", name: "Long (reserved)",
       startedAt: NOW - 60 }] })), "Pacer");
+  assert.deepEqual((same.rows[1]?.lead ?? []).map((cell) => cell.text.trim()), ["w4"]);
   assert.deepEqual((same.rows[1]?.slot ?? []).map((cell) => cell.text.trim()),
-                   ["w4", "", "1m"]);
+                   ["", "1m"]);
   // A post-merge check is named for what it checks, not for its scratch tree.
   const post = group(pacerPane(pacerReading({ slots: [
     { slot: 1, busy: true, pid: 2, repo: "post-merge-example-repo-c0c5f474.tree",
       project: "example-repo", startedAt: NOW - 60 }] })), "Pacer");
+  assert.deepEqual((post.rows[1]?.lead ?? []).map((cell) => cell.text.trim()),
+                   ["example-repo"]);
   assert.deepEqual((post.rows[1]?.slot ?? []).map((cell) => cell.text.trim()),
-                   ["example-repo", "example-repo-c0c5f474", "1m"]);
+                   ["example-repo-c0c5f474", "1m"]);
 });
 
 test("a busy slot's elapsed time counts on between reads", () => {
@@ -427,7 +483,8 @@ test("a busy slot's elapsed time counts on between reads", () => {
 test("a busy slot whose holder pacer could not name is busy, never free", () => {
   const section = group(pacerPane(pacerReading({ slots: [
     { slot: 0, busy: true, pid: null, repo: null, startedAt: null }] })), "Pacer");
-  assert.deepEqual(section.rows[1]?.slot.map((cell) => cell.text.trim()), ["", "held", ""]);
+  assert.deepEqual(section.rows[1]?.lead?.map((cell) => cell.text.trim()), [""]);
+  assert.deepEqual(section.rows[1]?.slot.map((cell) => cell.text.trim()), ["held", ""]);
   assert.equal(section.rows[1]?.state, "working");
 });
 
@@ -2421,7 +2478,9 @@ test("a held slot says what pacer could not record about it", () => {
   const slots = section.rows.filter((row) => row.key?.startsWith("pacer.slot:"));
   // The worktree column says who holds it, and a slot whose start was not
   // recorded draws no elapsed time rather than a nought.
+  assert.deepEqual(slots.map((row) => (row.lead ?? []).map((cell) => cell.text.trim())),
+                   [[""], [""], [""], [""]]);
   assert.deepEqual(slots.map((row) => row.slot.map((cell) => cell.text.trim())),
-                   [["", "fleet", ""], ["", "held", ""], ["", "free", ""], ["", "free", ""]]);
+                   [["fleet", ""], ["held", ""], ["free", ""], ["free", ""]]);
   assert.deepEqual(slots.map((row) => row.state), ["working", "working", undefined, undefined]);
 });

@@ -2336,7 +2336,13 @@ function runLabel(repo: string | null): string | null {
  * the same table twice: the headers and the values jumped under each other on
  * every read. A fixed table is the same table at every read, and a value too
  * long for its cell is cut to it instead of moving the cells after it.
+ *
+ * The label is a column too, so the repo starts at the same cell after it on
+ * every row: left-anchored beside the label, not carried to the right edge with
+ * the figures. The worktree stays right-anchored and the elapsed cell holds the
+ * row's last cells, so only the space between them moves as a slot changes.
  */
+const SLOT_LABEL = 12;
 const SLOT_PROJECT = 20;
 const SLOT_WORKTREE = 18;
 // Wide enough for "ELAPSED", the word above the column, and for "23h 59m".
@@ -2345,11 +2351,12 @@ const SLOT_ELAPSED = 7;
 /** The row above the slots, drawn through the same cells so it cannot sit off them. */
 function pacerHeaderRow(): Row {
   const cells: Slot[] = [
-    { text: "REPO", width: SLOT_PROJECT, align: "left", dim: true },
     { text: " WORKTREE", width: SLOT_WORKTREE + 1, align: "right", dim: true },
     { text: " ELAPSED", width: SLOT_ELAPSED + 1, align: "right", dim: true },
   ];
-  return { key: PACER_PREFIX + "header", title: "", meta: [], slot: cells };
+  return { key: PACER_PREFIX + "header", title: "", titleWidth: SLOT_LABEL, meta: [],
+           lead: [{ text: "REPO", width: SLOT_PROJECT, align: "left", dim: true }],
+           slot: cells };
 }
 
 /** One slot as a row of four columns: its number, project, worktree and elapsed. */
@@ -2374,12 +2381,14 @@ function pacerSlotRow(slot: PacerSlot, now: number): Row {
   // A column after the first carries its own leading gap, so the row and the
   // names above it measure the same line.
   const cells: Slot[] = [
-    { text: project, width: SLOT_PROJECT, align: "left", dim: quiet },
     { text: " " + worktree, width: SLOT_WORKTREE + 1, align: "right", dim: quiet },
     { text: " " + elapsed, width: SLOT_ELAPSED + 1, align: "right", dim: quiet },
   ];
-  return slot.busy ? { key, title, state: "working", meta: [], slot: cells }
-    : { key, title, meta: [], slot: cells };
+  const row: Row = { key, title, titleWidth: SLOT_LABEL, meta: [],
+                     lead: [{ text: project, width: SLOT_PROJECT, align: "left",
+                              dim: quiet, bold: true }],
+                     slot: cells };
+  return slot.busy ? { ...row, state: "working" } : row;
 }
 
 /** One finished run: passed, refused, stopped by a signal, or the exit it failed with. */
