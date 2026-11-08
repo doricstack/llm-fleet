@@ -36,6 +36,20 @@ ARROW = re.compile(r"\((?P<params>[^()]*)\)\s*(?::\s*[^=]+)?=>")
 ENTRY = re.compile(r"^\s+\w+:\s*\"(?P<path>readers/\w+\.py)\",$", re.MULTILINE)
 FIXED_PROGRAMS = ("claude", "ps", "git", "lsof", "gh", "tmux")
 PRIVACY_URL = "https://doricstack.com/privacy"
+# The README states the module's call list as the listing's answer to what the
+# mod touches, so a member added to the module without a line there is a claim
+# the directory reads as untrue. Everything the engine hands over counts, call
+# or property; a bracket lookup or a name taken off the engine would read past
+# this, so the module is refused those forms.
+NAME = re.compile(r"\$\.(?P<group>[A-Za-z0-9_]+)\.(?P<method>[A-Za-z0-9_]+)")
+CALL_SECTION = re.compile(r"^### Calls from Claude Code$(?P<body>.*?)(?=^### |\Z)",
+                          re.MULTILINE | re.DOTALL)
+BRACKET = re.compile(r"\$\s*\[|\$\.\s*$|(?:const|let|var)\s*\{[^}]*\}\s*=\s*\$")
+
+
+def calls_in(text: str, pattern: re.Pattern[str] = NAME) -> set[str]:
+    return {"$." + found.group("group") + "." + found.group("method")
+            for found in pattern.finditer(text)}
 
 
 def code_only(text: str) -> str:
@@ -179,6 +193,24 @@ class FleetDirectoryRules(unittest.TestCase):
     def test_the_readme_links_the_privacy_policy(self):
         readme = README.read_text(encoding="utf-8")
         self.assertRegex(readme, r"\[[^\]]*Privacy[^\]]*\]\(" + re.escape(PRIVACY_URL) + r"\)")
+
+    def test_the_readme_names_every_call_the_module_makes(self):
+        # The README's call list is what the listing answers with, and it had
+        # drifted: five calls were missing, one of them a file read that its own
+        # prose said did not happen. Both directions are checked, so a name left
+        # in the list after the call went is a wrong answer too.
+        code = code_only(HOOKS.read_text(encoding="utf-8"))
+        made = calls_in(code)
+        self.assertTrue(made)
+        section = CALL_SECTION.search(README.read_text(encoding="utf-8"))
+        self.assertIsNotNone(section)
+        named = calls_in(section.group("body") if section else "", NAME)
+        self.assertEqual(sorted(made ^ named), [])
+
+    def test_no_call_is_written_in_a_form_the_call_list_cannot_read(self):
+        """A bracket lookup or a name taken off the engine would hide a call from the list."""
+        found = BRACKET.findall(code_only(HOOKS.read_text(encoding="utf-8")))
+        self.assertEqual(found, [])
 
     def test_no_module_reads_an_object_kind_by_reflection(self):
         found = []

@@ -27,3 +27,12 @@ include make/test.mk
 include make/quality.mk
 include make/export.mk
 include make/scripts.mk
+
+# pacer holds one of the machine's heavy-run slots around each heavy target.
+# The fragment defines PACED, which expands to `<pacer> run -- ` or to nothing
+# when pacer is off or unreadable, so a target runs bare rather than failing.
+# It is reached through `personal/`, which the export never publishes: the
+# shared directory it names is private tooling. Until 2026-11-07 no target here
+# asked for a slot, which is why a mutation run that held the whole machine for
+# ninety minutes never showed in the pane.
+-include personal/make/pacer.mk

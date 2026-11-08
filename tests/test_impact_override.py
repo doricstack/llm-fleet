@@ -251,7 +251,7 @@ class SelectorContractTests(unittest.TestCase):
         # than the repository it was asked about.
         recipe = (ROOT / "make" / "test.mk").read_text(encoding="utf-8")
         exported = [line for line in recipe.splitlines()
-                    if '-C "$$trial/public"' in line and " test " in line]
+                    if '-C "$$trial/public"' in line and " test-full " in line]
         self.assertEqual(len(exported), 1, exported)
         # Both destinations reach a run through the environment, so the
         # exported tree's make is started with both emptied.
@@ -259,6 +259,45 @@ class SelectorContractTests(unittest.TestCase):
         # A person may still name the destination on the command line, which
         # reaches every make the run starts; the exported tree's is emptied too.
         self.assertRegex(exported[0], r"\bJUNIT_XML=(\s|;|$)")
+
+    def test_the_targets_route_the_tiers_they_name(self) -> None:
+        # CI's pull-request check calls the selector directly, so a change that
+        # pointed `test` back at the whole suite, or narrowed `test-ci` to the
+        # selector, would pass CI while quietly moving what a person gets. The
+        # routing is read here, where a pull request does check it.
+        recipe = (ROOT / "make" / "test.mk").read_text(encoding="utf-8")
+        lines = recipe.splitlines()
+
+        def body_of(target: str) -> list[str]:
+            start = next(i for i, line in enumerate(lines)
+                         if line.startswith(target + ":")
+                         and not line.startswith(target + "-"))
+            body: list[str] = []
+            for line in lines[start + 1:]:
+                if not line.startswith("\t"):
+                    break
+                body.append(line)
+            return body
+
+        # A commit runs what it affects, at the tier that checks a commit.
+        commit = "\n".join(body_of("test"))
+        self.assertIn(".cits/test-impact.sh", commit)
+        self.assertIn("--tier commit", commit)
+        self.assertNotIn("test-report", commit)
+
+        # The whole suite kept its own name, and it is what a release runs: the
+        # export round trip's own tree is handed it, and test-ci calls it.
+        full_head = next(line for line in lines if line.startswith("test-full:"))
+        self.assertIn("test-report", full_head.split("##", 1)[0])
+        self.assertIn("--pattern 'test_*.py'", "\n".join(body_of("test-report")))
+        whole = "\n".join(body_of("test-ci"))
+        self.assertIn("$(MAKE) test-full", whole)
+        self.assertNotRegex(whole, r"\$\(MAKE\) test(\s|$)")
+
+        # The branch check is the push tier, diffed against the base branch.
+        pushed = "\n".join(body_of("test-impacted"))
+        self.assertIn("--tier push", pushed)
+        self.assertIn("origin/main", pushed)
 
 
 class ShellTests(unittest.TestCase):
@@ -325,6 +364,112 @@ class ShellTests(unittest.TestCase):
                                text=True, check=False)
         self.assertEqual(probe.returncode, 0, probe.stdout + probe.stderr)
         self.assertIn("Usage:", probe.stdout)
+
+
+class NoHistoryTests(unittest.TestCase):
+    """A published tree: no repository, so nothing to diff, and still testable.
+
+    An exported or downloaded copy carries no .git. `make test` is the target
+    that tree publishes, so it has to run something there: refusing left the
+    published tree's test target broken, and a run of nothing reads as a pass.
+    """
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "components").mkdir()
+        (self.root / "components" / "a.test.ts").write_text("// suite\n", encoding="utf-8")
+        # Both layers, because a glob that names one and drops the other would
+        # run components and leave everything under config unrun.
+        (self.root / "config").mkdir()
+        (self.root / "config" / "loader.test.ts").write_text("// suite\n", encoding="utf-8")
+
+    def install_recorders(self) -> Path:
+        """Stand-ins that write down what they were started with.
+
+        The plan is not the run: a case that reads only the printed plan passes
+        over a run line replaced with `true`. These record what was started.
+        """
+        log = self.root / "ran.log"
+        recorder = (
+            "import json, os, sys\n"
+            "with open(os.environ['STUB_LOG'], 'a', encoding='utf-8') as handle:\n"
+            "    handle.write(json.dumps({'program': os.path.basename(sys.argv[0]),\n"
+            "        'argv': sys.argv[1:]}) + '\\n')\n")
+        (self.root / "scripts").mkdir(exist_ok=True)
+        (self.root / "scripts" / "typescript-suite.py").write_text(recorder, encoding="utf-8")
+        (self.root / "scripts" / "record.py").write_text(recorder, encoding="utf-8")
+        (self.root / "Makefile").write_text(recorder_makefile(), encoding="utf-8")
+        return log
+
+    def ran(self, log: Path) -> list[dict]:
+        if not log.exists():
+            return []
+        return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+    def test_the_whole_suite_runs_where_there_is_no_history(self) -> None:
+        result = run_selector("--tier", "commit", "--repo", str(self.root), "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("  $ make test-report\n", result.stdout)
+        self.assertIn("--suite components/a.test.ts", result.stdout)
+        self.assertIn("--suite config/loader.test.ts", result.stdout)
+        self.assertIn("  $ make doc-format\n", result.stdout)
+        self.assertIn("no history", result.stdout)
+        self.assertNotIn(NONE_AFFECTED, result.stdout)
+
+    @unittest.skipUnless(shutil.which("make"), "the run needs make, which this machine does not have")
+    def test_the_run_really_starts_the_suite_and_every_suite_file(self) -> None:
+        # The run line is the half a dry run never reaches: replacing it with a
+        # no-op would still print "the whole suite passed".
+        log = self.install_recorders()
+        result = run_selector("--tier", "commit", "--repo", str(self.root),
+                              env=clean_environment(STUB_LOG=str(log)))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = [(entry["program"], tuple(entry["argv"])) for entry in self.ran(log)]
+        self.assertIn(("record.py", ("test-report",)), calls)
+        self.assertIn(("record.py", ("doc-format",)), calls)
+        suites = [entry["argv"][-1] for entry in self.ran(log) if "--suite" in entry["argv"]]
+        self.assertCountEqual(suites, ["components/a.test.ts", "config/loader.test.ts"])
+
+    @unittest.skipUnless(shutil.which("git"), "the case needs git to make a repository")
+    def test_a_repository_with_no_commit_also_runs_the_whole_suite(self) -> None:
+        # `git init` and nothing committed is a repository with no history, the
+        # same tree an interrupted clone leaves: it used to stop at the base
+        # check, which is the defect this block exists for.
+        subprocess.run(["git", "init", "-q"], cwd=str(self.root), check=True,
+                       capture_output=True, text=True, env=clean_environment())
+        result = run_selector("--tier", "commit", "--repo", str(self.root), "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("  $ make test-report\n", result.stdout)
+        self.assertIn("no history", result.stdout)
+
+    def test_a_caller_that_requires_a_change_is_refused_without_history(self) -> None:
+        # --require-change is a check that there was something to measure. A
+        # whole-suite run answers a different question, so it is not that check.
+        result = run_selector("--tier", "commit", "--repo", str(self.root),
+                              "--require-change", "--dry-run")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("requires a change", result.stderr)
+        self.assertNotIn("--- plan ---", result.stdout)
+
+    def test_a_base_the_caller_named_is_still_refused_without_history(self) -> None:
+        # Naming a base is a question about history; answering it with the whole
+        # suite would answer a different one.
+        result = run_selector("--tier", "commit", "--repo", str(self.root),
+                              "--base", "origin/main", "--dry-run")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        # A machine with no git at all refuses a named base for its own reason.
+        # Both are the refusal this case is about, and neither is a run.
+        self.assertRegex(result.stderr, "names no commit here|git is not installed")
+        self.assertNotIn("--- plan ---", result.stdout)
+
+    def test_the_push_tier_still_refuses_without_history(self) -> None:
+        # The widening belongs to the commit tier alone: a push measures a
+        # branch, and a tree with no branch has nothing to measure.
+        result = run_selector("--tier", "push", "--repo", str(self.root), "--dry-run")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertNotIn("--- plan ---", result.stdout)
 
 
 class MakeShellTests(unittest.TestCase):

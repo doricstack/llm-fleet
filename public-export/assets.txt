@@ -1,1 +1,2 @@
 plugins/llm-fleet/.claude-plugin/icon.png
+plugins/llm-fleet/assets/pane-example.png

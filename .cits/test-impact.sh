@@ -27,6 +27,12 @@
 #              tier on main and on a release tag, so the whole suite still runs
 #              on every change that lands.
 #
+#              A tree carrying no .git, which is what an exported or a
+#              downloaded copy is, has no change set to measure. The commit tier
+#              runs the whole suite there rather than refusing: the published
+#              tree's `make test` has to work on its own. Naming --base is a
+#              question about history, so that still refuses without one.
+#
 # Usage: .cits/test-impact.sh --tier commit|push|ci [--base REF] [--repo PATH] [--require-change] [--dry-run]
 #        --dry-run prints the commands without running them.
 #        --require-change refuses a change set that comes out empty, for a
@@ -38,15 +44,19 @@ set -euo pipefail
 
 tier=""
 base=""
+base_given=0
 repo="$PWD"
 dry_run=0
 require_change=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --tier) tier="$2"; shift 2 ;;
-    --base) base="$2"; shift 2 ;;
-    --repo) repo="$2"; shift 2 ;;
+    --tier) [ "$#" -ge 2 ] || { echo "test-impact: --tier needs a value" >&2; exit 2; }
+      tier="$2"; shift 2 ;;
+    --base) [ "$#" -ge 2 ] || { echo "test-impact: --base needs a value" >&2; exit 2; }
+      base="$2"; base_given=1; shift 2 ;;
+    --repo) [ "$#" -ge 2 ] || { echo "test-impact: --repo needs a value" >&2; exit 2; }
+      repo="$2"; shift 2 ;;
     --require-change) require_change=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     -h|--help)
@@ -61,7 +71,13 @@ case "$tier" in
 esac
 
 cd "$repo" || { echo "test-impact: cannot enter $repo" >&2; exit 2; }
-command -v git >/dev/null 2>&1 || { echo "test-impact: git is not installed" >&2; exit 2; }
+# git is asked for a change set, not for a working tree. A downloaded or
+# exported copy carries neither a repository nor the program, and the commit
+# tier still has to run there, so the absence is recorded and decided with the
+# history test below rather than refused here. A tier that has to measure a
+# branch still refuses without the program.
+git_available=0
+command -v git >/dev/null 2>&1 && git_available=1
 
 # The interpreter is resolved the way the make targets resolve theirs, so a host
 # where only `python` answers runs the same suite instead of failing to start
@@ -122,6 +138,60 @@ if [ "$tier" = "ci" ]; then
   echo "  \$ make test-ci"
   [ "$dry_run" -eq 1 ] && exit 0
   exec make test-ci
+fi
+
+# --- a tree with no history -----------------------------------------------------
+# An exported or downloaded copy carries no .git, so there is no change set to
+# measure and nothing to select from. The commit tier is the target such a tree
+# publishes, and it runs what it can prove there: the whole scaffold suite and
+# every TypeScript suite. Refusing instead is what this block replaces, because
+# a one-line error is not a test run and the published tree's `make test` has to
+# work on its own. A caller that names a base has asked a question about
+# history, so that still refuses below rather than answering a different one.
+# The test is history, not a .git directory: `git init` with nothing committed
+# has a repository and still no change set, and a clone interrupted before its
+# first checkout is the same tree.
+no_history=0
+if [ "$tier" = "commit" ] && [ "$base_given" -eq 0 ]; then
+  if [ "$git_available" -eq 0 ] \
+     || ! git rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null 2>&1; then
+    no_history=1
+  fi
+fi
+if [ "$no_history" -eq 1 ] && [ "$require_change" -eq 1 ]; then
+  # A caller that requires a change set is checking that there was something to
+  # measure. A whole-suite run answers a different question, so it refuses here
+  # rather than reading as a pass over a change nobody could see.
+  echo "test-impact: this tree has no history, and this caller requires a change against one" >&2
+  exit 2
+fi
+if [ "$no_history" -eq 1 ]; then
+  echo "=== test-impact (tier=commit, no history) ==="
+  echo "  - the whole suite: this tree carries no history to measure a change against"
+  reports_note
+  plan_header
+  echo "  \$ make test-report"
+  for suite in components/*.test.ts config/*.test.ts; do
+    [ -f "$suite" ] || continue
+    echo "  \$ $python scripts/typescript-suite.py --suite $suite"
+  done
+  echo "  \$ make doc-format"
+  # The host's test kit cannot run outside a session, so those suites are named
+  # as covered by CI here exactly as the ordinary plan names them.
+  echo "  - plugins/llm-fleet runs through the host's test kit; CI covers it (make test-pane)"
+  [ "$dry_run" -eq 1 ] && exit 0
+  make test-report
+  for suite in components/*.test.ts config/*.test.ts; do
+    [ -f "$suite" ] || continue
+    "$python" scripts/typescript-suite.py --suite "$suite"
+  done
+  make doc-format
+  echo "test-impact: the whole suite passed; this tree carries no history to select from."
+  exit 0
+fi
+if [ "$git_available" -eq 0 ]; then
+  echo "test-impact: git is not installed" >&2
+  exit 2
 fi
 
 # --- what changed -------------------------------------------------------------

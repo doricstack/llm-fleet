@@ -31,6 +31,7 @@ scripts/check-doc-format.py
 scripts/statusline-demo.py
 scripts/typescript-suite.py
 scripts/host-drift.py
+scripts/render-pane-image.py
 scripts/render-review.py
 scripts/plugin-boundary.py
 scripts/version.py
@@ -80,6 +81,8 @@ plugins/llm-fleet/components/version.ts
 components/pressable.test.ts
 plugins/llm-fleet/assets/readme-header.svg
 plugins/llm-fleet/assets/pane-example.svg
+plugins/llm-fleet/assets/pane-example.png
+plugins/llm-fleet/assets/pane-example.source
 plugins/llm-fleet/assets/logo-horizontal-color-on-dark.svg
 plugins/llm-fleet/assets/logo-horizontal-color-on-light.svg
 plugins/llm-fleet/assets/symbol-color-on-dark.svg
@@ -124,6 +127,7 @@ tests/test_typescript_report.py
 tests/test_public_export.py
 tests/test_publication.py
 tests/test_doc_format.py
+tests/test_render_pane_image.py
 tests/test_config_loader.py
 tests/test_host_drift.py
 tests/test_host_update.py

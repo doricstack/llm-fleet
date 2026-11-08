@@ -9,8 +9,8 @@ dependency to get one, so the report is written here, from the result object
 unittest already produces. The format is not this repository's invention; it is
 the one every gate and every hosted runner reads.
 
-The discovery is the one `make test` publishes, so a run here and a run there
-are the same tests rather than two lists to keep in step.
+The discovery is the one `make test-full` publishes, so a run here and a run
+there are the same tests rather than two lists to keep in step.
 
     python3 scripts/test-report.py
     python3 scripts/test-report.py --junit-xml report.xml

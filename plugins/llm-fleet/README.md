@@ -72,6 +72,8 @@ Everything else is in the configuration file. Each section can be shown or hidde
 
 A path in the configuration may be written with `~/`, which expands from `HOME`; a relative path resolves beside the configuration file, and an absolute path follows the running platform. A disabled source stays disabled.
 
+`hooks/llm-fleet.ts` reads one local file of its own: the speech clip the voice helper writes when spoken answers are on, read as bytes, played through Claude Code's audio, and discarded. It reads no conversation text and no other file. Everything else it draws comes from the readers it starts, from Claude Code's own event payloads, and from the plugin store. Every other local read in this plugin happens in one of the Python readers, each of which is named below with what it reads and where the reading goes: none of them writes a reading anywhere but this machine, and none sends one anywhere. The one exception is documented under "What it sends": the daily rate-card fetch, which sends nothing of yours.
+
 The plugin reads the session roster through the `claude` command, transcripts and task lists under the homes you configure, and, when you switch it on, pull requests through the `gh` command. The outside commands the readers start (`claude`, `gh`, `git`, `ps`, `lsof`, the speech command and your own sections' commands) run with your Anthropic variables and the common provider API key variables removed from their environment, and the configuration can add to that list but never shorten it.
 
 The pane draws in the terminal, the Claude desktop app and the VS Code extension, on the same render site each app provides.
@@ -94,12 +96,14 @@ Every hook either answers its own command or drawing and returns, or passes the 
 | `command.run` | Answers those four commands and nothing else. |
 | `ui.render` | Draws the pane, the band above the prompt and the key tip under it. |
 | `ui.close` | Records that the pane shut, so the next command opens it rather than closing a pane that is already gone. |
-| `prompt.submit` | Records this session as the one you are typing in, so alerts reach you here, and lands any write a paint left waiting. It hands the prompt on unchanged and never reads, edits or drops its text. |
+| `prompt.submit` | Records this session as the one you are typing in, so alerts reach you here, and lands any write a paint left waiting. It hands the prompt on unchanged and never reads, edits or drops its text. The event carries this name, and `prompt.submit` is also the name of the call that raises it, so this hook sees every such call any code in the session makes. It only reads the session identity from it. |
 | `session.end` | Stops the timers this session started. |
 
 ### The programs it runs, and why
 
 Every program runs as your user, from the list below, with its arguments built by the plugin and never through a shell.
+
+The one place a command is assembled rather than written out in full is `hooks/llm-fleet.ts` around its only `$.process.run` call: it takes the interpreter from the plugin option, joins a reader's script name and that reader's own arguments to it, and starts it. The reader it starts is always one of the fixed names in the table below, so the program is your Python interpreter and the script is one of the plugin's own; nothing from a reading, a session or a configuration can add a program or an argument to it.
 
 | Program | Why |
 | --- | --- |
@@ -125,9 +129,13 @@ The outside commands run with your Anthropic variables and the common provider A
 
 The hooks module reads terminal identity only: `TERM_PROGRAM`, `TMUX`, `ITERM_SESSION_ID` and `LC_TERMINAL`. The Python scripts read `FLEET_CONFIG`, `HOME`, `USERPROFILE`, `CLAUDE_CONFIG_DIR`, `PATH`, `TMPDIR` and the XDG and Windows folder variables to find your configuration, homes and commands, and hand the rest of the environment, minus the removed variables above, to the commands they start. None of it is sent anywhere.
 
+No part of this plugin reads a credential from the environment or from a file: there is no API key, token or password among the names above, the pane and the hooks module read no environment variable at all beyond the four terminal-identity ones, and the plugin ships no credential of its own. Anything that needs a credential uses your own `gh` login through the `gh` command, which keeps and sends it itself; the plugin neither sees it nor forwards it.
+
 ### Calls from Claude Code
 
-Every mods API call it makes is part of Claude Code's own surface, `$.ui.notify` included; it adds no namespace and calls no method another plugin adds. The paint recolors the element tree it was handed by walking that tree's props and rewriting the color values in it (`components/palette.ts`); it reads nothing else and draws nothing new.
+Every mods API call it makes is part of Claude Code's own surface, and none of them comes from another plugin. The module uses `$.ui.open`, `$.ui.close`, `$.ui.invalidate`, `$.ui.resolve`, `$.ui.panes`, `$.ui.toast`, `$.ui.copy` and `$.ui.notify`; `$.store.get` and `$.store.set`; `$.clock.now` and `$.clock.every`; `$.state.get` and `$.state.set`; `$.env.get("NAME")`; `$.process.run`; `$.fs.read` and `$.audio.play` for the speech clip; `$.command.register` for the pane's own commands; `$.plugin.root` to place its own assets; and `$.session.version`, `$.session.usage`, `$.session.model`, `$.session.id` and `$.session.send`. `$.ui.notify` shows a desktop notification for a session that failed or is waiting on you, on this machine; it is Claude Code's notification, not a message to another service. The only names ever read from the environment are the four terminal-identity variables listed above.
+
+The paint recolors the element tree it was handed by walking that tree's props and rewriting the color values in it (`components/palette.ts`); it reads nothing else and draws nothing new.
 
 ## Privacy
 

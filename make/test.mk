@@ -1,12 +1,15 @@
-.PHONY: test test-report test-impacted test-unit test-doc-format test-export test-config test-config-parity test-readers test-components test-components-drift test-typescript test-engine test-pane plugin-validate install-check test-ci test-export-roundtrip mutants mutants-measure
+.PHONY: test test-full test-report test-impacted test-unit test-doc-format test-export test-config test-config-parity test-readers test-components test-components-drift test-typescript test-engine test-pane plugin-validate install-check test-ci test-export-roundtrip mutants mutants-measure
 
-test: test-report ## Run every implemented scaffold test
+test: ## Run the tests this change affects
+	.cits/test-impact.sh --tier commit --repo "$(CURDIR)"
+
+test-full: test-report ## Run every implemented scaffold test
 
 test-report: ## Run every implemented scaffold test, writing a JUnit report when JUNIT_XML is set
-	$(TEST_ENV) $(PYTHON) scripts/test-report.py --directory tests --pattern 'test_*.py' $(if $(JUNIT_XML),--junit-xml "$(JUNIT_XML)",)
+	$(TEST_ENV) $(PACED)$(PYTHON) scripts/test-report.py --directory tests --pattern 'test_*.py' $(if $(JUNIT_XML),--junit-xml "$(JUNIT_XML)",)
 
-test-impacted: ## Run only the tests the working tree's changes affect
-	.cits/test-impact.sh --tier commit --repo "$(CURDIR)"
+test-impacted: ## Run the tests this branch affects, diffed against origin/main
+	.cits/test-impact.sh --tier push --base $(or $(BASE),origin/main) --repo "$(CURDIR)"
 
 mutants: script-mutation-gate ## Measure what changed through the receipt store and judge it; a survivor fails
 
@@ -115,7 +118,7 @@ install-check: ## Validate the repository as the marketplace the install line na
 
 test-ci: ## Run all CI checks, including an isolated exported-tree round trip
 	@$(MAKE) quality
-	@$(MAKE) test
+	@$(MAKE) test-full
 	@$(MAKE) test-readers
 	@$(MAKE) test-components
 	@$(MAKE) test-components-drift HOST_DECLARATION_MAY_BE_ABSENT=1
@@ -134,6 +137,6 @@ test-export-roundtrip: ## Export the tree into a scratch folder, run its own che
 EXPORT_ROUNDTRIP = set -euo pipefail; trial=$$(mktemp -d); trap 'rm -rf "$$trial"' EXIT; \
 	  $(MAKE) export-check PUBLIC_TREE="$$trial/public" > "$$trial/preview.log"; \
 	  $(MAKE) export PUBLIC_TREE="$$trial/public" > "$$trial/export.log"; \
-	  FLEET_TS_JUNIT_DIR= FLEET_JUNIT_XML= $(MAKE) -C "$$trial/public" quality test test-readers test-components test-engine test-typescript test-config-parity build STATE_DIR="$$trial/state" JUNIT_XML=; \
+	  FLEET_TS_JUNIT_DIR= FLEET_JUNIT_XML= $(MAKE) -C "$$trial/public" quality test-full test-readers test-components test-engine test-typescript test-config-parity build STATE_DIR="$$trial/state" JUNIT_XML=; \
 	  $(MAKE) -C "$$trial/public" export-check PUBLIC_TREE="$$trial/roundtrip" > "$$trial/roundtrip.log"; \
 	  echo 'Isolated export and round-trip validation passed.'

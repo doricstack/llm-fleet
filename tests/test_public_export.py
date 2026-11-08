@@ -380,7 +380,7 @@ class MakeGateTests(unittest.TestCase):
         self.assertIn("Injected preview failure", output)
         self.assertNotEqual(result.returncode, 0, output)
         self.assertEqual(calls.read_text().splitlines(),
-                         ["quality", "test", "test-readers", "test-components",
+                         ["quality", "test-full", "test-readers", "test-components",
                           "test-components-drift", "test-engine", "test-typescript",
                           "test-config-parity", "build", "export-check"])
         self.assertNotIn("Isolated export and round-trip validation passed.", output)

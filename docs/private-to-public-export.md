@@ -45,7 +45,7 @@
 
 | Item | Value |
 | --- | --- |
-| 1 | `make test` |
+| 1 | `make test-full` |
 | 2 | `make build` |
 | 3 | `make export-check PUBLIC_TREE=/tmp/fleet-public-preview` |
 | 4 | `make export PUBLIC_TREE=/tmp/fleet-public-tree` |

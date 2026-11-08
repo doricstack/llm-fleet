@@ -30,7 +30,7 @@ script-plugin-boundary: ## Invoke plugin-boundary.py on this source tree
 
 script-mutation-gate: ## Run the gate: plan, measure what changed, record every slice, judge
 	@set -euo pipefail; test -f scripts/mutation-gate.py || { echo 'Unavailable: the gate that writes mutation receipts is kept with the private checkout; this tree carries the harness, which is `make mutants-measure`.' >&2; exit 2; }
-	$(PYTHON) scripts/mutation-gate.py
+	$(PACED)$(PYTHON) scripts/mutation-gate.py
 
 script-mutation-check: ## Invoke mutation-check.py on a copy of this tree; pick mutants with MUTANTS
 	$(PYTHON) scripts/mutation-check.py --root "$(ROOT)" --node "$(NODE)" $(foreach id,$(MUTANTS),--only $(id))

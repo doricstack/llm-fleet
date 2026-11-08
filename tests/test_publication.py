@@ -12,6 +12,8 @@ one file and not the others fails here, before anyone types a line that answers
 import json
 from pathlib import Path
 import re
+import subprocess
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -110,6 +112,17 @@ class Assets(unittest.TestCase):
 
 
 class Export(unittest.TestCase):
+    def test_the_readme_picture_is_the_tree_it_ships_with(self) -> None:
+        """The front page showed 0.4.22 for months, because its image was a release upload."""
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        pictures = re.findall(r"!\[[^\]]*\]\((?P<url>[^)\s]+)\)", readme)
+        self.assertIn("plugins/llm-fleet/assets/pane-example.png", pictures)
+        self.assertFalse(any("releases/download" in url for url in pictures))
+        checked = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "render-pane-image.py"), "--check"],
+            cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
     def test_the_published_tree_carries_what_an_install_reads(self) -> None:
         listed = set(ALLOWLIST.read_text(encoding="utf-8").splitlines())
         for path in (PUBLISHED, MANIFEST, PLUGIN / "README.md", ROOT / "README.md"):

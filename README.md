@@ -50,7 +50,7 @@ Your prompt
 
 ## What the pane shows
 
-![The llm-fleet pane, drawn from a sample machine](https://github.com/doricstack/llm-fleet/releases/download/v0.4.22/pane-demo-0.4.22.gif)
+![The llm-fleet pane, drawn from a sample machine](plugins/llm-fleet/assets/pane-example.png)
 
 The figures at the top are the controls: press one and the pane narrows to those rows, and a line under the controls says how many rows it shows, with **Show all** to widen it again. The pane opens on what failed when anything did, without hiding a section: the sections holding a failure are opened on it and the rest are folded where they are, and any fold you press yourself stands.
 
@@ -151,7 +151,7 @@ Everything the plugin reads comes from one configuration file. [The configuratio
 You need Python 3.11 or newer, Make and a POSIX shell (Git Bash or WSL on Windows). The TypeScript suites need Node 22.6 or newer and report themselves unavailable without it rather than passing.
 
 ```
-make test
+make test-full
 make test-readers
 make test-components
 make test-engine

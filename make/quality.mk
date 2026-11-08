@@ -1,6 +1,12 @@
-.PHONY: quality lint typecheck violations doc-format plugin-boundary version version-check
+.PHONY: quality lint typecheck violations doc-format plugin-boundary version version-check pane-image pane-image-check
 
-quality: lint doc-format violations plugin-boundary version-check ## Run the implemented scaffold quality checks
+quality: lint doc-format violations plugin-boundary version-check pane-image-check ## Run the implemented scaffold quality checks
+
+pane-image: ## Draw the README's pane image from the SVG beside it
+	$(PYTHON) scripts/render-pane-image.py
+
+pane-image-check: ## Refuse a README image that is not the picture of the committed SVG
+	$(PYTHON) scripts/render-pane-image.py --check
 
 version: ## Write the pane's version constant from the manifest
 	$(MAKE) script-version
