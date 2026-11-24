@@ -1,0 +1,9 @@
+{
+  "stateDir": "$HOME/llm-fleet/state",
+  "sources": {
+    "skills": {
+      "enabled": true,
+      "directory": "$HOME/skills"
+    }
+  }
+}

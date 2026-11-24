@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { DEFAULT_KEYS, HIDE_PREFIX, SHOW_ALL_PREFIX, allErrors, paneFrom, prUrl, replyKey,
-         replyText, shortCommand, unreadableSources,
+         replyText, sectionFolded, shortCommand, unreadableSources,
          worktreeNextStep, worktreeOwnerNote, type PaneOptions }
   from "../plugins/llm-fleet/components/pane.ts";
 import { GEOMETRY } from "../plugins/llm-fleet/components/options.ts";
@@ -53,7 +53,7 @@ test("a press on a figure narrows the pane to that state, and the counts stay wh
   assert.equal(paneFrom(reading, options()).focus, undefined);
 });
 
-test("the pane opens on what failed when nothing was pressed, and never on nothing", () => {
+test("the pane opens the section holding a failure, and every other keeps its configured fold", () => {
   const failing = snapshot({
     roster: { state: "ready", jobs: [{ ...JOB, state: "failed" },
                                      { ...JOB, id: "run", name: "Building the pane",
@@ -62,20 +62,27 @@ test("the pane opens on what failed when nothing was pressed, and never on nothi
               sources: { jobs: "ready", interactive: "empty" } },
   });
   // Opened on a failure with nothing pressed: the section holding it is open on
-  // that row, and every other section is still in the pane, folded where it is.
-  // A heading the pane dropped is a place the section picker promises and the
-  // pane does not draw.
-  const opened = paneFrom(failing, options({ focusAuto: true }));
+  // that row, though the configuration folds it, and every other section is
+  // still in the pane at the fold the configuration gives it. The open only
+  // opens: Load and Pacer stay open, and Skills stays folded as configured.
+  const sections = { ...options().sections,
+                     sessions: { visible: true, collapsed: true },
+                     skills: { visible: true, collapsed: true } };
+  const opened = paneFrom(failing, options({ focusAuto: true, sections }));
   assert.equal(opened.focus, undefined);
   const sessions = opened.groups.find((group) => group.title === "Background sessions");
   assert.deepEqual(sessions?.rows.map((row) => row.title), ["Review adapter behavior"]);
   assert.equal(sessions?.collapsed, false);
-  assert.deepEqual(opened.groups.map((group) => group.title),
-                   ["Background sessions", "This session", "Pacer", "Pull requests",
-                    "Worktrees", "Skills", "Load", "Warnings", "Keys"]);
-  // Every section that holds no failure is folded, not hidden.
-  const calm = opened.groups.filter((group) => group.title !== "Background sessions");
-  assert.equal(calm.every((group) => group.collapsed), true);
+  assert.deepEqual(opened.groups.map((group) => [group.title, group.collapsed === true]),
+                   [["Background sessions", false], ["This session", false], ["Pacer", false],
+                    ["Pull requests", false], ["Worktrees", false], ["Skills", true],
+                    ["Load", false], ["Warnings", false], ["Keys", false]]);
+  // A fold the person pressed on a calm section stands under the open.
+  const pressed = paneFrom(failing, options({ focusAuto: true, sections,
+                                              folded: { load: true, skills: false } }));
+  assert.equal(pressed.groups.find((group) => group.title === "Load")?.collapsed, true);
+  assert.equal(pressed.groups.find((group) => group.title === "Skills")?.collapsed, false);
+  assert.equal(pressed.groups.find((group) => group.title === "Pacer")?.collapsed, false);
 
   // Nothing failed: the same options draw the fleet with the folds it was given.
   const nothing = snapshot({ roster: { ...failing.roster,
@@ -87,7 +94,7 @@ test("the pane opens on what failed when nothing was pressed, and never on nothi
 
 test("the pane's own open keeps every section it draws, even when the failure sits elsewhere", () => {
   // The one failure is a pull request the configuration hides, so no row can be
-  // opened to it: every other section is still drawn, folded where it is.
+  // opened to it: every other section is still drawn, at its configured fold.
   const hidden = snapshot({
     prs: { state: "ready", prs: [{ ...PULL }], errors: [] },
     roster: { state: "ready", jobs: [{ ...JOB, state: "working" }], interactive: {},
@@ -97,8 +104,8 @@ test("the pane's own open keeps every section it draws, even when the failure si
   const automatic = paneFrom(hidden, options({ focusAuto: true, sections }));
   // No filter line: the pane said nothing, so there is nothing to widen.
   assert.equal(automatic.focus, undefined);
-  // Every section it draws is still drawn, folded where the failure is not.
-  assert.equal(automatic.groups.every((group) => group.collapsed), true);
+  // Every section it draws is still drawn, and none is folded for the failure.
+  assert.equal(automatic.groups.every((group) => group.collapsed === false), true);
   // The hidden section is still hidden: the pane does not resurrect it.
   assert.equal(automatic.groups.some((group) => group.title === "Pull requests"), false);
   assert.equal(automatic.groups.some((group) => group.title === "Background sessions"), true);
@@ -115,8 +122,7 @@ test("a fold the person pressed outranks the pane's own open", () => {
   // The person folded the section that holds the failure: the next paint must
   // not open it again, and its rows are left whole for when it opens.
   const pressed = paneFrom(reading, options({ focusAuto: true,
-                                              folded: { sessions: true },
-                                              pressedFolds: { sessions: true } }));
+                                              folded: { sessions: true } }));
   const sessions = pressed.groups.find((group) => group.title === "Background sessions");
   assert.equal(sessions?.collapsed, true);
   assert.deepEqual(sessions?.rows.map((row) => row.title), ["Review adapter behavior"]);
@@ -166,6 +172,74 @@ test("a press on a figure is the control that carries its state", () => {
   }), options());
   assert.deepEqual(pane.cards?.map((card) => card.press?.key),
                    ["fleet.focus.working", "fleet.focus.waiting", "fleet.focus.failed"]);
+});
+
+test("a press on a figure reaches the failing row a section's ceiling held back", () => {
+  // The passing pull request is drawn first and the failing one behind it, and
+  // the section draws one row. The figure still counted the failure, so the
+  // press must draw it: a figure whose rows the press cannot reach is a control
+  // that answers nothing.
+  const passing = { ...PULL, number: 1, title: "Green", checks: "pass" as const };
+  const failing = { ...PULL, number: 2, title: "Red" };
+  const sections = { ...options().sections,
+                     prs: { visible: true, collapsed: false, maxRows: 1 } };
+  const pane = paneFrom(snapshot({ prs: { state: "ready", prs: [passing, failing], errors: [] } }),
+                        options({ focus: "failed", sections }));
+  assert.equal(pane.focus?.text, "Showing 1 failed row.");
+  assert.deepEqual(group(pane, "Pull requests").rows.map((row) => row.title), ["#2 Red"]);
+});
+
+test("a press on working draws the sessions it counted, not a worktree that shares the word", () => {
+  // The working figure counts background sessions. A worktree row carries the
+  // word "active" for a different fact, and the press counted it as a second
+  // working row the figure never counted.
+  const pane = paneFrom(snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, id: "run", state: "working" }], interactive: {},
+              errors: [], providers: {}, sources: { jobs: "ready", interactive: "empty" } },
+    worktrees: { state: "ready", errors: [], worktrees: [
+      { name: "lane", path: "/tmp/lane", branch: "x", state: "active", merged: false,
+        archived: false, held: false, cleanup_command: "clean lane", checked_at: NOW }] },
+  }), options({ focus: "working" }));
+  assert.equal(pane.focus?.text, "Showing 1 working row.");
+  assert.deepEqual(pane.groups.map((entry) => entry.title), ["Background sessions"]);
+  assert.deepEqual(group(pane, "Background sessions").rows.map((row) => row.title),
+                   ["Review adapter behavior"]);
+});
+
+test("a failure the pull-request reader reported is counted when the roster did not answer", () => {
+  // The roster held no jobs to count, so the working figure is unknown. The
+  // failing check was read, and it is a failed outcome whatever the roster did:
+  // dropping it hid the one thing the pane knew.
+  const pane = paneFrom(snapshot({
+    roster: { state: "unavailable", jobs: [], interactive: {}, providers: {}, errors: [],
+              sources: { jobs: "unavailable", interactive: "unavailable" } },
+    prs: { state: "ready", prs: [{ ...PULL }], errors: [] },
+  }), options());
+  assert.deepEqual(pane.counts.map((slot) => slot.text), ["1 failed"]);
+  assert.deepEqual(pane.cards?.map((card) => [card.label, card.value]),
+                   [["Failed outcomes", "1"]]);
+  // The card is the way in to what it counted: the row is one press away.
+  const reached = paneFrom(snapshot({
+    roster: { state: "unavailable", jobs: [], interactive: {}, providers: {}, errors: [],
+              sources: { jobs: "unavailable", interactive: "unavailable" } },
+    prs: { state: "ready", prs: [{ ...PULL }], errors: [] },
+  }), options({ focus: "failed" }));
+  assert.equal(reached.focus?.text, "Showing 1 failed row.");
+  assert.deepEqual(reached.groups.map((entry) => entry.title), ["Pull requests"]);
+});
+
+test("a failed outcome is not drawn as nought while one of its two sources was not read", () => {
+  // Failed outcomes are job failures and failing pull requests. The roster
+  // answered with none, and the pull-request read failed without a row, so the
+  // number of failing pull requests is unknown: a nought would claim it.
+  const pane = paneFrom(snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, id: "run", state: "working" }], interactive: {},
+              errors: [], providers: {}, sources: { jobs: "ready", interactive: "empty" } },
+    prs: { state: "failed", prs: [], errors: [{ source: "prs", reason: "exit 4" }] },
+  }), options());
+  assert.deepEqual(pane.cards?.map((card) => card.label),
+                   ["Working sessions", "Waiting on you"]);
+  assert.deepEqual(pane.counts.map((slot) => slot.text), ["1 working"]);
 });
 
 test("a row pressed open says so, and carries the press that closes it", () => {
@@ -1094,6 +1168,26 @@ test("the same entity is not counted under two headings", () => {
   assert.equal(counts.some((value) => value.includes("1 failed")), false);
 });
 
+test("a roster that did not answer states no working count at all", () => {
+  // A refused or absent read leaves the jobs array empty, and counting it drew
+  // "0 working" over a question nothing asked. Rows a refused read still holds
+  // are a reading, and their figures stand. Found by review, 2026-11-23.
+  for (const state of ["failed", "unavailable"]) {
+    const quiet = snapshot({
+      roster: { state, jobs: [], interactive: {}, providers: {},
+                errors: [], sources: { jobs: state, interactive: state } },
+    });
+    assert.deepEqual(paneFrom(quiet, options()).counts, [], state);
+  }
+  const holding = snapshot({
+    roster: { state: "failed", jobs: [JOB], interactive: {}, providers: {},
+              errors: [{ source: "jobs", reason: "exit 3" }],
+              sources: { jobs: "failed", interactive: "failed" } },
+  });
+  assert.deepEqual(paneFrom(holding, options()).counts.map((slot) => slot.text),
+                   ["0 working", "  1 waiting"]);
+});
+
 test("an empty warning list claims no source was read", () => {
   const pane = paneFrom(snapshot(), options());
   const found = group(pane, "Warnings");
@@ -1881,14 +1975,13 @@ test("finished jobs are drawn quiet under the live ones, newest first, without a
   assert.equal(sessions.summary[1]?.dim, true);
 });
 
-test("the warnings say how many interactive sessions each provider runs, and what the band hides", () => {
+test("the warnings say how many interactive sessions each provider runs", () => {
   const pane = paneFrom(snapshot({ roster: roster([LIVE], { primary: 2, other: 1, none: 0 }) }),
-                        options({ hidden: 3 }));
+                        options());
   const warnings = group(pane, "Warnings");
   assert.equal(warnings.rows.length, 0);
   assert.deepEqual(warnings.notes?.map((note) => note.map((slot) => slot.text)),
-                   [["Interactive sessions:", "Provider A 2", " · other 1"],
-                    ["3 hidden from the band; /llm-fleet unhide shows them again."]]);
+                   [["Interactive sessions:", "Provider A 2", " · other 1"]]);
   assert.deepEqual(warnings.summary.map((slot) => slot.text), ["none", "  3 interactive"]);
   // Notes are no warning: the section keeps its place rather than leading the pane.
   assert.notEqual(pane.groups[0]?.title, "Warnings");
@@ -2293,13 +2386,19 @@ test("a section keeps the place configuration gave it, whatever it holds", () =>
   assert.equal(group(asking, "Background sessions").attention, true);
 });
 
-test("a failing source still leads, and a section keeps the fold a person pressed", () => {
+test("a failing source is named in place, and a section keeps the fold a person pressed", () => {
+  // The configured order is the order, whatever a source does: a failing reader
+  // used to lift Warnings above the section before it while the pane was opened
+  // for one pull request, and moving a section moves the digit under it. Found
+  // by review, 2026-11-23.
   const order = ["sessions", "prs", "warnings"];
   const built = paneFrom(snapshot({
     prs: { state: "ready", prs: [PULL], errors: [{ source: "prs:other", reason: "timed out" }] },
   }), options({ sectionOrder: order, folded: { prs: true } }));
-  assert.deepEqual(built.groups.map((entry) => entry.title), ["Warnings", "Background sessions", "Pull requests"]);
+  assert.deepEqual(built.groups.map((entry) => entry.title),
+                   ["Background sessions", "Pull requests", "Warnings"]);
   assert.equal(group(built, "Pull requests").collapsed, true);
+  assert.equal(group(built, "Pull requests").attention, true);
   // A passing pull request is calm, and a slot nobody took is not the person's to answer.
   const calm = paneFrom(snapshot({
     prs: { state: "ready", prs: [{ ...PULL, checks: "pass" }], errors: [] },
@@ -2483,4 +2582,323 @@ test("a held slot says what pacer could not record about it", () => {
   assert.deepEqual(slots.map((row) => row.slot.map((cell) => cell.text.trim())),
                    [["fleet", ""], ["held", ""], ["free", ""], ["free", ""]]);
   assert.deepEqual(slots.map((row) => row.state), ["working", "working", undefined, undefined]);
+});
+
+// Who owns a fold: the drawing is derived on every paint, and the precedence is
+// the one docs/pane-design.md states. The table is every mix of the inputs.
+
+type FoldCase = [view: "none" | "this" | "other", press: "none" | "open" | "folded",
+                 filter: "no" | "yes", failure: "none" | "here" | "elsewhere",
+                 configured: "open" | "folded", drawn: "open" | "folded", decidedBy: string];
+
+/**
+ * Every mix of what can decide a section's fold, and the fold it draws.
+ *
+ * The columns: the one-section view (none, on this section, on another), this
+ * session's fold press, a filter holding rows here, the pane's own open on what
+ * failed (not at work, a failure here, a failure elsewhere), the configuration.
+ * The strongest wins, in that order. The open on what failed only opens: a
+ * failure elsewhere has no say here, and the configuration decides.
+ */
+const FOLD_TABLE: FoldCase[] = [
+  ["none", "none", "no", "none", "open", "open", "configuration"],
+  ["none", "none", "no", "none", "folded", "folded", "configuration"],
+  ["none", "none", "no", "here", "open", "open", "failure"],
+  ["none", "none", "no", "here", "folded", "open", "failure"],
+  ["none", "none", "no", "elsewhere", "open", "open", "configuration"],
+  ["none", "none", "no", "elsewhere", "folded", "folded", "configuration"],
+  ["none", "none", "yes", "none", "open", "open", "filter"],
+  ["none", "none", "yes", "none", "folded", "open", "filter"],
+  ["none", "none", "yes", "here", "open", "open", "filter"],
+  ["none", "none", "yes", "here", "folded", "open", "filter"],
+  ["none", "none", "yes", "elsewhere", "open", "open", "filter"],
+  ["none", "none", "yes", "elsewhere", "folded", "open", "filter"],
+  ["none", "open", "no", "none", "open", "open", "press"],
+  ["none", "open", "no", "none", "folded", "open", "press"],
+  ["none", "open", "no", "here", "open", "open", "press"],
+  ["none", "open", "no", "here", "folded", "open", "press"],
+  ["none", "open", "no", "elsewhere", "open", "open", "press"],
+  ["none", "open", "no", "elsewhere", "folded", "open", "press"],
+  ["none", "open", "yes", "none", "open", "open", "press"],
+  ["none", "open", "yes", "none", "folded", "open", "press"],
+  ["none", "open", "yes", "here", "open", "open", "press"],
+  ["none", "open", "yes", "here", "folded", "open", "press"],
+  ["none", "open", "yes", "elsewhere", "open", "open", "press"],
+  ["none", "open", "yes", "elsewhere", "folded", "open", "press"],
+  ["none", "folded", "no", "none", "open", "folded", "press"],
+  ["none", "folded", "no", "none", "folded", "folded", "press"],
+  ["none", "folded", "no", "here", "open", "folded", "press"],
+  ["none", "folded", "no", "here", "folded", "folded", "press"],
+  ["none", "folded", "no", "elsewhere", "open", "folded", "press"],
+  ["none", "folded", "no", "elsewhere", "folded", "folded", "press"],
+  ["none", "folded", "yes", "none", "open", "folded", "press"],
+  ["none", "folded", "yes", "none", "folded", "folded", "press"],
+  ["none", "folded", "yes", "here", "open", "folded", "press"],
+  ["none", "folded", "yes", "here", "folded", "folded", "press"],
+  ["none", "folded", "yes", "elsewhere", "open", "folded", "press"],
+  ["none", "folded", "yes", "elsewhere", "folded", "folded", "press"],
+  ["this", "none", "no", "none", "open", "open", "view"],
+  ["this", "none", "no", "none", "folded", "open", "view"],
+  ["this", "none", "no", "here", "open", "open", "view"],
+  ["this", "none", "no", "here", "folded", "open", "view"],
+  ["this", "none", "no", "elsewhere", "open", "open", "view"],
+  ["this", "none", "no", "elsewhere", "folded", "open", "view"],
+  ["this", "none", "yes", "none", "open", "open", "view"],
+  ["this", "none", "yes", "none", "folded", "open", "view"],
+  ["this", "none", "yes", "here", "open", "open", "view"],
+  ["this", "none", "yes", "here", "folded", "open", "view"],
+  ["this", "none", "yes", "elsewhere", "open", "open", "view"],
+  ["this", "none", "yes", "elsewhere", "folded", "open", "view"],
+  ["this", "open", "no", "none", "open", "open", "view"],
+  ["this", "open", "no", "none", "folded", "open", "view"],
+  ["this", "open", "no", "here", "open", "open", "view"],
+  ["this", "open", "no", "here", "folded", "open", "view"],
+  ["this", "open", "no", "elsewhere", "open", "open", "view"],
+  ["this", "open", "no", "elsewhere", "folded", "open", "view"],
+  ["this", "open", "yes", "none", "open", "open", "view"],
+  ["this", "open", "yes", "none", "folded", "open", "view"],
+  ["this", "open", "yes", "here", "open", "open", "view"],
+  ["this", "open", "yes", "here", "folded", "open", "view"],
+  ["this", "open", "yes", "elsewhere", "open", "open", "view"],
+  ["this", "open", "yes", "elsewhere", "folded", "open", "view"],
+  ["this", "folded", "no", "none", "open", "open", "view"],
+  ["this", "folded", "no", "none", "folded", "open", "view"],
+  ["this", "folded", "no", "here", "open", "open", "view"],
+  ["this", "folded", "no", "here", "folded", "open", "view"],
+  ["this", "folded", "no", "elsewhere", "open", "open", "view"],
+  ["this", "folded", "no", "elsewhere", "folded", "open", "view"],
+  ["this", "folded", "yes", "none", "open", "open", "view"],
+  ["this", "folded", "yes", "none", "folded", "open", "view"],
+  ["this", "folded", "yes", "here", "open", "open", "view"],
+  ["this", "folded", "yes", "here", "folded", "open", "view"],
+  ["this", "folded", "yes", "elsewhere", "open", "open", "view"],
+  ["this", "folded", "yes", "elsewhere", "folded", "open", "view"],
+  ["other", "none", "no", "none", "open", "folded", "view"],
+  ["other", "none", "no", "none", "folded", "folded", "view"],
+  ["other", "none", "no", "here", "open", "folded", "view"],
+  ["other", "none", "no", "here", "folded", "folded", "view"],
+  ["other", "none", "no", "elsewhere", "open", "folded", "view"],
+  ["other", "none", "no", "elsewhere", "folded", "folded", "view"],
+  ["other", "none", "yes", "none", "open", "folded", "view"],
+  ["other", "none", "yes", "none", "folded", "folded", "view"],
+  ["other", "none", "yes", "here", "open", "folded", "view"],
+  ["other", "none", "yes", "here", "folded", "folded", "view"],
+  ["other", "none", "yes", "elsewhere", "open", "folded", "view"],
+  ["other", "none", "yes", "elsewhere", "folded", "folded", "view"],
+  ["other", "open", "no", "none", "open", "folded", "view"],
+  ["other", "open", "no", "none", "folded", "folded", "view"],
+  ["other", "open", "no", "here", "open", "folded", "view"],
+  ["other", "open", "no", "here", "folded", "folded", "view"],
+  ["other", "open", "no", "elsewhere", "open", "folded", "view"],
+  ["other", "open", "no", "elsewhere", "folded", "folded", "view"],
+  ["other", "open", "yes", "none", "open", "folded", "view"],
+  ["other", "open", "yes", "none", "folded", "folded", "view"],
+  ["other", "open", "yes", "here", "open", "folded", "view"],
+  ["other", "open", "yes", "here", "folded", "folded", "view"],
+  ["other", "open", "yes", "elsewhere", "open", "folded", "view"],
+  ["other", "open", "yes", "elsewhere", "folded", "folded", "view"],
+  ["other", "folded", "no", "none", "open", "folded", "view"],
+  ["other", "folded", "no", "none", "folded", "folded", "view"],
+  ["other", "folded", "no", "here", "open", "folded", "view"],
+  ["other", "folded", "no", "here", "folded", "folded", "view"],
+  ["other", "folded", "no", "elsewhere", "open", "folded", "view"],
+  ["other", "folded", "no", "elsewhere", "folded", "folded", "view"],
+  ["other", "folded", "yes", "none", "open", "folded", "view"],
+  ["other", "folded", "yes", "none", "folded", "folded", "view"],
+  ["other", "folded", "yes", "here", "open", "folded", "view"],
+  ["other", "folded", "yes", "here", "folded", "folded", "view"],
+  ["other", "folded", "yes", "elsewhere", "open", "folded", "view"],
+  ["other", "folded", "yes", "elsewhere", "folded", "folded", "view"],
+];
+
+test("the fold table names every mix of its inputs once", () => {
+  const keys = FOLD_TABLE.map((row) => row.slice(0, 5).join("/"));
+  assert.equal(new Set(keys).size, 3 * 3 * 2 * 3 * 2);
+  assert.equal(keys.length, 3 * 3 * 2 * 3 * 2);
+});
+
+test("a section's fold is the strongest of view, press, filter, failure and configuration", () => {
+  for (const [view, press, filter, failure, configured, drawn, decidedBy] of FOLD_TABLE) {
+    const folded = sectionFolded({
+      viewed: view === "none" ? null : view === "this",
+      pressed: press === "none" ? undefined : press === "folded",
+      filtered: filter === "yes",
+      failed: failure === "here",
+      configured: configured === "folded",
+    });
+    assert.equal(folded ? "folded" : "open", drawn,
+                 [view, press, filter, failure, configured].join("/") + " is decided by the " + decidedBy);
+  }
+});
+
+test("the pane draws every mix of the fold table as the table says", () => {
+  // One section under test, the background sessions, in a reading built so each
+  // input is what the row names: a working job the filter keeps, a failed job
+  // here or a failed pull request elsewhere for the pane's own open, the view
+  // on this section or on the worktrees, a press, and the configured fold.
+  for (const [view, press, filter, failure, configured, drawn] of FOLD_TABLE) {
+    const jobs = [{ ...JOB, id: "run", name: "Building the pane", state: "working" },
+                  ...(failure === "here" ? [{ ...JOB, id: "bad", state: "failed" }] : [])];
+    const reading = snapshot({
+      roster: { state: "ready", jobs, interactive: {}, errors: [], providers: {},
+                sources: { jobs: "ready", interactive: "empty" } },
+      prs: failure === "elsewhere" ? { state: "ready", prs: [{ ...PULL }], errors: [] }
+        : { state: "empty", prs: [], errors: [] },
+    } as never);
+    const sections = { ...options().sections,
+                       sessions: { visible: true, collapsed: configured === "folded" } };
+    const pane = paneFrom(reading, options({
+      sections,
+      viewSection: view === "none" ? null : view === "this" ? "sessions" : "worktrees",
+      folded: press === "none" ? {} : { sessions: press === "folded" },
+      focus: filter === "yes" ? "working" : null,
+      focusAuto: failure !== "none",
+    }));
+    const sessions = pane.groups.find((group) => group.title === "Background sessions");
+    assert.equal(sessions?.collapsed === true ? "folded" : "open", drawn,
+                 [view, press, filter, failure, configured].join("/"));
+  }
+});
+
+test("a one-section view draws its section whole and open, and folds every other", () => {
+  const reading = snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "failed" },
+                                     { ...JOB, id: "run", name: "Building the pane",
+                                       state: "working" }],
+              interactive: {}, errors: [], providers: {},
+              sources: { jobs: "ready", interactive: "empty" } },
+  });
+  const whole = paneFrom(reading, options());
+  // A filter and the pane's own open are both at work, and a press folds the
+  // section the view names: the view outranks all three.
+  const viewed = paneFrom(reading, options({ viewSection: "worktrees", focus: "failed",
+                                             focusAuto: true, folded: { worktrees: true } }));
+  // No section left the pane, and no line says the pane is narrowed.
+  assert.deepEqual(viewed.groups.map((group) => group.title),
+                   whole.groups.map((group) => group.title));
+  assert.equal(viewed.focus, undefined);
+  for (const group of viewed.groups) {
+    assert.equal(group.collapsed, group.title !== "Worktrees", group.title);
+  }
+  // Every section keeps its rows, whole, for when it is opened again.
+  const rows = (pane: typeof whole): Record<string, string[]> => Object.fromEntries(
+    pane.groups.map((group) => [group.title, group.rows.map((row) => row.title)]));
+  assert.deepEqual(rows(viewed), rows(whole));
+});
+
+test("a view on a section the configuration does not draw is ignored", () => {
+  const reading = snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "failed" }], interactive: {},
+              errors: [], providers: {}, sources: { jobs: "ready", interactive: "empty" } },
+  });
+  const hidden = { ...options().sections, worktrees: { visible: false, collapsed: false } };
+  const shape = (pane: ReturnType<typeof paneFrom>): unknown =>
+    [pane.focus?.text, pane.groups.map((group) => [group.title, group.collapsed,
+                                                  group.rows.map((row) => row.title)])];
+  for (const extra of [{}, { focus: "failed" as const }, { focusAuto: true }]) {
+    // Hidden by the configuration.
+    assert.deepEqual(
+      shape(paneFrom(reading, options({ sections: hidden, viewSection: "worktrees", ...extra }))),
+      shape(paneFrom(reading, options({ sections: hidden, ...extra }))));
+    // Left out of the order, and a name no section carries.
+    const order = options().sectionOrder.filter((name) => name !== "worktrees");
+    for (const name of ["worktrees", "nothing"]) {
+      assert.deepEqual(
+        shape(paneFrom(reading, options({ sectionOrder: order, viewSection: name, ...extra }))),
+        shape(paneFrom(reading, options({ sectionOrder: order, ...extra }))));
+    }
+  }
+});
+
+test("a section the configuration switches off is not drawn, and its name stays dim in the picker", () => {
+  const sections = { ...options().sections,
+                     worktrees: { visible: true, collapsed: false, off: true } };
+  const built = paneFrom(snapshot(), options({ sections }));
+  assert.equal(built.groups.some((entry) => entry.title === "Worktrees"), false);
+  const item = built.picker?.find((entry) => entry.name === "worktrees");
+  assert.equal(item?.hidden, true);
+  assert.equal(item?.press.key, HIDE_PREFIX + "worktrees");
+  // Every other section is drawn, and its name is not dim.
+  assert.equal(built.picker?.filter((entry) => entry.hidden).length, 1);
+  assert.equal(built.groups.some((entry) => entry.title === "Pacer"), true);
+});
+
+test("this session's switch press outranks the configuration's switch, both ways", () => {
+  const sections = { ...options().sections,
+                     worktrees: { visible: true, collapsed: true, off: true } };
+  // Pressed on: drawn, at the fold the configuration gives it, and not dim.
+  const on = paneFrom(snapshot(), options({ sections, putAway: { worktrees: false } }));
+  assert.equal(on.groups.find((entry) => entry.title === "Worktrees")?.collapsed, true);
+  assert.equal(on.picker?.find((entry) => entry.name === "worktrees")?.hidden, false);
+  // Pressed off over a configuration that draws it.
+  const off = paneFrom(snapshot(), options({ putAway: { pacer: true } }));
+  assert.equal(off.groups.some((entry) => entry.title === "Pacer"), false);
+  assert.equal(off.picker?.find((entry) => entry.name === "pacer")?.hidden, true);
+  // No press: the configuration's switch.
+  const none = paneFrom(snapshot(), options({ sections, putAway: {} }));
+  assert.equal(none.groups.some((entry) => entry.title === "Worktrees"), false);
+});
+
+test("a one-section view draws its section even when it is switched off", () => {
+  const sections = { ...options().sections,
+                     worktrees: { visible: true, collapsed: true, off: true },
+                     keys: { visible: true, collapsed: true, hideWhenEmpty: true } };
+  for (const putAway of [{}, { worktrees: true }]) {
+    const viewed = paneFrom(snapshot(), options({ sections, putAway, viewSection: "worktrees" }));
+    const worktrees = viewed.groups.find((entry) => entry.title === "Worktrees");
+    assert.equal(worktrees?.collapsed, false);
+    // The switch did not move: the picker still draws the name dim.
+    assert.equal(viewed.picker?.find((entry) => entry.name === "worktrees")?.hidden, true);
+    // Every other drawn section is folded out of the way.
+    assert.equal(viewed.groups.filter((entry) => entry.title !== "Worktrees")
+                   .every((entry) => entry.collapsed), true);
+  }
+  // A section another switch put away is not brought back by a view on this one.
+  const other = paneFrom(snapshot(), options({ sections, putAway: { pacer: true },
+                                               viewSection: "worktrees" }));
+  assert.equal(other.groups.some((entry) => entry.title === "Pacer"), false);
+});
+
+test("a fold press outranks a filter, and the rows stay the filter's", () => {
+  const reading = snapshot({
+    roster: { state: "ready", jobs: [{ ...JOB, state: "failed" },
+                                     { ...JOB, id: "run", name: "Building the pane",
+                                       state: "working" }],
+              interactive: {}, errors: [], providers: {},
+              sources: { jobs: "ready", interactive: "empty" } },
+  });
+  const folded = { ...options().sections, sessions: { visible: true, collapsed: true } };
+  // The filter opens a section the configuration folded...
+  const opened = paneFrom(reading, options({ focus: "failed", sections: folded }));
+  assert.equal(opened.groups[0]?.collapsed, false);
+  // ...and a press on its heading folds it while the filter stands.
+  const pressed = paneFrom(reading, options({ focus: "failed", folded: { sessions: true } }));
+  assert.equal(pressed.focus?.text, "Showing 1 failed row.");
+  assert.deepEqual(pressed.groups.map((group) => group.title), ["Background sessions"]);
+  assert.equal(pressed.groups[0]?.collapsed, true);
+  assert.deepEqual(pressed.groups[0]?.rows.map((row) => row.title), ["Review adapter behavior"]);
+});
+
+test("an explicit ask draws a section that is empty and set to hide while empty", () => {
+  const sections = { ...options().sections,
+                     warnings: { visible: true, collapsed: false, hideWhenEmpty: true } };
+  const switchedOffToo = { ...sections,
+                           warnings: { visible: true, collapsed: false, hideWhenEmpty: true,
+                                       off: true } };
+  const drawn = (extra: Partial<PaneOptions>): boolean =>
+    paneFrom(snapshot(), options({ sections, ...extra }))
+      .groups.some((entry) => entry.title === "Warnings");
+  // Nobody asked: an empty section set to hide while empty is not drawn.
+  assert.equal(drawn({}), false);
+  // A press in the picker that switched it on in this session is an ask.
+  assert.equal(drawn({ putAway: { warnings: false } }), true);
+  assert.equal(drawn({ sections: switchedOffToo }), false);
+  assert.equal(drawn({ sections: switchedOffToo, putAway: { warnings: false } }), true);
+  // A press that switched it off is not.
+  assert.equal(drawn({ putAway: { warnings: true } }), false);
+  // A one-section view is an ask too.
+  assert.equal(drawn({ viewSection: "warnings" }), true);
+  assert.equal(drawn({ sections: switchedOffToo, viewSection: "warnings" }), true);
+  // A standing filter still narrows what is drawn: the section holds none of its rows.
+  assert.equal(drawn({ putAway: { warnings: false }, focus: "failed" }), false);
 });

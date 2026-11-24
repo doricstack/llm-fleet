@@ -1,0 +1,6 @@
+{
+  "errors": [
+    {"code": "E_CONFIG_VALUE", "path": "keys.close"},
+    {"code": "E_CONFIG_VALUE", "path": "keys.expand"}
+  ]
+}

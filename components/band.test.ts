@@ -1,9 +1,11 @@
 /**
- * The band above the prompt: what it leads with, and the switch it always draws.
+ * The band above the prompt: the switch it always draws, and the figures it
+ * makes a way into the pane.
  *
  * The cases read a snapshot assembled the way the plugin assembles one, from
- * documents shaped as the readers print them, so a band item is proved against
- * the same fields the pane reads.
+ * documents shaped as the readers print them, so a figure is proved against
+ * the same fields the pane reads. The item list is still built for the tab's
+ * color, which is why bandItems has cases here without the band drawing one.
  *
  * Run with: node --test components/band.test.ts
  */
@@ -11,10 +13,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BAND_DEFAULTS, BAND_DISMISS, BAND_FOCUS, BAND_ITEM, BAND_PACER, BAND_SPEAK,
-         BAND_TOGGLE,
-         bandConfigFrom, bandCounts, bandItems,
-         answeredSources, bandTree, fleetLabel, keptHidden,
+import { BAND_DEFAULTS, BAND_FOCUS, BAND_PACER, BAND_SPEAK, BAND_TOGGLE,
+         bandConfigFrom, bandCounts, bandItems, bandTree, fleetLabel,
          isOwnJob, speakLabel } from "../plugins/llm-fleet/components/band.ts";
 import { renderedText } from "../plugins/llm-fleet/components/layout.ts";
 import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
@@ -107,7 +107,7 @@ function skill(name: string, verdict: string, extra: Record<string, unknown> = {
 
 test("a newly flagged skill is an error on the band, and one to read or a failed scan a wait", () => {
   const items = bandItems(snapshotFrom(reading({
-    skills: { state: "ready", items: [], counts: {},
+    skills: { state: "ready", counts: {},
               new: [skill("alpha", "flagged"), skill("beta", "review"), skill("gamma", "failed")] },
   }), AT), [], "");
   const skills = items.filter((item) => item.key.startsWith("skill:"));
@@ -137,7 +137,7 @@ test("the band raises only a finding in his own skills", () => {
   // not the band's to interrupt for. A reading written before rows carried a
   // scope is his, because there was nothing else for it to be.
   const items = bandItems(snapshotFrom(reading({
-    skills: { state: "ready", items: [], counts: {}, new: [
+    skills: { state: "ready", counts: {}, new: [
       skill("mine", "flagged"),
       skill("theirs", "flagged", { scope: "installed" }),
       skill("theirs-too", "review", { scope: "other" }),
@@ -152,7 +152,7 @@ test("the band raises only a finding in his own skills", () => {
 
 test("a skill's finding is masked on the band as it is on the pane", () => {
   const items = bandItems(snapshotFrom(reading({
-    skills: { state: "ready", items: [], counts: {},
+    skills: { state: "ready", counts: {},
               new: [skill("alpha", "flagged", { issue: "posts " + SKILL_KEY })] },
   }), AT), [], "");
   const flagged = items.find((item) => item.key.startsWith("skill:"))?.text ?? "";
@@ -186,13 +186,10 @@ test("a pacer run it refused is an error on the band; one that failed on its own
              recent: [run(null, 75, "refused", AT - 1)] } }), AT), [], "");
   assert.deepEqual(unnamed.filter((item) => item.key.startsWith("pacer:")).map((item) => item.text),
                    ["Pacer refused a run in a repository"]);
-  // A reading from before pacer was read has not heard from it, so a pacer
-  // refusal dismissed earlier is kept rather than forgotten.
+  // A reading from before pacer was read has not heard from it, and raises
+  // nothing for it.
   const older = snapshotFrom(reading(), AT);
   delete (older as { pacer?: unknown }).pacer;
-  assert.equal(answeredSources(older).has("pacer"), false);
-  assert.deepEqual(keptHidden(["pacer:web-app:1"], [], [], 10, answeredSources(older)),
-                   ["pacer:web-app:1"]);
   // A pacer that has not reported its runs raises nothing.
   const quiet = bandItems(snapshotFrom(reading({
     pacer: { state: "ready", enabled: true, slotCount: 4, slots: [], errors: [] } }), AT), [], "");
@@ -275,49 +272,6 @@ test("the band's settings come from the reading, each one the default when it is
   assert.deepEqual(BAND_DEFAULTS, { hiddenLimit: 200, waitingJobSeconds: 86400 });
 });
 
-test("a dismissal keeps only keys that name something current, the newest within the limit", () => {
-  const current = ["trial:t1", "pr:a", "job:x:blocked:1", "job:y:blocked:2"];
-  // Keys for things that have gone are dropped when a dismissal is written.
-  assert.deepEqual(keptHidden(["gone:1", "trial:t1", "gone:2"], current, ["pr:a"], 200),
-                   ["trial:t1", "pr:a"]);
-  // A key dismissed twice is kept once, at its newest place.
-  assert.deepEqual(keptHidden(["pr:a", "trial:t1"], current, ["pr:a"], 200),
-                   ["trial:t1", "pr:a"]);
-  // The limit keeps the newest.
-  assert.deepEqual(keptHidden(["trial:t1", "pr:a"], current,
-                              ["job:x:blocked:1", "job:y:blocked:2"], 3),
-                   ["pr:a", "job:x:blocked:1", "job:y:blocked:2"]);
-});
-
-test("a dismissed key from a source that did not answer is kept, though nothing shows it now", () => {
-  // The roster failed this read, so job a is absent only because nobody could
-  // ask; its dismissal must outlive the read. A trial key is pruned, since the
-  // trials source answered and the trial is gone.
-  const answered = new Set(["trials", "prs", "skills", "progress"]);
-  assert.deepEqual(keptHidden(["job:a:blocked:1", "trial:gone"], ["pr:a"], ["pr:a"], 200,
-                              answered),
-                   ["job:a:blocked:1", "pr:a"]);
-  // A key no source claims names nothing the band could show, and goes.
-  assert.deepEqual(keptHidden(["odd:1"], [], ["pr:a"], 200, new Set()), ["pr:a"]);
-});
-
-test("a source has answered when it read ready or empty with no error", () => {
-  const sources = (overrides: Record<string, unknown>) =>
-    [...answeredSources(snapshotFrom(reading(overrides), AT))].sort();
-  assert.deepEqual(sources({ skills: { state: "ready", new: [] },
-                             worktrees: { state: "empty" } }),
-                   ["pacer", "prs", "roster", "skills"]);
-  // A roster with one provider failing has not answered for that provider's jobs.
-  assert.deepEqual(sources({ roster: { state: "ready", providers: {}, interactive: {},
-                                       sources: { jobs: "ready", interactive: "empty" },
-                                       jobs: [], errors: [{ source: "jobs:two",
-                                                            reason: "exit 3" }] } }),
-                   ["pacer", "prs", "skills"]);
-  assert.deepEqual(sources({ roster: { state: "failed", errors: [] },
-                             prs: { state: "disabled" }, pacer: { state: "unavailable" } }),
-                   ["skills"]);
-});
-
 test("a job is this session's own by its full identifier or by its head", () => {
   const snapshot = snapshotFrom(reading(), AT);
   const waiting = snapshot.roster.jobs[1];
@@ -339,15 +293,12 @@ test("the figures are the pane's, and there are none for a roster nobody read", 
 
 test("the switch is always drawn, and its word says which way a press goes", () => {
   for (const open of [false, true]) {
-    const tree = bandTree({ items: [], counts: null, open, width: 120,
-                            onToggle: noop, onDismiss: noop });
+    const tree = bandTree({ counts: null, open, width: 120,
+                            onToggle: noop });
     const toggle = nodesIn(tree).find((node) => node.props && "key" in node.props
       && (node.props as { key?: string }).key === BAND_TOGGLE);
     assert.equal((toggle?.props as { label?: string }).label,
                  open ? "\u2261 Close llm-fleet" : "\u2261 Open llm-fleet");
-    // Nothing to dismiss draws no Dismiss.
-    assert.equal(nodesIn(tree).some((node) =>
-      (node.props as { key?: string }).key === BAND_DISMISS), false);
   }
 });
 
@@ -355,40 +306,40 @@ test("pacer takes the gear, and its word says whether pacer is on", () => {
   let pressed = 0;
   const keyed = (tree: Node, key: string) => nodesIn(tree).find((node) =>
     (node.props as { key?: string } | undefined)?.key === key);
-  const on = bandTree({ items: [], counts: null, open: false, width: 120,
+  const on = bandTree({ counts: null, open: false, width: 120,
                         pacer: { enabled: true }, onPacer: () => { pressed += 1; },
-                        onToggle: noop, onDismiss: noop });
+                        onToggle: noop });
   const button = keyed(on, BAND_PACER);
   assert.equal((button?.props as { label?: string }).label, "⚙ Pacer on");
   (button?.props as { onPress: () => void }).onPress();
   assert.equal(pressed, 1);
-  const off = bandTree({ items: [], counts: null, open: false, width: 120,
+  const off = bandTree({ counts: null, open: false, width: 120,
                          pacer: { enabled: false }, onPacer: noop,
-                         onToggle: noop, onDismiss: noop });
+                         onToggle: noop });
   assert.equal((keyed(off, BAND_PACER)?.props as { label?: string }).label, "⚙ Pacer off");
   // A pacer whose switch was not read says so rather than picking a side.
-  const unread = bandTree({ items: [], counts: null, open: false, width: 120,
+  const unread = bandTree({ counts: null, open: false, width: 120,
                             pacer: { enabled: null }, onPacer: noop,
-                            onToggle: noop, onDismiss: noop });
+                            onToggle: noop });
   assert.equal((keyed(unread, BAND_PACER)?.props as { label?: string }).label,
                "⚙ Pacer not read");
   // No pacer: the band carries no gear at all.
-  const without = bandTree({ items: [], counts: null, open: false, width: 120, pacer: null,
-                             onPacer: noop, onToggle: noop, onDismiss: noop });
+  const without = bandTree({ counts: null, open: false, width: 120, pacer: null,
+                             onPacer: noop, onToggle: noop });
   assert.equal(keyed(without, BAND_PACER), undefined);
   // Narrow, the word drops its name and keeps the icon and the answer.
-  const narrow = bandTree({ items: [], counts: null, open: false, width: 30,
+  const narrow = bandTree({ counts: null, open: false, width: 30,
                             pacer: { enabled: true }, onPacer: noop,
                             onSpeak: noop, speaking: false,
-                            onToggle: noop, onDismiss: noop });
+                            onToggle: noop });
   assert.equal((keyed(narrow, BAND_PACER)?.props as { label?: string }).label, "⚙ on");
 });
 
 test("a figure is the press that opens the pane narrowed to what it counted", () => {
   const opened: (string | undefined)[] = [];
   const counts = { working: 2, waiting: 1, failed: 1 };
-  const tree = bandTree({ items: [], counts, open: false, width: 120,
-                          onToggle: () => undefined, onDismiss: () => undefined,
+  const tree = bandTree({ counts, open: false, width: 120,
+                          onToggle: () => undefined,
                           onOpen: (focus) => { opened.push(focus); } });
   const keys = nodesIn(tree).filter((node) => node.type === "Button")
     .map((node) => (node.props as { key?: string }).key);
@@ -399,93 +350,102 @@ test("a figure is the press that opens the pane narrowed to what it counted", ()
   (failed?.props as { onPress?: () => unknown }).onPress?.();
   assert.deepEqual(opened, ["failed"]);
   // A figure at zero draws nothing, so there is no press to a state nobody is in.
-  const quiet = bandTree({ items: [], counts: { working: 2, waiting: 0, failed: 0 }, open: false,
-                           width: 120, onToggle: () => undefined, onDismiss: () => undefined,
+  const quiet = bandTree({ counts: { working: 2, waiting: 0, failed: 0 }, open: false,
+                           width: 120, onToggle: () => undefined,
                            onOpen: (focus) => { opened.push(focus); } });
   const quietKeys = nodesIn(quiet).filter((node) => node.type === "Button")
     .map((node) => (node.props as { key?: string }).key);
   assert.deepEqual(quietKeys, [BAND_TOGGLE, BAND_FOCUS + "working"]);
 });
 
-test("the band states what this session spent, and gives the chip up before the item", () => {
-  const item = { key: "job:one:blocked", level: "warning" as const,
-                 text: "fix the parser is waiting for you" };
+test("the band states what this session spent, and gives the chip up before a figure", () => {
   const priced = renderedText(bandTree({
-    items: [], counts: { working: 1, waiting: 0, failed: 0 }, spend: "~$1.24", open: false,
-    width: 120, onToggle: noop, onDismiss: noop })).join("");
+    counts: { working: 1, waiting: 0, failed: 0 }, spend: "~$1.24", open: false,
+    width: 120, onToggle: noop })).join("");
   assert.equal(priced.includes("~$1.24"), true);
   // Nothing priced it: no chip, since a spend of nothing is a different claim.
   const unpriced = renderedText(bandTree({
-    items: [], counts: { working: 1, waiting: 0, failed: 0 }, spend: null, open: false,
-    width: 120, onToggle: noop, onDismiss: noop })).join("");
+    counts: { working: 1, waiting: 0, failed: 0 }, spend: null, open: false,
+    width: 120, onToggle: noop })).join("");
   assert.equal(unpriced.includes("$"), false);
-  // A line too narrow for both gives the chip up: it is a figure a person can
-  // still find on the pane's own tiles, and the item it would push out is not.
+  // A line too narrow for both gives the chip up: a figure is still on the
+  // pane's own tiles, and the switch above them is not.
   const tight = (width: number, spend: string | null) => renderedText(bandTree({
-    items: [item], counts: { working: 1, waiting: 0, failed: 0 }, spend, open: false,
-    width, onToggle: noop, onDismiss: noop })).join("");
-  // At this width the figures fit and the item does not: the chip still goes,
-  // and the item it gave way to is the one drawn.
-  const crowded = tight(60, "$1.24");
-  assert.equal(crowded.includes("$1.24"), false);
-  assert.equal(crowded.includes("fix the"), true);
-  assert.equal(tight(60, null).includes("fix the"), true);
+    counts: { working: 1, waiting: 0, failed: 0 }, spend, open: false,
+    width, onToggle: noop })).join("");
+  assert.equal(tight(40, "$1.24").includes("$1.24"), false);
+  assert.equal(tight(40, "$1.24").includes("1 working"), true);
   // And a line with no room for either draws no chip.
   assert.equal(tight(30, "$1.24").includes("$1.24"), false);
 });
 
-test("what the band leads with opens the pane", () => {
-  const items = [{ key: "trial:r:feat/a:TRYING", level: "error" as const,
-                   text: "Trial failed on repo feat/a: 2 failed" }];
-  const opened: { focus?: string; key?: string }[] = [];
-  const tree = bandTree({ items, counts: { working: 0, waiting: 0, failed: 1 }, open: false,
-                          width: 140, onToggle: () => undefined, onDismiss: () => undefined,
-                          onOpen: (focus, key) => { opened.push({ focus, key }); } });
-  const lead = nodesIn(tree).find((node) =>
-    (node.props as { key?: string }).key === BAND_ITEM + items[0].key);
-  assert.notEqual(lead, undefined);
-  (lead?.props as { onPress?: () => unknown }).onPress?.();
-  // No state was named, and the row's key is: the pane opens where that row
-  // lives, which is what the band can say without drawing anything itself.
-  assert.deepEqual(opened, [{ focus: undefined, key: items[0].key }]);
-});
-
 test("the band states figures above zero, says when nothing runs, and names a read in flight", () => {
-  const busy = renderedText(bandTree({ items: [], counts: { working: 2, waiting: 0, failed: 1 },
-                                       open: false, width: 120, onToggle: noop,
-                                       onDismiss: noop }));
+  const busy = renderedText(bandTree({ counts: { working: 2, waiting: 0, failed: 1 },
+                                       open: false, width: 120, onToggle: noop }));
   assert.equal(busy.includes("2 working"), true);
   assert.equal(busy.includes("1 failed"), true);
   assert.equal(busy.some((value) => value.includes("waiting")), false);
-  const quiet = renderedText(bandTree({ items: [], counts: { working: 0, waiting: 0, failed: 0 },
-                                        open: false, width: 120, onToggle: noop,
-                                        onDismiss: noop }));
+  const quiet = renderedText(bandTree({ counts: { working: 0, waiting: 0, failed: 0 },
+                                        open: false, width: 120, onToggle: noop }));
   assert.equal(quiet.includes("Nothing running"), true);
+  // An item can need a person with every figure at zero, a flagged skill with
+  // no job beside it: the line says how many rather than calling the machine
+  // quiet. Found by review, 2026-11-23.
+  const attention = renderedText(bandTree({ counts: { working: 0, waiting: 0, failed: 0 },
+                                            attention: 1, open: false, width: 120,
+                                            onToggle: noop }));
+  assert.equal(attention.includes("1 needs you"), true);
+  assert.equal(attention.includes("Nothing running"), false);
+  const several = renderedText(bandTree({ counts: { working: 0, waiting: 0, failed: 0 },
+                                          attention: 3, open: false, width: 120,
+                                          onToggle: noop }));
+  assert.equal(several.includes("3 need you"), true);
+  // A job figure does not answer an item that needs the person: one job
+  // working and one flagged item both show, because the figure counts jobs
+  // and the item count is a different fact. Found by review, 2026-11-23.
+  const busyWithAttention = renderedText(bandTree({ counts: { working: 1, waiting: 0, failed: 0 },
+                                                    attention: 1, open: false, width: 120,
+                                                    onToggle: noop }));
+  assert.equal(busyWithAttention.includes("1 working"), true);
+  assert.equal(busyWithAttention.includes("1 needs you"), true);
+  const none = renderedText(bandTree({ counts: { working: 0, waiting: 0, failed: 0 },
+                                       attention: 0, open: false, width: 120,
+                                       onToggle: noop }));
+  assert.equal(none.includes("Nothing running"), true);
   // No reading yet is not a quiet fleet: the band says it is still reading.
-  const reading = renderedText(bandTree({ items: [], counts: null, note: "Reading the machine...",
-                                          open: false, width: 120, onToggle: noop,
-                                          onDismiss: noop }));
+  const reading = renderedText(bandTree({ counts: null, note: "Reading the machine...",
+                                          open: false, width: 120, onToggle: noop }));
   assert.equal(reading.includes("Reading the machine..."), true);
   assert.equal(reading.includes("Nothing running"), false);
+  // The roster can be unread or disabled, which leaves no figures, and an item
+  // can still need the person: the note says why the figures are absent, and
+  // the count is drawn before it rather than dropped. Found by review, 2026-11-23.
+  const unread = renderedText(bandTree({ counts: null, note: "Roster unread", attention: 2,
+                                         open: false, width: 120, onToggle: noop }));
+  assert.equal(unread.includes("2 need you"), true);
+  assert.equal(unread.some((value) => value.includes("Roster unread")), true);
+  assert.equal(unread.indexOf("2 need you") < unread.findIndex(
+    (value) => value.includes("Roster unread")), true);
 });
 
-test("the band leads with the worst item and counts the rest after it", () => {
+test("the band draws no item of its own, whatever needs a person", () => {
+  // The figures say what needs a person and a press on one opens the rows. A
+  // sentence naming the worst item made the line long and, at a narrow width,
+  // cost the switch its room, so the band does not draw one at all.
   const items = bandItems(snapshotFrom(reading(), AT), [], "");
-  const tree = bandTree({ items, counts: { working: 1, waiting: 2, failed: 1 }, open: false,
-                          width: 160, onToggle: noop, onDismiss: noop });
+  const tree = bandTree({ counts: { working: 1, waiting: 2, failed: 1 }, open: false,
+                          width: 160, onToggle: noop, onOpen: noop });
   const values = renderedText(tree);
-  assert.equal(values.includes("PR 7 checks failing: Fix it"), true);
-  assert.equal(values.includes(" · 2 more waiting"), true);
-  const lead = nodesIn(tree).find((node) => node.children[0] === "PR 7 checks failing: Fix it");
-  assert.equal((lead?.props as { color?: string }).color, "error");
+  assert.equal(values.includes("PR 7 checks failing: Fix it"), false);
+  assert.equal(values.some((value) => value.includes("more waiting")), false);
   assert.equal(nodesIn(tree).some((node) =>
-    (node.props as { key?: string }).key === BAND_DISMISS), true);
-  // Too narrow for the item, the switch and the figures stay and the item goes.
-  const narrow = renderedText(bandTree({ items, counts: { working: 1, waiting: 2, failed: 1 },
-                                         open: false, width: 50, onToggle: noop,
-                                         onDismiss: noop }));
-  assert.equal(narrow.includes("PR 7 checks failing"), false);
+    (node.props as { key?: string }).key === "fleet.band.dismiss"), false);
+  assert.equal(items.length > 0, true);
+  // A narrow band keeps the switch and the figures, and the line stays one row.
+  const narrow = renderedText(bandTree({ counts: { working: 1, waiting: 2, failed: 1 },
+                                         open: false, width: 50, onToggle: noop }));
   assert.equal(narrow.includes("1 working"), true);
+  assert.equal(new Set(narrow).size > 0, true);
 });
 
 /** A key of the shape the masking refuses, built in parts so no file holds one whole. */
@@ -523,117 +483,24 @@ function drawnWidth(node: Node | string): number {
 }
 
 test("the band's line fits the width it is given, gaps and button chrome counted", () => {
-  const snapshot = snapshotFrom(reading(), AT);
-  const items = bandItems(snapshot, [], "");
   const counts = { working: 12, waiting: 3, failed: 2 };
-  for (let width = 70; width <= 160; width += 1) {
+  for (let width = 40; width <= 160; width += 1) {
     for (const open of [false, true]) {
-      const tree = bandTree({ items, counts, open, width, onToggle: noop, onDismiss: noop });
+      const tree = bandTree({ counts, open, width, onToggle: noop, onOpen: noop });
       assert.ok(drawnWidth(tree) <= width, `width ${width}: drew ${drawnWidth(tree)}`);
+      const lines = nodeLines(tree, width, false);
+      assert.equal(lines.length, 2, `width ${width}: drew ${lines.length} lines`);
+      for (const line of lines) {
+        assert.ok(line.length <= width, `width ${width}: a line drew ${line.length} cells`);
+      }
     }
   }
 });
 
-/**
- * An item longer than any band line: the shape a long pull request title or a
- * long skill issue arrives in. It is drawn as a press by the live band, which
- * is what turns its words into a button the host adds chrome around.
- */
-const LONG_ITEM = { key: "job:long:blocked", level: "warning" as const,
-                    text: "K - M C P - C C - N " + "check-name ".repeat(20) };
-
-/** The band at one width, with the presses the live band carries. */
-function longBand(width: number): Node {
-  return bandTree({ items: [LONG_ITEM], counts: { working: 1, waiting: 1, failed: 0 },
-                    open: false, width, onToggle: noop, onDismiss: noop, onOpen: noop });
-}
-
-/**
- * What the band draws at a width: its rule line and one row, each no wider than
- * the width it was given.
- *
- * The line count and the words come from the review renderer, which walks the
- * real tree. The row's width is measured with the cells the host adds around a
- * button, because that is where a long item used to push the line past its
- * width: the text was cut, and the chrome around the cut was not, so the host
- * squeezed the item's label into a column one character wide.
- */
-function assertTwoLinesWithin(tree: Node, width: number): string[] {
-  const lines = nodeLines(tree, width, false);
-  assert.equal(lines.length, 2, `width ${width}: drew ${lines.length} lines: ` +
-                                JSON.stringify(lines));
-  const row = tree.children[1] as Node;
-  assert.ok(drawnWidth(row) <= width, `width ${width}: the row drew ${drawnWidth(row)} cells`);
-  for (const line of lines) {
-    assert.ok(line.length <= width, `width ${width}: a line drew ${line.length} cells: ${line}`);
-  }
-  return lines;
-}
-
-test("a 200-character item does not break the band at width 40", () => {
-  const width = 40;
-  const tree = longBand(width);
-  const lines = assertTwoLinesWithin(tree, width);
-  const drawn = lines.join("\n");
-  // The item has no room left after the switch and the figures, so it is cut to
-  // nothing rather than squeezing them. Its press is not drawn either.
-  assert.equal(drawn.includes("K - M C P"), false, drawn);
-  assert.notEqual(pressable(tree, BAND_TOGGLE), undefined);
-  assert.equal(drawn.includes("1 working"), true, drawn);
-  assert.equal(drawn.includes("1 waiting"), true, drawn);
-});
-
-test("a 200-character item does not break the band at width 60", () => {
-  const width = 60;
-  const tree = longBand(width);
-  const drawn = assertTwoLinesWithin(tree, width).join("\n");
-  assert.notEqual(pressable(tree, BAND_TOGGLE), undefined);
-  assert.equal(drawn.includes("1 working"), true, drawn);
-  assert.equal(drawn.includes("1 waiting"), true, drawn);
-  // The item still has no room beside the figures and Dismiss: it is given up
-  // before any of them, and the press that would carry it is not drawn.
-  assert.equal(drawn.includes("K - M C P"), false, drawn);
-  assert.equal(drawn.includes("Dismiss"), true, drawn);
-});
-
-test("a 200-character item does not break the band at width 80", () => {
-  const width = 80;
-  const tree = longBand(width);
-  const drawn = assertTwoLinesWithin(tree, width).join("\n");
-  assert.notEqual(pressable(tree, BAND_ITEM + LONG_ITEM.key), undefined);
-  assert.equal(drawn.includes("K - M C ..."), true, drawn);
-  // The cut falls on the item, never on the switch, the figures or Dismiss.
-  assert.notEqual(pressable(tree, BAND_TOGGLE), undefined);
-  assert.equal(drawn.includes("1 working"), true, drawn);
-  assert.equal(drawn.includes("1 waiting"), true, drawn);
-  assert.equal(drawn.includes("Dismiss"), true, drawn);
-});
-
-test("a 200-character item does not break the band at width 100", () => {
-  const width = 100;
-  const tree = longBand(width);
-  const drawn = assertTwoLinesWithin(tree, width).join("\n");
-  assert.notEqual(pressable(tree, BAND_ITEM + LONG_ITEM.key), undefined);
-  assert.equal(drawn.includes("K - M C P - C C - N"), true, drawn);
-  assert.equal(drawn.includes(LONG_ITEM.text), false, drawn);
-  assert.equal(drawn.includes("Dismiss"), true, drawn);
-});
-
-test("a 200-character item does not break the band at width 140", () => {
-  const width = 140;
-  const tree = longBand(width);
-  const drawn = assertTwoLinesWithin(tree, width).join("\n");
-  assert.notEqual(pressable(tree, BAND_ITEM + LONG_ITEM.key), undefined);
-  assert.equal(drawn.includes("K - M C P - C C - N"), true, drawn);
-  assert.equal(drawn.includes(LONG_ITEM.text), false, drawn);
-  assert.equal(drawn.includes("1 working"), true, drawn);
-  assert.equal(drawn.includes("Dismiss"), true, drawn);
-});
-
 test("the band draws a rule across its width above the buttons, and keeps the line under it", () => {
   const width = 80;
-  const tree = bandTree({ items: [], counts: null, open: true, width,
-                          onToggle: noop, onDismiss: noop });
+  const tree = bandTree({ counts: null, open: true, width,
+                          onToggle: noop });
   assert.equal(tree.type, "Box");
   assert.equal((tree.props as { flexDirection?: unknown }).flexDirection, "column");
   const [first, second] = tree.children;
@@ -664,8 +531,8 @@ function pressable(tree: Node, key: string): { label?: string; variant?: string;
 test("the speech switch sits beside the fleet's and says how speech stands everywhere", () => {
   const pressed: string[] = [];
   for (const speaking of [false, true]) {
-    const tree = bandTree({ items: [], counts: null, open: false, width: 120, speaking,
-                            onToggle: noop, onDismiss: noop,
+    const tree = bandTree({ counts: null, open: false, width: 120, speaking,
+                            onToggle: noop,
                             onSpeak: () => { pressed.push("speak"); } });
     const speak = pressable(tree, BAND_SPEAK);
     assert.equal(speak?.label, speaking ? "\u266A Speak: on" : "\u266A Speak: off");
@@ -678,8 +545,8 @@ test("the speech switch sits beside the fleet's and says how speech stands every
   }
   assert.deepEqual(pressed, ["speak", "speak"]);
   // A band built without the press draws no switch that would do nothing.
-  const bare = bandTree({ items: [], counts: null, open: false, width: 120,
-                          onToggle: noop, onDismiss: noop });
+  const bare = bandTree({ counts: null, open: false, width: 120,
+                          onToggle: noop });
   assert.equal(pressable(bare, BAND_SPEAK), undefined);
 });
 
@@ -692,47 +559,89 @@ test("a terminal draws one-cell glyphs on the switches and a picture surface dra
     assert.equal(speakLabel(true, surface), "\u{1F50A} Speak: on");
     assert.equal(speakLabel(false, surface), "\u{1F507} Speak: off");
   }
-  const tree = bandTree({ items: [], counts: null, open: true, width: 120, surface: "desktop",
-                          speaking: false, onToggle: noop, onDismiss: noop, onSpeak: noop });
+  const tree = bandTree({ counts: null, open: true, width: 120, surface: "desktop",
+                          speaking: false, onToggle: noop, onSpeak: noop });
   assert.equal(pressable(tree, BAND_TOGGLE)?.label, "\u{1F4CB} Close llm-fleet");
   assert.equal(pressable(tree, BAND_SPEAK)?.label, "\u{1F507} Speak: off");
 });
 
 test("the band's line fits its width with the speech switch drawn too", () => {
-  const snapshot = snapshotFrom(reading(), AT);
-  const items = bandItems(snapshot, [], "");
   const counts = { working: 12, waiting: 3, failed: 2 };
   // Down to the narrowest width the band is drawn at, where the speech switch
   // gives up its word to keep the line inside the terminal.
-  for (let width = 73; width <= 160; width += 1) {
+  for (let width = 40; width <= 160; width += 1) {
     for (const speaking of [false, true]) {
-      const tree = bandTree({ items, counts, open: false, width, speaking,
-                              onToggle: noop, onDismiss: noop, onSpeak: noop });
+      const tree = bandTree({ counts, open: false, width, speaking,
+                              onToggle: noop, onSpeak: noop });
       assert.ok(drawnWidth(tree) <= width, `width ${width}: drew ${drawnWidth(tree)}`);
       // The switch keeps its icon and its state however narrow the band is.
       const label = String(pressable(tree, BAND_SPEAK)?.label);
       assert.equal(label.startsWith("♪ ") && label.endsWith(speaking ? "on" : "off"), true, label);
     }
   }
-  // The product's name is given up before the speech switch's state word is:
-  // the verb alone still says which way a press goes.
-  const narrow = bandTree({ items, counts, open: false, width: 80, speaking: true,
-                            onToggle: noop, onDismiss: noop, onSpeak: noop });
+  // The product's name and the speech switch's word are given up before a
+  // figure is: the counts are what the line is read for, and the verb alone
+  // still says which way a press goes.
+  const narrow = bandTree({ counts, open: false, width: 30, speaking: true,
+                            onToggle: noop, onSpeak: noop });
   assert.equal(pressable(narrow, BAND_TOGGLE)?.label, "≡ Open");
-  assert.equal(pressable(narrow, BAND_SPEAK)?.label, "♪ Speak: on");
-  const wide = bandTree({ items, counts, open: false, width: 160, speaking: true,
-                          onToggle: noop, onDismiss: noop, onSpeak: noop });
+  assert.equal(pressable(narrow, BAND_SPEAK)?.label, "♪ on");
+  const wide = bandTree({ counts, open: false, width: 160, speaking: true,
+                          onToggle: noop, onSpeak: noop });
+  assert.equal(pressable(wide, BAND_TOGGLE)?.label, "≡ Open llm-fleet");
   assert.equal(pressable(wide, BAND_SPEAK)?.label, "♪ Speak: on");
   // A band too narrow for the word drops it rather than running off the edge:
   // the icon and the state are what a person presses for.
   let shortened = 0;
-  for (let width = 73; width <= 80; width += 1) {
-    const tree = bandTree({ items, counts, open: false, width, speaking: true,
-                            onToggle: noop, onDismiss: noop, onSpeak: noop });
+  for (let width = 30; width <= 45; width += 1) {
+    const tree = bandTree({ counts, open: false, width, speaking: true,
+                            onToggle: noop, onSpeak: noop });
     if (pressable(tree, BAND_SPEAK)?.label === "♪ on") {
       shortened += 1;
     }
     assert.ok(drawnWidth(tree) <= width, `width ${width}: drew ${drawnWidth(tree)}`);
   }
-  assert.ok(shortened > 0, "no width between 73 and 80 drew the short speech switch");
+  assert.ok(shortened > 0, "no width between 30 and 45 drew the short speech switch");
+});
+
+test("the count stays where it is when a figure is given up", () => {
+  // The count stands after the figures, so every figure dropped from the middle
+  // moved it, and the cut was then written one place along the line: the count
+  // was drawn twice or the line ran past its width. Found by review,
+  // 2026-11-23.
+  for (let width = 20; width <= 70; width += 1) {
+    const tree = bandTree({ counts: { working: 5, waiting: 3, failed: 0 },
+                            attention: 2, open: false, width, onToggle: noop });
+    const line = renderedText(tree).join("");
+    const counted = line.match(/needs? you/g)?.length ?? 0;
+    assert.ok(counted <= 1, `width ${width}: the count was drawn ${counted} times`);
+    assert.ok(drawnWidth(tree) <= width, `width ${width}: drew ${drawnWidth(tree)}`);
+  }
+});
+
+test("what needs a person outranks the controls beside it on a narrow line", () => {
+  // The item count is the line's one cue out of the pane, and no other line
+  // carries it: a control gives up its place first, and the count itself is
+  // cut only when the switch alone leaves no room. Found by review, 2026-11-23.
+  const build = (width: number) => bandTree({
+    counts: { working: 0, waiting: 0, failed: 0 }, attention: 1, open: false,
+    width, speaking: false, pacer: { enabled: true }, onPacer: noop,
+    onToggle: noop, onSpeak: noop,
+  });
+  for (let width = 30; width <= 80; width += 1) {
+    const tree = build(width);
+    assert.ok(drawnWidth(tree) <= width, `width ${width}: drew ${drawnWidth(tree)}`);
+    // The whole count survives wherever the switch and the count alone fit.
+    assert.equal(renderedText(tree).join("").includes("1 needs you"), true,
+                 `width ${width}: the count was not drawn in full`);
+  }
+  // At 40 the gear has already gone, and the line is still inside its width.
+  assert.equal(pressable(build(40), BAND_PACER), undefined);
+  assert.equal(pressable(build(40), BAND_SPEAK)?.label, "♪ off");
+  // Narrower than the switch and the count, the count is cut and marked rather
+  // than dropped: a line that says less is still a line that says something.
+  const cut = renderedText(build(20)).join("");
+  assert.equal(cut.includes("1 ne"), true);
+  assert.equal(cut.includes("..."), true);
+  assert.ok(drawnWidth(build(20)) <= 20, `width 20: drew ${drawnWidth(build(20))}`);
 });

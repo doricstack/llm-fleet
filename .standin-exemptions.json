@@ -1,0 +1,606 @@
+{
+ "standins": [],
+ "fixtures": [
+  {
+   "path": "config/fixtures/README.md",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/bad-version/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/bad-version/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/bad-version/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/claude-limits/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/claude-limits/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/claude-limits/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/codex-sessions/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/codex-sessions/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/codex-sessions/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/command-argv/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/command-argv/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/command-argv/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/command-not-argv/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/command-not-argv/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/command-not-argv/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/custom-sections-refused/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/custom-sections-refused/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/custom-sections-refused/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/custom-sections/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/custom-sections/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/custom-sections/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/defaults/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/defaults/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/dotted-key/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/dotted-key/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/dotted-key/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/explicit-config-missing/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/explicit-config-missing/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/home-from-userprofile/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/home-from-userprofile/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/home-from-userprofile/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/home-preferred-over-userprofile/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/home-preferred-over-userprofile/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/home-preferred-over-userprofile/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/huge-version-refused/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/huge-version-refused/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/huge-version-refused/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/integral-float/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/integral-float/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/integral-float/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/job-state-limits-refused/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/job-state-limits-refused/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/job-state-limits-refused/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/job-state-limits/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/job-state-limits/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/job-state-limits/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/key-control-refused/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/key-control-refused/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/key-control-refused/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/layout-values/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/layout-values/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/layout-values/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/legacy-environment/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/legacy-environment/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/malformed-json/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/malformed-json/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/malformed-json/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/missing-home/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/missing-home/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/missing-home/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-required/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-required/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-required/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-states/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-states/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-states/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-unsupported-platform/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-unsupported-platform/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/mods-unsupported-platform/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/nested-unknown-keys/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/nested-unknown-keys/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/nested-unknown-keys/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/non-json-constant/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/non-json-constant/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/non-json-constant/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/open-price-families/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/open-price-families/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/open-price-families/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/premium-readers-refused/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/premium-readers-refused/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/premium-readers-refused/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/premium-readers/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/premium-readers/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/premium-readers/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/profile-dollar-kept/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/profile-dollar-kept/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/proto-key-kept/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/proto-key-kept/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/proto-key-kept/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/providers-ready/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/providers-ready/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/providers-ready/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/relative-paths/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/relative-paths/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/relative-paths/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/required-when-enabled/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/required-when-enabled/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/required-when-enabled/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/retired-settings/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/retired-settings/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/retired-settings/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/rgb-integral-float/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/rgb-integral-float/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/rgb-integral-float/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/rules/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/rules/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/rules/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/runtime-credential-baseline/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/runtime-credential-baseline/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/runtime-credential-baseline/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/runtime-credential-extended/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/runtime-credential-extended/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/runtime-credential-extended/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/section-order-index-refused/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/section-order-index-refused/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/section-order-index-refused/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/source-targets/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/source-targets/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/source-targets/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/statusline-prices-retired/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/statusline-prices-retired/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/statusline-prices-retired/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/statusline-spend-window/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/statusline-spend-window/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/statusline-spend-window/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/tab-tint-stale-refused/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/tab-tint-stale-refused/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/tab-tint-stale-refused/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/trailing-slash-state-dir/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/trailing-slash-state-dir/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/trailing-slash-state-dir/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/type-mismatch/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/type-mismatch/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/type-mismatch/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unknown-key/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unknown-key/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unknown-key/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unresolved-variable/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unresolved-variable/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unresolved-variable/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unsafe-numbers-refused/config.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unsafe-numbers-refused/env.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "config/fixtures/unsafe-numbers-refused/expected.json",
+   "kind": "synthetic"
+  },
+  {
+   "path": "tests/fixtures/rate-cards/anthropic.md",
+   "kind": "recorded",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing.md"
+  },
+  {
+   "path": "tests/fixtures/rate-cards/deepseek.html",
+   "kind": "recorded",
+   "source": "https://api-docs.deepseek.com/quick_start/pricing/"
+  },
+  {
+   "path": "tests/fixtures/rate-cards/kimi.md",
+   "kind": "recorded",
+   "source": "https://platform.kimi.ai/docs/pricing/chat.md"
+  },
+  {
+   "path": "tests/fixtures/rate-cards/mimo.md",
+   "kind": "recorded",
+   "source": "https://mimo.mi.com/static/docs/price/pay-as-you-go.md"
+  },
+  {
+   "path": "tests/fixtures/rate-cards/openrouter.json",
+   "kind": "recorded",
+   "source": "https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints"
+  }
+ ]
+}

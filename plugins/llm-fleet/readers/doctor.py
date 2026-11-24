@@ -28,7 +28,8 @@ from typing import Any, Mapping, Sequence
 if __package__ in (None, ""):
     import plugin_root  # noqa: F401  (puts the plugin root on the import path)
 
-from config.loader import ConfigError, config_location, load_config, load_schema
+from config.loader import (ConfigError, config_location, load_config, load_schema,
+                           resolved_environment)
 
 MINIMUM_PYTHON = (3, 11)
 
@@ -84,7 +85,7 @@ def hint_keys(hint: str) -> list[str]:
 def diagnose(config_path: str | None = None,
              environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     """The whole diagnosis, as data; `render` writes it for a person."""
-    environment = dict(os.environ if environ is None else environ)
+    environment = resolved_environment(dict(os.environ if environ is None else environ))
     schema = load_schema("")
     location = config_location(config_path, environment)
     # The home travels with the diagnosis, so a path is shortened against the

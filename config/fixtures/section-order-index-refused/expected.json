@@ -1,0 +1,6 @@
+{
+  "errors": [
+    {"code": "E_CONFIG_TYPE", "path": "pane.sectionOrder[0]"},
+    {"code": "E_CONFIG_RULE", "path": "pane.sectionOrder[1]"}
+  ]
+}

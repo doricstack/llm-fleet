@@ -127,6 +127,24 @@ function stateOf(document: unknown, fallback: ReaderState): ReaderState {
     : "failed";
 }
 
+/**
+ * One source's own state, read from that source rather than from its container.
+ *
+ * The roster publishes `sources` as a map of source name to state word, and the
+ * map has no state of its own: asking it for one found nothing and marked every
+ * source failed. A word this layer does not know is the source failing, as it is
+ * for a whole document; an absent entry is the fallback.
+ */
+function sourceState(value: unknown, fallback: ReaderState): ReaderState {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  if (typeof value === "string") {
+    return READER_STATES.has(value as ReaderState) ? value as ReaderState : "failed";
+  }
+  return stateOf(value, fallback);
+}
+
 function errorsOf(document: unknown): { source: string; reason: string }[] {
   if (!isObject(document)) {
     return [];
@@ -438,14 +456,14 @@ function rosterFrom(document: unknown): Roster {
     }
   }
   return {
-    state: stateOf(document, "empty"),
+    state: stateOf(document, "unavailable"),
     jobs: jobsOf(document),
     interactive: counts,
     errors: errorsOf(document),
     providers,
     sources: {
-      jobs: stateOf(sources, "empty"),
-      interactive: stateOf(sources, "empty"),
+      jobs: sourceState(sources.jobs, "empty"),
+      interactive: sourceState(sources.interactive, "empty"),
     },
     spend_series: isObject(document) ? spendSeriesOf(document.spend_series) : null,
   };
@@ -468,7 +486,7 @@ function pullRequestsFrom(document: unknown): PullRequests {
       opened_at: isoSeconds(entry.opened_at),
       mine: entry.mine === true,
     }));
-  return { state: stateOf(document, "empty"), prs, errors: errorsOf(document) };
+  return { state: stateOf(document, "unavailable"), prs, errors: errorsOf(document) };
 }
 
 function skillItems(value: unknown): SkillItem[] {
@@ -514,7 +532,7 @@ function skillsFrom(document: unknown): Skills {
     }
   }
   return {
-    state: stateOf(document, "empty"),
+    state: stateOf(document, "unavailable"),
     generated_at: maybeCount(source.generated_at),
     counts,
     scopes: skillScopes(source.scopes),
@@ -579,7 +597,7 @@ function worktreesFrom(document: unknown): Worktrees {
     };
   });
   return {
-    state: stateOf(document, "empty"),
+    state: stateOf(document, "unavailable"),
     worktrees,
     errors: errorsOf(document),
   };
@@ -657,7 +675,7 @@ function loadFrom(document: unknown): Load {
     });
   }
   return {
-    state: stateOf(document, "empty"),
+    state: stateOf(document, "unavailable"),
     sampled_at: maybeCount(source.sampled_at),
     total: wholeCount(source.total) ?? 0,
     system: loadSystemFrom(source.system),
@@ -776,7 +794,7 @@ function sessionFrom(document: unknown): SessionFigures {
     }
   }
   return {
-    state: stateOf(document, "empty"),
+    state: stateOf(document, "unavailable"),
     absent: list(source.absent).filter((name): name is string => typeof name === "string"),
     ...Object.fromEntries(numbers),
     ...Object.fromEntries(words),

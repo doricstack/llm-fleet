@@ -48,8 +48,9 @@
  * The terminal tab is tinted by the band's level where the terminal draws a
  * tab color, and given its own color back when the band clears or the session
  * ends. While a draft is typed the hint line under the prompt ends with a key
- * tip. `/worktrees` and `/keys` open the pane on one section, and the folds a
- * person leaves are kept for the next session.
+ * tip. `/worktrees` and `/keys` open the pane on one section. A fold a person
+ * presses lasts for the session, and the configuration is where every session
+ * starts.
  *
  * A `-p` run or an SDK host has nobody to show any of this to, so it starts no
  * timer and reads nothing on its own.
@@ -65,16 +66,15 @@ import type { PaneConfig } from "../components/options.ts";
 import type { FleetFold } from "../types/index.d.ts";
 import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.ts";
 import { recolor, THEME } from "../components/palette.ts";
-import { CLOSE, DETAILS_PREFIX, FOCUS_CLEAR, FOCUS_PREFIX, HIDE_PREFIX,
-         REPLY_PENDING_SECONDS, replyKey, replyText, SHOW_ALL_PREFIX, TOGGLE_ALL,
+import { CLOSE, DETAILS_PREFIX, drawnFolds, FOCUS_CLEAR, FOCUS_PREFIX, HIDE_PREFIX,
+         REPLY_PENDING_SECONDS, replyKey, replyText, SHOW_ALL_PREFIX, switchedOff, TOGGLE_ALL,
          TOGGLE_PREFIX, unreadableKey,
          type Focus, type PaneActions, type PaneOptions, type RepliesPaused }
   from "../components/pane.ts";
 import { mask } from "../components/mask.ts";
 import { pendingSources, stepStream } from "../components/stream.ts";
 import { isReading, isRefusal, surfaceTree } from "../components/surface.ts";
-import { answeredSources, bandConfigFrom, bandCounts, bandItems, bandTree, hiddenLimitFrom,
-         keptHidden } from "../components/band.ts";
+import { bandConfigFrom, bandCounts, bandItems, bandTree, hiddenLimitFrom } from "../components/band.ts";
 import { bindPrimitives, drawsFields, mount, type HostElements } from "../components/mount.ts";
 import { snapshotFrom } from "../components/snapshot.ts";
 import { newEvents, type FleetEvent } from "../components/alerts.ts";
@@ -146,13 +146,6 @@ export const LIVE_CLAIM_KEY = "live.claim";
  * about twelve frames a second, enough for a row to read as sliding.
  */
 export const FRAME_MS = 80;
-/**
- * How long after a paint a write it asked for is made: at the next tick, which
- * the host runs as an event of its own rather than as part of the paint.
- */
-export const AFTER_PAINT_MS = 1;
-/** The longest a session's end waits for the folds and the last look it is still writing. */
-export const END_WRITES_MS = 2_000;
 /** The most frames one movement may ask for, so frames stop even if no paint comes. */
 const FRAME_LIMIT = Math.ceil((BLINK_MS + SLIDE_MS) / FRAME_MS) + 2;
 /**
@@ -179,9 +172,11 @@ export const COUNTS_KEY = "live-counts";
  */
 export const HIDDEN_KEY = "band-hidden";
 /**
- * The session state holding which sections a person folded. The host keeps
- * state under the plugin's own name and reads this reference from the source,
- * so the name is spelled here once, as the literal the manifest carries.
+ * The session state holding the folds a person pressed in this session, presses
+ * only: the configuration decides every section nobody pressed, and nothing
+ * about a fold reaches the store. The host keeps state under the plugin's own
+ * name and reads this reference from the source, so the name is spelled here
+ * once, as the literal the manifest carries.
  */
 const FOLDED = { plugin: "llm-fleet", key: "folded" } as const;
 /**
@@ -193,12 +188,12 @@ const FOLDED = { plugin: "llm-fleet", key: "folded" } as const;
  */
 const SHOWN_ALL = { plugin: "llm-fleet", key: "shownAll" } as const;
 /**
- * The session state holding the sections a person put away.
+ * The session state holding the switches a person pressed in the section
+ * picker: true for a section switched off, false for one switched on.
  *
- * Beside the folds, because it is the same kind of thing: a choice about the
- * pane that lasts for this session and crosses a hot reload. It stays out of
- * the resolved configuration for the same reason the folds do, so a reading
- * that lands with a new order cannot walk over a press.
+ * Beside the folds, because it is the same kind of thing: a press about the
+ * pane that lasts for this session and crosses a hot reload, and outranks the
+ * configuration's `off` without ever being written where another session reads.
  */
 const HIDDEN = { plugin: "llm-fleet", key: "hidden" } as const;
 /**
@@ -255,12 +250,6 @@ export function speechIsOn(value: unknown): boolean {
 }
 /** How often a session looks for the switch another session pressed. */
 export const SPEECH_POLL_MS = 1_500;
-/**
- * Where the folds a person left are kept, in the plugin's own store, so the
- * next session opens with them. The host's `fleet.folded` holds them for this
- * session across a reload; this holds them across sessions.
- */
-export const FOLDS_KEY = "folds";
 /** Where the person's own word on the key tips is kept: false is off, anything else is no word. */
 export const TIPS_KEY = "key-tips";
 /** Where the tab color is written, inside the plugin. */
@@ -349,6 +338,50 @@ export function paneNumberFrom(documents: unknown,
 type Fold = FleetFold;
 
 /**
+ * What the person is looking at, apart from how the pane is folded.
+ *
+ * A one-section open names a section; a figure, on the pane or on the band,
+ * names a filter. Neither is a fold or a switch, and neither is written
+ * anywhere: the paint reads them, and when one ends the paint simply stops
+ * reading it, so nothing has to be put back.
+ */
+type View = {
+  /** The section `/worktrees` or `/keys` opened the pane on, or null. */
+  section: string | null;
+  /** The state a figure narrowed the pane to, or null for the whole fleet. */
+  focus: Focus | null;
+  /**
+   * Whether the person has said what to look at themselves, by a figure, Show
+   * all, or the two controls that fold every section. Until they have, a pane
+   * opened while something failed opens on that, worked out on each paint.
+   */
+  chosen: boolean;
+  /**
+   * How many times the view has been set, or left standing by Escape. Work
+   * that finishes later reads it before it acts: a different number is the
+   * person's newer word, and the late answer changes nothing.
+   */
+  generation: number;
+};
+
+/**
+ * Change the view, in one step that waits on nothing.
+ *
+ * Every change goes through here, so there is one place a view can change and
+ * one count that says it did. It answers whether the section or the filter
+ * moved, which is what a caller asks before it requests a frame. Called with no
+ * change it still counts: that is how Escape, which ends no view, tells an open
+ * still in flight that the person has moved on.
+ */
+function setView(state: State,
+                 change: { section?: string | null; focus?: Focus | null; chosen?: boolean } = {}): boolean {
+  const before = state.view;
+  const after = { ...before, ...change, generation: before.generation + 1 };
+  state.view = after;
+  return after.section !== before.section || after.focus !== before.focus;
+}
+
+/**
  * What the pane draws from: the last reading, or the reason there is none.
  *
  * One of these per registration rather than one for the module: the engine
@@ -366,7 +399,8 @@ type State = {
   counting: boolean;
   hydrated: boolean;
   /**
-   * Which sections are folded, by name, once anything has been pressed.
+   * The folds a person pressed in this session, by section name: true folded,
+   * false open.
    *
    * Only what a person pressed, not what the pane draws: the configuration
    * decides every section nobody touched, and a reading that lands while the
@@ -375,38 +409,87 @@ type State = {
    * nobody has an opinion about, while the presses stand.
    *
    * It lives for this session and nowhere else, and the host holds it: a press
-   * folds a section for now, and a hot reload of the plugin keeps it.
+   * folds a section for now, a hot reload of the plugin keeps it, and the next
+   * session starts on the configuration.
    */
   pressed: Fold;
-  /** Whether the fold this session was left in has been asked for. */
+  /** Whether the presses the host holds for this session have been asked for. */
   restored: boolean;
+  /** The read of those presses, and after it each write of them, in the order made. */
+  pressWrites: Promise<unknown>;
   /** Which sections a person pressed to draw in full, by name. */
   shownAll: Fold;
   /**
-   * The sections a person put away, by name.
+   * The switches a person pressed in the section picker, by section name: true
+   * off, false on.
    *
    * Kept apart from the folds: a fold changes how much of a section is read,
-   * while a section put away is not read here at all. Both are presses, so both
+   * while a section switched off is not drawn at all. Both are presses, so both
    * live in this session's state and outrank the configuration.
    */
   putAway: Fold;
-  /** Whether the sections this session opened with put away have been asked for. */
+  /** Whether the switches the host holds for this session have been asked for. */
   putAwayRestored: boolean;
+  /** The read of those switches, and after it each write of them, in the order made. */
+  switchWrites: Promise<unknown>;
   /**
-   * The state a press on a headline figure narrowed the pane to.
+   * What the person is looking at: a one-section view, a filter, or neither.
    *
-   * It lives for this session and only while it is pressed: the figures at the
-   * top keep counting the whole machine, and the clear control beside them
-   * widens the pane again.
+   * Held here, in this load's memory, and nowhere else. A view changes no fold
+   * and no switch, so ending one puts nothing back, and it changes only through
+   * `setView`.
    */
-  focus: Focus | null;
+  view: View;
   /**
-   * Whether the person has chosen a focus themselves, by pressing a figure or
-   * Show all. Until they have, opening the pane goes to what failed, since a
-   * pane opened while something is wrong is opened for that. Once they have,
-   * their choice stands for the session and the pane never narrows itself again.
+   * How many presses on the band's figures have asked the pane to open.
+   *
+   * A press the host does not place puts the focus back, and a second press can
+   * land before the first answers: a late refusal would then undo the second
+   * press's narrowing and mark the open pane closed. A press carries the count
+   * it took, and one a newer press has passed reverts nothing. Found by review,
+   * 2026-11-23.
    */
-  focusChosen: boolean;
+  bandOpens: number;
+  /**
+   * The filter a refused band press restores, as the last one that landed.
+   *
+   * Two presses can be in flight at once, and the older one's refused open is
+   * ignored; the newer one must not then put back the focus the older press
+   * had only tentatively set, which nobody ever saw. It is captured before the
+   * first of those presses changes anything and released when the newest
+   * answers. Found by review, 2026-11-23.
+   */
+  bandBase: { section: string | null; focus: Focus | null; chosen: boolean;
+              open: boolean } | null;
+  /** Whether a band press is still waiting on the engine to place its pane. */
+  bandPending: boolean;
+  /**
+   * The newest band press whose open the host placed.
+   *
+   * An older press can answer after a newer one has already placed, and the
+   * newer press is the person's last word: only an open newer than every other
+   * landing may draw its filter. Found by review, 2026-11-23.
+   */
+  bandLanded: number;
+  /**
+   * The view's generation as the band's own last change left it.
+   *
+   * An open a figure on the band asked for acts when it lands only while the
+   * two still agree. Escape, a command or a press in the pane since then is the
+   * person's newer word, and the late answer changes nothing.
+   */
+  bandGeneration: number;
+  /**
+   * The newest generation something other than the band left the view at, as
+   * a band press found it.
+   *
+   * Each press on the band keeps the generation its own change produced, and
+   * its open acts when it lands only if that generation is newer than this. A
+   * newer press sets `bandGeneration` to its own, so without this floor an
+   * older open from before Escape would read as current again the moment a
+   * newer press was made.
+   */
+  bandFloor: number;
   /** The rows a person pressed open, by the key the row carries. */
   details: Record<string, true>;
   /**
@@ -417,7 +500,7 @@ type State = {
   pacerArmedAt: number;
   /** Whether the sections this session was left in full have been asked for. */
   shownAllRestored: boolean;
-  /** The band items a person dismissed, by key. */
+  /** Item dismissals an earlier version recorded, by key. */
   hidden: string[];
   /** The replies sent from a pane on this machine, by `replyKey`, newest last. */
   replied: string[];
@@ -525,24 +608,6 @@ type State = {
   /** The tab's heartbeat, at a third of the staleness, and the interval it runs at. */
   tabBeat: { cancel(): void } | null;
   tabBeatMs: number;
-  /** The fold saves to the store, one after another, so the last press is the one kept. */
-  foldSaves: Promise<unknown>;
-  /** Whether the person has been told the folds could not be saved, so it is said once. */
-  foldToast: boolean;
-  /** Whether the folds the last session left have been read, or found absent. */
-  foldsLoaded: boolean;
-  /** Whether a press landed before they were, so the merge is saved once they are. */
-  foldsDirty: boolean;
-  /** The sections pressed before they were, saved over what the store holds once they are. */
-  foldsPending: Fold;
-  /** This load's last write of the held fold, so its writes land in the order made. */
-  foldWrites: Promise<unknown>;
-  /** The read of the folds a session opens with, which adds writes of its own when it lands. */
-  foldRestore: Promise<unknown>;
-  /** The writes a paint asked for, made at the next tick rather than inside it. */
-  afterPaint: (() => void)[];
-  /** The tick those writes wait on; null while none waits. */
-  afterPaintTick: { cancel(): void } | null;
 };
 
 /**
@@ -1345,20 +1410,6 @@ function hydrate($: Engine, state: State): void {
     });
 }
 
-/**
- * The fold each section starts in, which is the one the configuration declares.
- *
- * One place decides, so a press flips the same value the pane drew rather than
- * a second guess at it. A reading that carried the pane's configuration decides
- * the order and every section's start; a reading that carried none, which is
- * what an older one looks like, falls back to the packaged default.
- */
-function startFolded(width: number, now: number, pane: PaneConfig | null): Fold {
-  const base = paneOptions(width, now, pane).sections;
-  return Object.fromEntries(sectionNames(pane).map(
-    (name) => [name, base[name]?.collapsed ?? false]));
-}
-
 /** The sections this pane draws, which a resolved configuration may reorder. */
 function sectionNames(pane: PaneConfig | null): string[] {
   // An absent configuration is all eight. A configuration that is there
@@ -1367,52 +1418,45 @@ function sectionNames(pane: PaneConfig | null): string[] {
 }
 
 /**
- * The fold the pane draws with.
+ * What a fold press records: the presses with this one laid over them, the
+ * sections it named, and whether it changed anything the pane drew.
  *
- * One place decides, so a press flips the same value the pane drew rather than a
- * second guess at it: what a person pressed outranks the configuration, and a
- * section nobody pressed is wherever its configuration starts it.
+ * `drawn` is the fold each section had on the paint the press was made on, so a
+ * heading press flips what the person saw, whatever decided it: the
+ * configuration, an earlier press, a filter, a failure or a view. `every` is
+ * the sections the two controls that fold them all speak for: the ones that
+ * paint drew.
  */
-function foldDrawn(pressed: Fold, configured: Fold, names: string[]): Fold {
-  return Object.fromEntries(names.map(
-    (name) => [name, pressed[name] ?? configured[name] ?? false]));
-}
-
-/**
- * Fold what a press named, say whether it changed anything this pane drew, and
- * name the sections it pressed, which are what it writes.
- */
-function folded(pressed: Fold, configured: Fold, element: string,
-                names: string[]): { pressed: Fold; changed: boolean; named: string[] } {
-  const drawn = foldDrawn(pressed, configured, names);
+function folded(pressed: Fold, drawn: Fold, element: string, names: string[],
+                every: string[]): { pressed: Fold; changed: boolean; named: string[] } {
   if (element.startsWith(TOGGLE_PREFIX)) {
     const name = element.slice(TOGGLE_PREFIX.length);
-    if (!names.includes(name)) {
+    const shown = drawn[name];
+    // A heading is pressed where it is drawn: a key from a reading that has
+    // since gone names a section this paint did not draw, and is a press on
+    // nothing.
+    if (!names.includes(name) || shown === undefined) {
       return { pressed, changed: false, named: [] };
     }
-    // The flip is off what is drawn, not off what happens to be in the pressed
-    // map: a section the configuration folded and nobody has pressed draws
-    // folded, so the first press on it opens it rather than folding it again.
-    return { pressed: { ...pressed, [name]: !(drawn[name] ?? false) }, changed: true, named: [name] };
+    return { pressed: { ...pressed, [name]: !shown }, changed: true, named: [name] };
   }
   if (element === TOGGLE_ALL + ".collapse" || element === TOGGLE_ALL + ".expand") {
     const to = element.endsWith(".collapse");
-    if (!names.length) {
+    if (!every.length) {
       return { pressed, changed: false, named: [] };
     }
-    // Every section this pane draws gets a press of its own, and a section the
-    // pane is not drawing keeps the one it already had: the order can change
-    // under a session, and a control that replaced the whole map would drop the
-    // fold of a section that is merely out of sight for now, so it came back
-    // wherever its configuration started it rather than where it was left.
-    const merged = { ...pressed,
-                   ...Object.fromEntries(names.map((name) => [name, to])) };
+    // Every section this paint drew gets a press of its own, and a section it
+    // did not draw keeps the one it already had: a card a filter or an empty
+    // reading left out, or one that is switched off, was not there to be
+    // pressed, and a control that replaced the whole map would drop the fold of
+    // a section that is merely out of sight for now.
+    const merged = { ...pressed, ...Object.fromEntries(every.map((name) => [name, to])) };
     // The press is recorded even when every section already draws that way, so
-    // the person's last action stands if a later configuration disagrees. Only
-    // the redraw is skipped: a pane redrawn for a press that changed nothing is
+    // the person's last action stands if a later reading disagrees. Only the
+    // redraw is skipped: a pane redrawn for a press that changed nothing is
     // redrawn for nothing.
-    const already = names.every((name) => (drawn[name] ?? false) === to);
-    return { pressed: merged, changed: !already, named: names };
+    const already = every.every((name) => (drawn[name] ?? to) === to);
+    return { pressed: merged, changed: !already, named: every };
   }
   return { pressed, changed: false, named: [] };
 }
@@ -1433,20 +1477,6 @@ function isFold(value: unknown): value is Fold {
     .every((entry) => typeof entry === "boolean");
 }
 
-/**
- * Take back the fold this session was left in, if it was left in one.
- *
- * The host holds this, so it survives a hot reload of the plugin, which rebuilds
- * the module and with it everything a registration remembers. A session the
- * host holds no fold for is a new one, and it opens with the folds the last
- * session left, from the store. It is read once per registration, off the
- * paint: a paint answers from what it holds, and the configured fold is what it
- * holds until this lands.
- *
- * The reference is written out here rather than named by a constant, because the
- * host lists the values a module reads and writes by reading them off its
- * source: a key it cannot see is a value nobody can list.
- */
 /**
  * Ask the host which sections were left drawn in full, once per session.
  *
@@ -1473,18 +1503,19 @@ function restoreShownAll($: Engine, state: State): void {
 }
 
 /**
- * Ask the host which sections a person put away, once per session.
+ * Ask the host which switches a person pressed in this session, once per load.
  *
  * What the session drew while this read was out is newer than what the host
  * holds, so the two are merged with the press winning, and the pane is redrawn
- * only when that changed what it draws.
+ * only when that changed what it draws. Nothing is written back: the host
+ * already holds what it answered with.
  */
 function restorePutAway($: Engine, state: State): void {
   if (state.putAwayRestored) {
     return;
   }
   state.putAwayRestored = true;
-  $.state.get(HIDDEN).then((held) => {
+  state.switchWrites = $.state.get(HIDDEN).then((held) => {
     if (!isFold(held.value)) {
       return;
     }
@@ -1497,250 +1528,58 @@ function restorePutAway($: Engine, state: State): void {
   }).catch(() => undefined);
 }
 
+/**
+ * Ask the host which folds a person pressed in this session, once per load.
+ *
+ * The host holds them, so they survive a hot reload of the plugin, which
+ * rebuilds the module and with it everything a registration remembers. A
+ * session the host holds nothing for is a new one, and it opens on the
+ * configuration: nothing else is read, and the store keys older builds kept
+ * folds under are left exactly as they stand. It is read off the paint, which
+ * answers from what it holds, and a press made while the read is out is newer
+ * than what the host still holds, so it wins. Nothing is written back.
+ */
 function restoreFold($: Engine, state: State): void {
   if (state.restored) {
     return;
   }
   state.restored = true;
-  let restored: Fold = {};
-  state.foldRestore = $.state.get(FOLDED)
-    .then(async (held): Promise<{ value: unknown }> => isFold(held.value) ? held
-      : { value: await $.store.get(FOLDS_KEY).catch(() => undefined) })
-    .then((held) => {
-      if (!isFold(held.value)) {
-        return;
-      }
-      // A press that landed while this was in flight is newer than what the host
-      // still holds, so it wins: what is taken from the host is the sections
-      // nobody has pressed since. Reading this into state blindly would undo a
-      // press the person can see, while the host kept the newer value.
-      const merged = { ...held.value, ...state.pressed };
-      // Redrawn only when the fold actually changed, so a session that pressed
-      // nothing is not repainted for a value it already had.
-      const same = JSON.stringify(merged) === JSON.stringify(state.pressed);
-      state.pressed = merged;
-      if (!same) {
-        // What the host holds is written again with the merge in it: a press
-        // made while this read was out was written on its own, and the sections
-        // this read brought back would be lost by the next reload if they were
-        // only ever held here.
-        // This read was started by a paint, and the host refuses a write that
-        // work a paint started makes, so it is made at the next tick.
-        restored = held.value;
-        const brought = held.value;
-        afterPaint($, state, () => {
-          queueFold($, state, {}, brought);
-        });
-        $.ui.invalidate("ui.render");
-      }
-    })
-    .catch(() => undefined)
-    .finally(() => {
-      state.foldsLoaded = true;
-      // A press that landed before this read kept its fold in the host alone:
-      // saved now, with what was read merged under it, so the next session
-      // opens with both rather than with the press over nothing.
-      if (state.foldsDirty) {
-        state.foldsDirty = false;
-        const pending = state.foldsPending;
-        state.foldsPending = {};
-        saveFolds($, state, pending, restored);
-      }
-    });
-}
-
-/**
- * Write a change to the session's held fold: `over` is what a press set, laid
- * over what is held, and `under` is what a restore brought, laid only where
- * nothing stands.
- *
- * Every load of the session writes the same held fold, and each holds its own
- * picture of it, so no load writes its whole picture: the fold is read, the
- * change applied to what is held, and the write made at the version read,
- * read again if another write landed first.
- */
-async function writeFold($: Engine, over: FleetFold, under: FleetFold): Promise<void> {
-  try {
-    for (;;) {
-      const read = await $.state.get(FOLDED);
-      const current: FleetFold = isFold(read.value) ? read.value : {};
-      const kept: FleetFold = { ...under, ...current, ...over };
-      if (JSON.stringify(kept) === JSON.stringify(current)) {
-        break;
-      }
-      const written = await $.state.set(FOLDED, kept, { ifVersion: read.version });
-      if (written.isSet || written.version === read.version) {
-        break;
-      }
+  state.pressWrites = $.state.get(FOLDED).then((held) => {
+    if (!isFold(held.value)) {
+      return;
     }
-  } catch {
-    // The host would not hold it: this load still draws the fold it restored.
-  }
+    const merged = { ...held.value, ...state.pressed };
+    // Redrawn only when the fold actually changed, so a session that pressed
+    // nothing is not repainted for a value it already had.
+    const same = JSON.stringify(merged) === JSON.stringify(state.pressed);
+    state.pressed = merged;
+    if (!same) {
+      $.ui.invalidate("ui.render");
+    }
+  }).catch(() => undefined);
 }
 
 /**
- * Write a change to the held fold after every change this load made before it.
+ * Hand the host this session's fold presses, so a reload keeps them.
  *
- * A write refused at a moved version reads again and is made once more; left to
- * run beside a later press's write, an earlier press could land after it and
- * undo it. One at a time, in the order made, each lands over the last.
+ * Called from a press and never from a paint, whose writes the host refuses.
+ * The write follows the read of what the host held and every earlier write, so
+ * what lands is the whole map with the press in it, and the last press is the
+ * one kept. A host that refuses costs the fold across a reload and nothing else.
  */
-function queueFold($: Engine, state: State, over: FleetFold, under: FleetFold): void {
-  state.foldWrites = state.foldWrites
-    .then(() => writeFold($, over, under))
+function keepPresses($: Engine, state: State): void {
+  restoreFold($, state);
+  state.pressWrites = state.pressWrites
+    .then(() => $.state.set(FOLDED, state.pressed))
     .catch(() => undefined);
 }
 
-/**
- * Wait for this load's writes still out, the held fold, the stored folds and
- * the last look, at most `END_WRITES_MS`: a session's end lets go of them, and
- * a write held by a host that stopped answering must not hold the end with it.
- * With no clock to bound the wait, the end does not wait.
- *
- * A fold read still out when the end starts adds writes of its own when it
- * lands, so the chains are read again after each wait, until a wait ends with
- * none of them moved.
- */
-function writesLanded($: Engine, state: State): Promise<void> {
-  const chains = (): Promise<unknown>[] =>
-    [state.foldRestore, state.foldWrites, state.foldSaves];
-  return new Promise<void>((resolve) => {
-    let bound: { cancel(): void } | null = null;
-    let over = false;
-    const done = (): void => {
-      over = true;
-      bound?.cancel();
-      resolve();
-    };
-    try {
-      bound = $.clock.every(END_WRITES_MS, done);
-    } catch {
-      resolve();
-      return;
-    }
-    void (async () => {
-      for (;;) {
-        const waited = chains();
-        await Promise.all(waited).catch(() => undefined);
-        if (over) {
-          return;
-        }
-        if (chains().every((chain, index) => chain === waited[index])) {
-          break;
-        }
-      }
-      done();
-    })();
-  });
-}
-
-/**
- * Make a write a paint asked for at the next tick of the clock.
- *
- * The host refuses a write of its own values made while a render hook draws,
- * and work a paint started is still that paint's when it lands; a tick is an
- * event of its own. Every write waiting goes at one tick, in the order asked.
- * With no clock they wait for the next event that is not a paint, a prompt or
- * the session's end, which `drainAfterPaint` runs; written from the paint they
- * would only be refused.
- */
-function afterPaint($: Engine, state: State, write: () => void): void {
-  // An ended session draws nothing more and nothing later drains the queue, so
-  // a read that lands after the end writes at once: it was started by the
-  // session's start, not by a paint, unless no start ever came.
-  if (state.ended) {
-    write();
-    return;
-  }
-  state.afterPaint.push(write);
-  if (state.afterPaintTick !== null) {
-    return;
-  }
-  try {
-    const tick = $.clock.every(AFTER_PAINT_MS, () => {
-      // One tick is all it waits for, and a tick of one already cancelled
-      // never runs another's writes.
-      if (state.afterPaintTick !== tick) {
-        return;
-      }
-      drainAfterPaint(state);
-    });
-    state.afterPaintTick = tick;
-  } catch {
-    // No clock: the writes wait for the next event that is not a paint.
-  }
-}
-
-/**
- * Make every write a paint asked for now, from an event that is not a paint,
- * and stop the tick that was waiting to.
- */
-function drainAfterPaint(state: State): void {
-  state.afterPaintTick?.cancel();
-  state.afterPaintTick = null;
-  for (const queued of state.afterPaint.splice(0)) {
-    queued();
-  }
-}
-
-/**
- * Keep the folds as they stand now: in the host for this session, and in the
- * store for the next one.
- *
- * Neither write is waited for, and a refusal never undoes the fold: the pane a
- * person is looking at folds whatever the host or the store says. The store
- * writes go one after another, so two quick presses land in the order they
- * were pressed, and a store that refuses is said in a toast, once until a save
- * lands again, since the folds then last only for this session.
- */
-function keepFold($: Engine, state: State, named: string[]): void {
-  // Only the sections this press named: the rest of this load's picture may be
-  // older than what another load of the session pressed since. A section it
-  // named is written even where this load already drew it that way, since
-  // another load may have moved it, and the press is the person's last word.
-  const pressed: Fold = {};
-  for (const name of named) {
-    const value = state.pressed[name];
-    if (value !== undefined) {
-      pressed[name] = value;
-    }
-  }
-  queueFold($, state, pressed, {});
-  // Before the folds the last session left are read, a store write would put
-  // this press alone over them; the merge is saved once they land.
-  if (!state.foldsLoaded) {
-    state.foldsDirty = true;
-    state.foldsPending = { ...state.foldsPending, ...pressed };
-    return;
-  }
-  saveFolds($, state, pressed, {});
-}
-
-/**
- * Save a change to the folds the next session opens with, in the store, which
- * a paint may write: only the host's own values are refused it.
- *
- * As with the held fold, `over` is what was pressed and `under` what a restore
- * brought, applied to what the store holds now rather than written whole: a
- * session's picture can be older than another's save. A store that cannot say
- * what it holds is not written, and that is said as a refused save is.
- */
-function saveFolds($: Engine, state: State, over: Fold, under: Fold): void {
-  state.foldSaves = state.foldSaves
-    .then(async () => {
-      const stored: unknown = await $.store.get(FOLDS_KEY);
-      const current: Fold = isFold(stored) ? stored : {};
-      await $.store.set(FOLDS_KEY, { ...under, ...current, ...over });
-    })
-    .then(() => { state.foldToast = false; })
-    .catch(() => {
-      if (state.foldToast) {
-        return;
-      }
-      state.foldToast = true;
-      return $.ui.toast("fleet: section folds kept for this session; could not save them.",
-                        { timeoutMs: state.alerts.toastMs }).catch(() => undefined);
-    });
+/** Hand the host this session's switch presses, under the same terms as the folds. */
+function keepSwitches($: Engine, state: State): void {
+  restorePutAway($, state);
+  state.switchWrites = state.switchWrites
+    .then(() => $.state.set(HIDDEN, state.putAway))
+    .catch(() => undefined);
 }
 
 /**
@@ -2351,19 +2190,6 @@ function printedDocument(stdout: string): Record<string, unknown> | null {
 }
 
 /**
- * How many items the band holds that a person dismissed from it: the ones a
- * reading still names, since a dismissal of something long gone hides nothing.
- */
-function hiddenCount(state: State, documents: unknown, at: number): number {
-  if (!state.hidden.length || !isReading(documents as ReaderDocuments | null)) {
-    return 0;
-  }
-  const live = new Set(bandItems(snapshotFrom(documents as ReaderDocuments, at), [],
-                                 state.sessionId).map((item) => item.key));
-  return state.hidden.filter((key) => live.has(key)).length;
-}
-
-/**
  * Ask which terminal the session runs in, and which tab, once, at startup.
  *
  * The tab is what sessions sharing it key their shared record by: inside tmux
@@ -2442,8 +2268,11 @@ function ownLevel(state: State): TabLevel | undefined {
     return undefined;
   }
   const snapshot = snapshotFrom(held.documents as ReaderDocuments, held.at);
+  // How long a waiting job leads the band travels with the reading, so the tab
+  // follows the same wait the pane does rather than the packaged default.
+  const band = { ...bandConfigFrom(held.documents), now: held.at };
   return state.alerts.tint.enabled
-    ? tabLevel(bandItems(snapshot, state.hidden, state.sessionId)) : null;
+    ? tabLevel(bandItems(snapshot, state.hidden, state.sessionId, band)) : null;
 }
 
 /** The terminal this session may tell the helper about: one that draws a tab color, in a session with an id to key its entry by. */
@@ -2882,41 +2711,6 @@ const ONE_SECTION_TITLES: Record<string, string> = {
 };
 
 /**
- * The section a band item's row is drawn in, from the key the item carries.
- *
- * The key's head is the source that raised it, which is the same word the pane
- * groups its rows under: a job is a background session, a pull request is the
- * pull requests section, a flagged skill is the skills section, and a pacer run
- * is pacer's. A key this does not know opens the pane as it always has, at the
- * top.
- */
-export function sectionOfKey(key: string): string | null {
-  if (key.startsWith("pacer:")) {
-    return "pacer";
-  }
-  if (key.startsWith("job:")) {
-    return "sessions";
-  }
-  if (key.startsWith("pr:")) {
-    return "prs";
-  }
-  // Skills carry the prefix the section is named by in this module; the key
-  // and the section are the same word, so a flagged finding opens its rows.
-  if (key.startsWith("skill:")) {
-    return "skills";
-  }
-  return null;
-}
-
-/**
- * Open the pane on one section, or close it when it is already open on that one.
- *
- * Every other section is folded, so the one asked for is in view without
- * scrolling, and the folds are kept as a press keeps them: a person who left the
- * pane on Worktrees finds it there in the next session. A second run, with the
- * pane open and the section unfolded, closes the pane, the way `/llm-fleet` does.
- */
-/**
  * What a pane that the host would not place says.
  *
  * Every surface that docks a pane places it by width, the desktop app included,
@@ -2928,30 +2722,46 @@ export function notPlaced(section?: string): string {
     : `llm-fleet opens its ${section} section once this window is wider (${MARK}).`;
 }
 
-async function openOn($: Engine, state: State, section: string): Promise<{ text: string }> {
+/**
+ * Open the pane on one section, or close it when it is already open on that one.
+ *
+ * The section is a view: the paint draws it open and every other section
+ * folded, so the one asked for is in view without scrolling, and no fold or
+ * switch moves. A second run, with the pane open on that section, ends the view
+ * and closes the pane, and the pane opened after it draws what it drew before.
+ *
+ * The view is set whether or not a reading is held. Before the first one lands
+ * there is no configuration to say the section is drawn, and none is needed:
+ * a view moves nothing, and the paint ignores a view on a section it cannot
+ * draw, so the view applies once the reading lands and is nothing to undo when
+ * the configuration turns out to leave the section out.
+ *
+ * Which of the two a run is gets decided before anything is awaited, so two
+ * runs in flight at once open once and then close, rather than both reading the
+ * pane as shut.
+ */
+async function openSection($: Engine, state: State, section: string): Promise<{ text: string }> {
   const title = ONE_SECTION_TITLES[section] ?? section;
   const held = state.held !== null && "documents" in state.held ? state.held : null;
   const pane = paneConfigFrom(held?.documents);
   const names = sectionNames(pane);
-  if (!names.includes(section)) {
+  // A refusal needs a configuration to read: with no reading held, or a
+  // reading with no pane document, there is none, and the open goes ahead.
+  if (pane !== null && !names.includes(section)) {
     return { text: `The llm-fleet pane draws no ${title} section: the configuration leaves it out `
       + `of pane.sectionOrder (${MARK}).` };
   }
-  // A section the configuration hides draws nothing however it is folded, so
-  // folding the rest around it would open an empty pane and keep that fold.
-  if (pane?.sections[section]?.visible === false) {
+  // A section the configuration hides is never drawn, so a view on it would be
+  // one the paint ignores. A section that is only switched off is drawn by the
+  // view, and its switch stays where it is.
+  if (pane !== null && pane.sections[section]?.visible === false) {
     return { text: `The llm-fleet pane hides its ${title} section: set pane.sections.${section}.visible `
       + `to true to show it (${MARK}).` };
   }
-  // The open is the first call on every path: an open asked for after a wait
-  // reads as one nobody asked for, and a dock that has not measured itself
-  // refuses those on every surface, the desktop app included. Opening a pane
-  // that is already open draws nothing, so the close below costs one no-op.
-  const wasOpen = state.open;
-  const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
-  const now = (await $.clock.now()) / 1000;
-  const drawn = foldDrawn(state.pressed, startFolded(0, now, pane), names);
-  if (wasOpen && drawn[section] === false) {
+  if (state.open && state.view.section === section) {
+    // The second press on the same control is the way back out: the view ends,
+    // and because it moved no fold there is nothing to put back.
+    setView(state, { section: null });
     state.open = false;
     // A probe asked for by the run that opened it is not wanted once it is shut.
     state.freshAsked = false;
@@ -2959,26 +2769,33 @@ async function openOn($: Engine, state: State, section: string): Promise<{ text:
     $.ui.invalidate("ui.render");
     return { text: `llm-fleet pane closed (${MARK}).` };
   }
-  // The open names a section, so the pane draws that section and nothing
-  // narrows it to a state the person did not ask for. The clear and the flag
-  // sit on an open that landed: a command refused for a hidden or absent
-  // section, and one the host would not place, both drew nothing, and a press
-  // that drew nothing must not take the person's narrowing away.
+  const wasOpen = state.open;
+  const before = state.view.section;
+  setView(state, { section });
+  const mine = state.view.generation;
+  state.open = true;
+  // The open is the first call awaited: an open asked for after a wait reads as
+  // one nobody asked for, and a dock that has not measured itself refuses those
+  // on every surface, the desktop app included. Opening a pane that is already
+  // open draws nothing.
+  const opened = await $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true });
   const landed = wasOpen || opened.isPlaced;
-  if (landed) {
-    state.focus = null;
-    // The folds are the open too: a pane that was not placed must not leave a
-    // layout behind that nobody chose.
-    state.pressed = { ...state.pressed,
-                      ...Object.fromEntries(names.map((name) => [name, name !== section])) };
-    keepFold($, state, names);
+  // Escape, a second run or a press since this one started is the person's
+  // newer word, and this answer changes nothing it left.
+  if (state.view.generation === mine) {
+    if (!landed) {
+      // A pane the host would not place drew nothing, so the press must not
+      // leave a view nobody saw, and the next ask opens the pane again rather
+      // than closing what was never drawn.
+      setView(state, { section: before });
+    }
+    state.open = landed;
   }
-  // A pane the host would not place is not open: the next ask opens it again
-  // rather than closing what was never drawn.
-  state.open = landed;
   $.ui.invalidate("ui.render");
-  return { text: wasOpen || opened.isPlaced
-    ? `llm-fleet pane opened on ${title} (${MARK}).` : notPlaced(title) };
+  if (!landed) {
+    return { text: notPlaced(title) };
+  }
+  return { text: `llm-fleet pane opened on ${title} (${MARK}).` };
 }
 
 /**
@@ -3050,9 +2867,13 @@ async function selectVoice($: Engine, state: State, args: string, generation: nu
 export const register: Register = (on, options) => {
   launch = launchFrom(options);
   const state: State = { held: null, looking: false, readingWhole: false, counting: false, hydrated: false, pressed: {},
-                         restored: false, shownAll: {}, shownAllRestored: false,
-                         putAway: {}, putAwayRestored: false,
-                         focus: null, focusChosen: false,
+                         restored: false, pressWrites: Promise.resolve(),
+                         shownAll: {}, shownAllRestored: false,
+                         putAway: {}, putAwayRestored: false, switchWrites: Promise.resolve(),
+                         view: { section: null, focus: null, chosen: false, generation: 0 },
+                         bandOpens: 0,
+                         bandBase: null, bandPending: false, bandLanded: 0, bandGeneration: 0,
+                         bandFloor: 0,
                          details: {},
                          confirmingPacer: false, pacerArmedAt: 0,
                          hidden: [], replied: [], replying: new Set(), cleared: [],
@@ -3071,10 +2892,7 @@ export const register: Register = (on, options) => {
                          clock: null, clockMs: 0,
                          interactive: true, freshAsked: false, terminal: null,
                          tab: tabSender(), tabBeat: null, tabBeatMs: 0, tabId: null, tipsWord: undefined, tipsSet: false, tipTurn: 0, tipTimer: null,
-                         tipMs: 0, foldSaves: Promise.resolve(), foldToast: false,
-                         foldsLoaded: false, foldsDirty: false, foldsPending: {}, foldWrites: Promise.resolve(),
-                         foldRestore: Promise.resolve(),
-                         afterPaint: [], afterPaintTick: null };
+                         tipMs: 0 };
   on("session.start", async ($, event, next) => {
     // One command at a time, and a refusal costs one command rather than the
     // session. A name can already belong to the person, whose own /speak wins
@@ -3118,6 +2936,7 @@ export const register: Register = (on, options) => {
     }
     restoreFold($, state);
     restoreShownAll($, state);
+    restorePutAway($, state);
     rememberBand($, state);
     if (state.interactive) {
       followSpeech($, state);
@@ -3151,15 +2970,10 @@ export const register: Register = (on, options) => {
     if (state.sessionId !== "" && state.interactive) {
       void helper($, ["focus", state.sessionId]);
     }
-    // A prompt is not a paint, so what a paint left waiting is written here
-    // too, which is all that writes it where the host gives no clock.
-    drainAfterPaint(state);
     return next(event);
   });
 
   on("session.end", async ($, event, next) => {
-    // Written before the timers stop, so nothing a paint asked for is lost.
-    drainAfterPaint(state);
     state.ended = true;
     state.timer?.cancel();
     state.timer = null;
@@ -3173,12 +2987,9 @@ export const register: Register = (on, options) => {
     stopTabBeat(state);
     // The tab gets its own color back before the session lets go of it. The
     // helper is bounded by its own timeout, so an end is never held for long.
-    // The folds and the last look still being written land before the end
-    // does, for as long as `END_WRITES_MS` allows.
-    await Promise.all([
-      untint($, state).catch(() => undefined),
-      writesLanded($, state),
-    ]);
+    // Nothing else is waited for: no fold is written at the end, because no
+    // fold is written anywhere another session reads.
+    await untint($, state).catch(() => undefined);
     return next(event);
   });
 
@@ -3188,12 +2999,16 @@ export const register: Register = (on, options) => {
   on("ui.close", async ($, event, next) => {
     if (event.id === PANE) {
       state.open = false;
+      // Escape ends no view: a filter is still there when the pane is opened
+      // again. It does count, so an open still in flight finds the person has
+      // moved on and changes nothing when it lands.
+      setView(state);
     }
     return next(event);
   });
 
   on("command.run", { command: "worktrees" }, async ($) => {
-    const answer = await openOn($, state, "worktrees");
+    const answer = await openSection($, state, "worktrees");
     // Opened, the worktrees are probed on the next look, within one look's
     // interval: a person who asks for them is asking how they stand, not how
     // they stood at the last cached probe. The pane opens on the reading it
@@ -3211,7 +3026,7 @@ export const register: Register = (on, options) => {
       return { text: KEYS_USAGE };
     }
     if (asked === "open") {
-      return openOn($, state, "keys");
+      return openSection($, state, "keys");
     }
     state.tipsWord = asked.tips;
     state.tipsSet = true;
@@ -3385,17 +3200,28 @@ export const register: Register = (on, options) => {
     // packaged default is what it draws.
     const pane = paneConfigFrom(state.held.documents);
     const names = sectionNames(pane);
-    // What the configuration starts each section at, recomputed from the reading
+    // What the configuration asks of each section, recomputed from the reading
     // this paint is drawing: a fresh reading brings its own configuration, and a
-    // fold taken from the first one the pane ever saw would go on deciding the
+    // start taken from the first one the pane ever saw would go on deciding the
     // layout after the reading that said so had been replaced.
-    const configured = startFolded(width, now, pane);
+    const base = paneOptions(width, now, pane);
     // Asked for once, and drawn from what is held until it lands: a paint that
     // waited on the host would be a pane drawn empty while it waited.
     restoreFold($, state);
     restoreShownAll($, state);
     restorePutAway($, state);
-    const drawnFolds = foldDrawn(state.pressed, configured, names);
+    // The fold each section has on this paint, for the presses made on it: a
+    // heading press flips what the person saw. It is this paint's own and is
+    // kept nowhere, because a drawing is derived and nothing derived is stored.
+    let shownFolds: Fold = {};
+    /** Whether a section is switched off as things stand at the press. */
+    const off = (name: string): boolean => switchedOff(name, { ...base, putAway: state.putAway });
+    /** Whether a one-section view is what the pane draws, as things stand at the press. */
+    const viewing = (): boolean => {
+      const section = state.view.section;
+      return section !== null && names.includes(section)
+        && base.sections[section]?.visible !== false;
+    };
     // Drawn while open, so the ages on it count between readings.
     keepTime($, state);
     const shown = streamed($, state, state.held);
@@ -3405,7 +3231,10 @@ export const register: Register = (on, options) => {
     return surfaceTree({ documents: withSession(shown, state.engineSession) as never,
                          width, now, surface: e.surface,
                          takenAt: state.held.at,
-                         transform: (drawn: Pane) => moved($, state, drawn, now * 1000),
+                         transform: (drawn: Pane) => {
+                           shownFolds = drawnFolds(drawn);
+                           return moved($, state, drawn, now * 1000);
+                         },
                          onPress: (element: string) => {
                            // The host runs this in the plugin's environment when
                            // a button is pressed, which is how the pane hears
@@ -3448,11 +3277,10 @@ export const register: Register = (on, options) => {
                            if (element === FOCUS_CLEAR) {
                              // Shown whole by the person's own word: the pane
                              // does not work out an open of its own again this
-                             // session. A frame is owed only when something was
+                             // session, and a one-section view ends with the
+                             // filter. A frame is owed only when something was
                              // narrowed, so a pane already whole does not repaint.
-                             state.focusChosen = true;
-                             if (state.focus !== null) {
-                               state.focus = null;
+                             if (setView(state, { section: null, focus: null, chosen: true })) {
                                $.ui.invalidate("ui.render");
                              }
                              return;
@@ -3462,16 +3290,17 @@ export const register: Register = (on, options) => {
                              const known: Focus[] = ["working", "waiting", "failed"];
                              const chosen = known.find((name) => name === which) ?? null;
                              // The toggle answers the state the pane is drawn in:
-                             // the same figure pressed twice widens it again.
-                             const shown = state.focus;
+                             // the same figure pressed twice widens it again. A
+                             // pane drawn on one section draws no filter, so a
+                             // figure pressed there narrows to what it counts.
+                             const shown = viewing() ? null : state.view.focus;
                              const wanted = chosen !== null && chosen !== shown ? chosen : null;
                              // A press on a figure is the person choosing what
                              // they are looking at, so the pane keeps that
-                             // choice and does not pick for them on the next open.
-                             state.focusChosen = true;
-                             // A frame is owed when what is drawn changes.
-                             if (wanted !== shown) {
-                               state.focus = wanted;
+                             // choice and does not pick for them on the next
+                             // open, and a one-section view ends for it. A
+                             // frame is owed when what is drawn changes.
+                             if (setView(state, { section: null, focus: wanted, chosen: true })) {
                                $.ui.invalidate("ui.render");
                              }
                              return;
@@ -3492,52 +3321,76 @@ export const register: Register = (on, options) => {
                              }
                              return;
                            }
-                           // The picker's press: a section put away draws no
-                           // card, and its name in the picker stays, so the
-                           // same press brings it back. Only a section this
-                           // pane lists is acted on, so a key from a reading
-                           // that has since gone is not a press on nothing.
+                           // The picker's press: a section switched off draws
+                           // no card, and its name in the picker stays, so a
+                           // press there switches it on and the next switches
+                           // it off again. The press is laid over whatever the
+                           // switch says now, the configuration's word or an
+                           // earlier press. Only a section this pane lists is
+                           // acted on, so a key from a reading that has since
+                           // gone is not a press on nothing.
                            if (element.startsWith(HIDE_PREFIX)) {
                              const name = element.slice(HIDE_PREFIX.length);
                              if (names.includes(name)) {
-                               state.putAway = { ...state.putAway,
-                                                 [name]: state.putAway[name] !== true };
-                               $.state.set(HIDDEN, state.putAway).catch(() => undefined);
+                               state.putAway = { ...state.putAway, [name]: !off(name) };
+                               keepSwitches($, state);
                                $.ui.invalidate("ui.render");
                              }
                              return;
                            }
-                           const press = folded(state.pressed, configured, element, names);
+                           // Expand all and Collapse all speak for every section
+                           // this paint drew, and for no other: not a card a
+                           // filter or an empty reading left out, and a
+                           // switched-off card a one-section view drew is one
+                           // of them.
+                           const every = names.filter((name) => shownFolds[name] !== undefined);
+                           const press = folded(state.pressed, shownFolds, element, names, every);
+                           if (press.named.length === 0) {
+                             return;
+                           }
+                           // A fold press ends a one-section view: the layout
+                           // is the person's own from here, and the view moved
+                           // no fold, so nothing is put back. The two controls
+                           // that speak for every section end a filter as well,
+                           // which would otherwise keep drawing one state's rows
+                           // whatever the folds say, and they are the person's
+                           // own word, so the pane does not open itself on what
+                           // failed again this session.
+                           const wide = press.named.length > 1 || !element.startsWith(TOGGLE_PREFIX);
+                           const ended = wide
+                             ? setView(state, { section: null, focus: null, chosen: true })
+                             : state.view.section !== null && setView(state, { section: null });
                            // What the host holds is the presses, so a press is
                            // written whenever it recorded anything at all, even
                            // when every section already drew that way: the press
                            // is the person's last word on those sections, and a
-                           // later configuration that disagrees must not walk
-                           // over it.
-                           if (press.pressed !== state.pressed) {
-                             state.pressed = press.pressed;
-                             keepFold($, state, press.named);
+                           // later reading that disagrees must not walk over it.
+                           state.pressed = press.pressed;
+                           keepPresses($, state);
+                           // A second press on the same drawing flips what the
+                           // first one left, not what the paint before it drew.
+                           for (const name of press.named) {
+                             shownFolds[name] = press.pressed[name] === true;
                            }
                            // Only a press that changed what is drawn asks for a
                            // frame.
-                           if (press.changed) {
+                           if (press.changed || ended) {
                              $.ui.invalidate("ui.render");
                            }
                          },
                          options: withTipsWord(state, {
-                           ...paneOptions(width, now, pane), folded: drawnFolds,
-                           pressedFolds: state.pressed,
+                           ...base,
+                           // Presses only: what each section draws is worked
+                           // out by the pane, from these and what stands now.
+                           folded: state.pressed,
                            shownAll: state.shownAll,
                            putAway: state.putAway,
+                           viewSection: state.view.section,
                            // What the person chose stands; until they choose,
-                           // the pane works out its own narrowing from the
-                           // reading this paint draws.
-                           focus: state.focusChosen ? state.focus : null,
-                           // The pane narrows itself only for an open that
-                           // names nothing: a command that opens one section,
-                           // or a band item that names a row, draws what it
-                           // names.
-                           focusAuto: !state.focusChosen,
+                           // the pane works out its own open from the reading
+                           // this paint draws, and holds none of it.
+                           focus: state.view.chosen ? state.view.focus : null,
+                           focusAuto: !state.view.chosen,
                            details: state.details,
                            actions: paneActions($, state, e.surface),
                            replied: state.replied,
@@ -3545,7 +3398,6 @@ export const register: Register = (on, options) => {
                                                                REPLY_PENDING_SECONDS),
                            cleared: state.cleared,
                            paused: state.paused,
-                           hidden: hiddenCount(state, state.held.documents, state.held.at),
                            fields: drawsFields(e.surface) }) },
                        primitives);
   });
@@ -3583,16 +3435,21 @@ export const register: Register = (on, options) => {
     const snapshot = held !== null
       ? snapshotFrom(withSession(held.documents, state.engineSession) as ReaderDocuments, held.at)
       : null;
-    // How long a waiting job leads the band, and how many dismissals are kept,
-    // travel with the reading.
-    const band = { ...bandConfigFrom(held ? held.documents : null), now };
-    const items = snapshot ? bandItems(snapshot, state.hidden, state.sessionId, band) : [];
     // The band draws states in the pane's tones, so a theme recolors both.
     const theme = paneConfigFrom(held?.documents)?.theme ?? THEME;
+    // The band draws no item, so a machine with one flagged skill and no job
+    // read as "Nothing running". The items the band would have drawn are
+    // counted here, after the person's dismissals, and the line says how many
+    // there are instead of calling the machine quiet. Found by review,
+    // 2026-11-23.
+    const attention = snapshot !== null && held !== null
+      ? bandItems(snapshot, state.hidden, state.sessionId,
+                  { ...bandConfigFrom(held.documents), now: held.at }).length
+      : undefined;
     return mount(recolor(bandTree({
-      items,
       counts: snapshot ? bandCounts(snapshot, state.sessionId) : null,
       spend: sessionSpend(snapshot),
+      attention,
       note: snapshot ? "Roster unread" : state.held === null ? "Reading the machine..."
         : "The fleet read failed",
       open,
@@ -3641,46 +3498,139 @@ export const register: Register = (on, options) => {
           .then(() => $.ui.invalidate("ui.render"))
           .catch(() => undefined);
       },
-      onOpen: (focus?: Focus, key?: string) => {
+      onOpen: (focus: Focus) => {
         // The band is read while the pane is shut, so a figure here is the
         // moment a person wants its rows: open the pane already narrowed to
         // them, and let the clear control inside widen it.
         //
-        // The item the band leads with names a row instead, and the pane draws
-        // no scroll container: opening it at the top would put that row below
-        // the fold. So the section the row lives in is opened alone, through
-        // the same path the commands that open one section use, and every
-        // other section is folded out of the way.
-        const section = key === undefined ? null : sectionOfKey(key);
-        if (section !== null) {
-          // The narrowing is dropped by the open that lands, not before it: a
-          // refusal for a section the pane does not draw opens nothing, and a
-          // press that changed nothing must not widen what is being read.
-          return openOn($, state, section).catch(() => undefined);
+        // The same figure pressed twice widens the pane again, which is what
+        // the figure inside the pane already does; a different one narrows to
+        // what it counts.
+        // A press the host does not place puts the focus back, and a second
+        // press can land before the first answers: without this count the
+        // first's late refusal restored stale focus and marked the pane the
+        // second press opened as closed. Only the newest press may revert.
+        // Found by review, 2026-11-23.
+        const attempt = ++state.bandOpens;
+        // The filter a refusal restores is the last one that landed. A press
+        // that starts while an earlier one is unanswered must not remember the
+        // focus that earlier press only tentatively set: the older refusal is
+        // ignored, and the newer one would then leave a filter nobody saw the
+        // press make. Found by review, 2026-11-23.
+        //
+        // Escape, a command or a press in the pane since the band's last change
+        // is the person's newer word. Every open still out from before it is
+        // void from here, so none of them can become the filter a refusal
+        // restores, and what a refusal of this press restores is the pane as
+        // that newer word left it.
+        const outside = state.view.generation !== state.bandGeneration;
+        if (outside) {
+          state.bandFloor = state.view.generation;
         }
-        state.focus = focus ?? null;
+        if (!state.bandPending || outside) {
+          state.bandBase = { section: state.view.section, focus: state.view.focus,
+                             chosen: state.view.chosen, open: state.open };
+        }
+        state.bandPending = true;
+        // The filter this press sets, kept for the case where its open lands
+        // while a newer press is still waiting: then this is the last filter
+        // that landed, and a refusal of the newer press returns here. A pane
+        // drawn on one section draws no filter, so the figure narrows to what
+        // it counts, and the one-section view ends for it.
+        const shown = state.view.section !== null ? null : state.view.focus;
+        const narrowing = shown === focus ? null : focus;
+        /** Change the view as the band's own doing, so its late answers know it. */
+        const view = (section: string | null, filter: Focus | null, chosen: boolean): void => {
+          setView(state, { section, focus: filter, chosen });
+          state.bandGeneration = state.view.generation;
+        };
         // The band's figure is the person choosing what to look at, so the
-        // pane keeps it rather than narrowing itself on the next open.
-        state.focusChosen = true;
+        // pane keeps it rather than opening itself on what failed.
+        view(null, narrowing, true);
+        // The generation this press's own change produced: what its open
+        // answers for when it lands, whatever a newer press has done since.
+        const mine = state.view.generation;
         state.open = true;
         $.ui.invalidate("ui.render");
+        // A pane the host would not place drew nothing, so the press must not
+        // take away the narrowing that was there: a narrow window would
+        // otherwise leave a filter nobody saw the press make.
+        const settle = () => {
+          state.bandPending = false;
+          state.bandBase = null;
+        };
+        const revert = () => {
+          const base = state.bandBase
+            ?? { section: null, focus: null, chosen: false, open: false };
+          // The pane's open state comes back too: an older press whose open
+          // landed left the pane open, and a refusal of the newer press set it
+          // closed, drawing a pane the host is still showing.
+          // Found by review, 2026-11-23.
+          state.open = base.open;
+          view(base.section, base.focus, base.chosen);
+          settle();
+          $.ui.invalidate("ui.render");
+        };
+        /**
+         * Whether the view moved by something other than the band since this
+         * press's own change: Escape, a command, or a press in the pane,
+         * whether or not a newer press on the band has been made after it.
+         * That is the person's newer word, so this answer changes nothing; the
+         * newest press only stops waiting.
+         */
+        const passed = (): boolean => {
+          if (mine > state.bandFloor && state.view.generation === state.bandGeneration) {
+            return false;
+          }
+          if (attempt === state.bandOpens) {
+            settle();
+          }
+          return true;
+        };
         return $.ui.open({ id: PANE, title: `llm-fleet (${MARK})`, closeOnEscape: true })
-          .catch(() => undefined);
-      },
-      onDismiss: () => {
-        // A key that names nothing the band could show now hides nothing, so
-        // it is let go here rather than kept until the limit pushes it out.
-        const current = snapshot
-          ? bandItems(snapshot, [], state.sessionId, band).map((item) => item.key) : [];
-        // Only a source that answered this reading can say its item has gone;
-        // a key from one that failed is kept for when it answers again.
-        state.hidden = keptHidden(state.hidden, current, items.map((item) => item.key),
-                                  band.hiddenLimit,
-                                  snapshot ? answeredSources(snapshot) : new Set<string>());
-        void $.store.set(HIDDEN_KEY, state.hidden).catch(() => undefined);
-        // What was dismissed no longer needs the person, so the tab follows the band.
-        void tint($, state);
-        $.ui.invalidate("ui.render");
+          .then((placed) => {
+            if (passed()) {
+              return;
+            }
+            if (attempt !== state.bandOpens) {
+              // A newer press overtook this one. Only the newest may revert,
+              // but an open that landed is the last filter that landed: it
+              // becomes what a refusal of the newer press restores, rather
+              // than the filter from before either press. Found by review,
+              // 2026-11-23.
+              if (placed.isPlaced) {
+                // Only a landing newer than every other is the last filter
+                // that landed: with three presses, an older open placing after
+                // a newer one must not become the filter a refusal of the
+                // newest press restores. One landing may both set the base for
+                // a newer press still waiting and draw when none is. Found by
+                // review, 2026-11-23.
+                if (attempt > state.bandLanded) {
+                  state.bandLanded = attempt;
+                  state.bandBase = { section: null, focus: narrowing, chosen: true, open: true };
+                  if (!state.bandPending) {
+                    view(null, narrowing, true);
+                    state.open = true;
+                    $.ui.invalidate("ui.render");
+                  }
+                }
+              }
+              return;
+            }
+            if (placed.isPlaced) {
+              state.bandLanded = attempt;
+              settle();
+            } else {
+              revert();
+            }
+          }, () => {
+            if (passed()) {
+              return;
+            }
+            if (attempt === state.bandOpens) {
+              revert();
+            }
+          });
       },
     }), theme), primitives);
   });

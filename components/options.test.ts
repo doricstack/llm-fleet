@@ -44,12 +44,21 @@ test("a configuration the reading carried decides the order and every start", ()
     // than the packaged title or legend of whichever section the schema names
     // first: absent and empty are the same answer here, and both are honest.
     assert.deepEqual(options.sections[name],
-                     { title: null, visible: shown, collapsed: folded, legend: null,
+                     { title: null, visible: shown, collapsed: folded, off: false, legend: null,
                        hideWhenEmpty: false }, name);
   }
   // A section the order does not name is not drawn. The order is the whole of
   // what was configured, not a starting point to add the rest back to.
   assert.equal("keys" in options.sections, false);
+});
+
+test("the packaged default order is the one the release documents", () => {
+  // A reading that carries no configuration draws this order. It is written
+  // here as well as in the schema on purpose: this is the copy a pane falls
+  // back to when the reading is older than the document, so a reorder here
+  // alone would show two machines two different panes.
+  assert.deepEqual(SECTIONS, ["session", "load", "pacer", "prs", "worktrees",
+                              "sessions", "skills", "warnings", "keys"]);
 });
 
 test("a reading carrying no configuration draws the packaged default", () => {
@@ -61,13 +70,13 @@ test("a reading carrying no configuration draws the packaged default", () => {
   for (const name of SECTIONS) {
     assert.equal(options.sections[name]?.visible, true, name);
   }
-  // The three the schema declares folded still start folded with nothing else
+  // The four the schema declares folded still start folded with nothing else
   // to go on, so a machine with no configuration file is not a pane that lost
   // its defaults.
-  for (const name of ["worktrees", "skills", "keys"]) {
+  for (const name of ["worktrees", "skills", "warnings", "keys"]) {
     assert.equal(options.sections[name]?.collapsed, true, name);
   }
-  for (const name of ["sessions", "session", "pacer", "prs", "warnings", "load"]) {
+  for (const name of ["sessions", "session", "pacer", "prs", "load"]) {
     assert.equal(options.sections[name]?.collapsed, false, name);
   }
 });
@@ -258,4 +267,63 @@ test("a key the host cannot fire is refused rather than listed", () => {
     state: "ready", order: ["sessions"], sections: { sessions: { visible: true, collapsed: false } },
     keys: { close: "q", collapse: "z", expand: "a" } }));
   assert.deepEqual([good?.keys.close, good?.keys.collapse, good?.keys.expand], ["q", "z", "a"]);
+});
+
+test("a section's switch reaches the pane, and one the document left out is on", () => {
+  const config = paneConfigFrom(reading({
+    state: "ready",
+    order: ["sessions", "worktrees", "keys"],
+    sections: { sessions: { visible: true, collapsed: false, off: false },
+                worktrees: { visible: true, collapsed: true, off: true },
+                // A reading an older build stored carries no switch at all.
+                keys: { visible: true, collapsed: true } },
+  }));
+  const options = paneOptions(80, NOW, config);
+  assert.equal(options.sections.sessions?.off, false);
+  assert.equal(options.sections.worktrees?.off, true);
+  assert.equal(options.sections.keys?.off, false);
+  // Off is not hidden and not folded: the three are separate answers.
+  assert.equal(options.sections.worktrees?.visible, true);
+  assert.equal(options.sections.worktrees?.collapsed, true);
+});
+
+test("a switch that is not a boolean refuses the whole document", () => {
+  // The same refusal the other two booleans get: `"off": "no"` read as truthy
+  // would take a section off the pane on the strength of a string.
+  for (const off of ["yes", "no", 1, 0, null, [], {}]) {
+    assert.equal(paneConfigFrom(reading({
+      state: "ready",
+      order: ["sessions", "warnings"],
+      sections: { sessions: { visible: true, collapsed: false, off: false },
+                  warnings: { visible: true, collapsed: false, off } },
+    })), null, JSON.stringify(off));
+  }
+});
+
+test("the packaged default switches every section on", () => {
+  const options = paneOptions(80, NOW, null);
+  for (const name of SECTIONS) {
+    assert.equal(options.sections[name]?.off, false, name);
+  }
+});
+
+test("a section a person added carries its own switch", () => {
+  const section = (off: unknown): unknown => ({
+    state: "ready", title: "Deploys", visible: true, collapsed: false, legend: null,
+    hideWhenEmpty: false, rows: [], errors: [], ...(off === undefined ? {} : { off }) });
+  const drawn = (off: unknown) => paneConfigFrom({
+    generated_at: NOW,
+    pane: { state: "ready", order: ["sessions", "custom:deploys"],
+            sections: { sessions: { visible: true, collapsed: false, off: false } } },
+    custom: { state: "ready", sections: { deploys: section(off) }, errors: [] },
+  });
+  assert.equal(drawn(true)?.sections["custom:deploys"]?.off, true);
+  assert.equal(drawn(false)?.sections["custom:deploys"]?.off, false);
+  assert.equal(drawn(undefined)?.sections["custom:deploys"]?.off, false);
+  // A section whose reading is missing keeps its place, switched on.
+  const missing = paneConfigFrom({
+    generated_at: NOW,
+    pane: { state: "ready", order: ["custom:deploys"], sections: {} },
+  });
+  assert.equal(missing?.sections["custom:deploys"]?.off, false);
 });

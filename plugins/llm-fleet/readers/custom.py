@@ -91,6 +91,7 @@ def read_section(key: str, section: Mapping[str, Any],
     document: dict[str, Any] = {
         "state": "unavailable", "title": section["title"], "legend": section["legend"],
         "visible": bool(section["visible"]), "collapsed": bool(section["collapsed"]),
+        "off": bool(section["off"]),
         "hideWhenEmpty": bool(section["hideWhenEmpty"]),
         "maxRows": int(section["maxRows"]),
         "summary": None, "rows": [], "printed": 0, "errors": [],

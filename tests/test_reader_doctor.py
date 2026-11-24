@@ -66,6 +66,14 @@ class ConfigurationTests(DoctorCase):
         text = "\n".join(doctor.render(diagnosis))
         self.assertIn("/llm-fleet setup", text)
 
+    def test_a_user_profile_alone_is_the_home_the_loader_reads(self):
+        # Windows sets USERPROFILE and may set no HOME; the diagnosis must name
+        # the same home the loader used, or a path is shortened against another.
+        self.config({"stateDir": "$HOME/state"})
+        diagnosis = doctor.diagnose(environ={"USERPROFILE": str(self.home), "PATH": str(self.bin)})
+        self.assertEqual(diagnosis["config"]["home"], str(self.home))
+        self.assertEqual(diagnosis["config"]["state"], "loaded")
+
     def test_a_refused_file_names_every_error_and_counts_as_a_problem(self):
         self.config({"providers": "none", "sources": {"jobs": {"enabled": "yes"}}})
         diagnosis = doctor.diagnose(environ=self.environ)

@@ -7,11 +7,11 @@
  * is always drawn, whatever the fleet holds.
  *
  * Beside it the band states the fleet in one line: how many sessions work and
- * wait, how many outcomes failed, and the worst thing that needs a person, with
- * the rest counted after it. Errors sort ahead of waits, so the first item is
- * the worst. This session's own job is left out, because a session telling its
- * own person that it is working is noise, and so is anything the person
- * dismissed.
+ * wait, how many outcomes failed, and what this session has spent. Each figure
+ * is a press that opens the pane already narrowed to the rows it counts, and
+ * the same figure pressed again widens it, so the band is a look rather than a
+ * one-way door. This session's own job is left out, because a session telling
+ * its own person that it is working is noise.
  *
  * Beside the fleet's switch sits the voice's. Speech is one switch for every
  * session on the machine, so the word on it is what the store says, and a press
@@ -31,16 +31,12 @@ import type { Job, Snapshot } from "./state.ts";
 
 /** The address of the band's switch, which is what a press comes back on. */
 export const BAND_TOGGLE = "fleet.band.toggle";
-/** The address of the button that hides what the band is showing. */
-export const BAND_DISMISS = "fleet.band.dismiss";
 /** The address of the switch that turns speech on or off in every session. */
 export const BAND_SPEAK = "fleet.band.speak";
 /** The address of pacer's switch, which is the machine's one gear. */
 export const BAND_PACER = "fleet.band.pacer";
 /** The address of a press on one of the band's figures, before the state it names. */
 export const BAND_FOCUS = "fleet.band.focus.";
-/** The address of a press on the item the band leads with. */
-export const BAND_ITEM = "fleet.band.item.";
 
 /** The cell the rule above the buttons is drawn from, written as a code point. */
 const BAND_RULE = "─";
@@ -122,7 +118,7 @@ function said(value: string | null | undefined): string {
 export type BandConfig = {
   /** How many dismissed keys are kept: the newest. */
   hiddenLimit: number;
-  /** How long after a job blocked it still leads the band rather than waiting in the pane. */
+  /** How long after a job blocked it still counts as waiting: past it the tab holds no level for it. */
   waitingJobSeconds: number;
 };
 
@@ -155,65 +151,7 @@ export function hiddenLimitFrom(documents: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : null;
 }
 
-/** The source each kind of band item comes from, by the head of its key. */
-const KEY_SOURCES: Record<string, string> = {
-  job: "roster", pr: "prs", skill: "skills", pacer: "pacer",
-};
-
-/** The source a band key belongs to, or null for a key no source makes. */
-function keySource(key: string): string | null {
-  return KEY_SOURCES[key.slice(0, key.indexOf(":"))] ?? null;
-}
-
-/**
- * The sources that answered this reading: read ready or empty, with no error.
- *
- * Only such a source can say an item has gone. A roster with one provider
- * failing is ready with an error, and that provider's jobs are absent only
- * because nobody could ask.
- */
-export function answeredSources(snapshot: Snapshot): Set<string> {
-  const answered = new Set<string>();
-  for (const name of Object.values(KEY_SOURCES)) {
-    // A reading taken before a source existed carries no document for it, and
-    // such a source has not answered.
-    const document = snapshot[name as keyof Snapshot] as
-      { state?: string; errors?: unknown[] } | undefined;
-    if (document === undefined) {
-      continue;
-    }
-    if ((document.state === "ready" || document.state === "empty")
-        && (document.errors ?? []).length === 0) {
-      answered.add(name);
-    }
-  }
-  return answered;
-}
-
-/**
- * The dismissed keys to keep once a dismissal is written.
- *
- * A key that names nothing the band could show now is dropped, since it hides
- * nothing, but only when its source answered this reading: an item absent
- * because its source failed is still dismissed when the source recovers. The
- * keys just dismissed go last, each kept once, and only the newest `limit` are
- * kept. Without `answered`, every source is taken to have answered.
- */
-export function keptHidden(hidden: readonly string[], current: readonly string[],
-                           dismissing: readonly string[], limit: number,
-                           answered: ReadonlySet<string> | null = null): string[] {
-  const live = new Set(current);
-  const fresh = new Set(dismissing);
-  const unasked = (key: string): boolean => {
-    const source = keySource(key);
-    return answered !== null && source !== null && !answered.has(source);
-  };
-  const kept = hidden.filter((key) => (live.has(key) || unasked(key)) && !fresh.has(key));
-  return [...new Set([...kept, ...dismissing])].slice(-limit);
-}
-
-/**
- * Whether a finding is in the owner's own skills.
+/** Whether a finding is in the owner's own skills.
  *
  * A row under a plugin install, a synced copy or a built-in is other people's
  * code: the pane shows it and neither the band nor an alert interrupts for it.
@@ -247,9 +185,9 @@ function skillItem(skill: Snapshot["skills"]["new"][number]): BandItem {  const 
  * time is a new item.
  *
  * A job that blocked longer ago than `waitingJobSeconds` is parked rather than
- * waiting on its person now, so it stays in the pane and off the band; the age
- * is read against `now`, or against the reading's own clock without one. A job
- * no read has dated is kept, since nothing shows it to be parked.
+ * waiting on its person now, so it is no item at all and the tab holds no level
+ * for it; the age is read against `now`, or against the reading's own clock
+ * without one. A job no read has dated is kept, since nothing shows it parked.
  */
 export function bandItems(snapshot: Snapshot, dismissed: readonly string[],
                           sessionId: string,
@@ -335,8 +273,6 @@ export function bandCounts(snapshot: Snapshot, sessionId = ""): BandCounts | nul
 }
 
 export type BandInput = {
-  /** What needs a person, worst first; empty when nothing does. */
-  items: BandItem[];
   /** The figures, or null while there is no reading or the roster could not be read. */
   counts: BandCounts | null;
   /**
@@ -348,6 +284,15 @@ export type BandInput = {
   spend?: string | null;
   /** Why there are no figures, when that is the case, such as a read in flight. */
   note?: string;
+  /**
+   * How many items need the person, after the person's own dismissals.
+   *
+   * The band's figures count sessions and failing checks; an item can need a
+   * person with every figure at zero, a flagged skill with no job beside it.
+   * The line says so rather than calling a machine with something to answer a
+   * quiet one. Absent where the caller keeps no items.
+   */
+  attention?: number;
   /** Whether the pane is open, which is what the switch's word says. */
   open: boolean;
   /** The cells the band is laid out in. */
@@ -357,7 +302,6 @@ export type BandInput = {
   /** Whether speech is on in every session; the speech switch is drawn only with `onSpeak`. */
   speaking?: boolean;
   onToggle: () => unknown;
-  onDismiss: () => void;
   onSpeak?: () => unknown;
   /**
    * Pacer's switch, drawn only on a machine that runs pacer.
@@ -365,20 +309,14 @@ export type BandInput = {
   pacer?: { enabled: boolean | null; confirming?: boolean } | null;
   onPacer?: () => unknown;
   /**
-   * Open the pane, narrowed to one of the figures, or to the whole fleet.
+   * Open the pane, narrowed to one of the figures.
    *
    * The band is on screen while the pane is shut, which is when a person reads
    * a count and wants the rows behind it; without this the figure is a number
-   * they have to go and find.
+   * they have to go and find. The same press widens the pane again, so a figure
+   * is a look rather than a state the person has to undo.
    */
-  /**
-   * The press that opens the pane, as this session's state to start it in.
-   *
-   * A figure names a state, and the pane opens narrowed to it. The item a band
-   * leads with names a row instead, so it hands its key over and the pane opens
-   * on the section that row lives in, the rest folded out of the way.
-   */
-  onOpen?: (focus?: "working" | "waiting" | "failed", key?: string) => unknown;
+  onOpen?: (focus: "working" | "waiting" | "failed") => unknown;
 };
 
 /** The cells a button adds around its label: "[ " before it and " ]" after. */
@@ -407,10 +345,9 @@ function button(key: string, label: string, onPress: () => unknown, primary = fa
  * The band's one line.
  *
  * The switch leads, so it sits in the same place whatever else the line holds.
- * The figures follow on chips, a figure at zero left out, and then the worst
- * item in its own color with the rest counted after it. Dismiss is offered only
- * when there is something to dismiss. A line too long for the band is cut from
- * the item's end, never from the switch or the figures.
+ * The figures follow on chips, a figure at zero left out, each a press that
+ * opens the pane narrowed to what it counted. A line too long for the band is
+ * cut from its last part, never from the switch or the figures.
  */
 export function bandTree(input: BandInput): Node {
   const toggle = fleetLabel(input.open, input.surface);
@@ -419,11 +356,15 @@ export function bandTree(input: BandInput): Node {
   // "[ " and " ]", a chip is its word with a cell of fill at each side, and
   // every part after the first sits two cells from the one before.
   let used = buttonCells(toggle);
+  let speakAt = -1;
+  let speakCells = 0;
   if (input.onSpeak !== undefined) {
     const speaking = input.speaking === true;
     const word = speakLabel(speaking, input.surface);
+    speakAt = parts.length;
     parts.push(button(BAND_SPEAK, word, input.onSpeak, speaking));
-    used += PART_GAP + buttonCells(word);
+    speakCells = PART_GAP + buttonCells(word);
+    used += speakCells;
   }
   // Pacer's switch sits beside the voice's, and only while the machine runs
   // pacer: a person who does not run that tooling never sees the gear.
@@ -435,11 +376,13 @@ export function bandTree(input: BandInput): Node {
                                             input.pacer?.confirming === true) }
     : null;
   let gearAt = -1;
+  let gearCells = 0;
   if (gear !== null) {
     const word = gear.label(false);
     gearAt = parts.length;
     parts.push(button(gear.key, word, gear.press));
-    used += PART_GAP + buttonCells(word);
+    gearCells = PART_GAP + buttonCells(word);
+    used += gearCells;
   }
   const figures: [number, string, Color, "working" | "waiting" | "failed"][] =
     input.counts === null ? [] : [
@@ -468,9 +411,27 @@ export function bandTree(input: BandInput): Node {
       used += cells;
     }
   }
-  if (input.counts !== null && figures.every(([count]) => count === 0)) {
-    parts.push(text({ dimColor: true }, "Nothing running"));
-    used += PART_GAP + "Nothing running".length;
+  // Items that need the person are a fact the line keeps even with no figures:
+  // a roster that is unread or disabled leaves `counts` null, and dropping the
+  // count there hid the one thing on the machine to answer. Found by review,
+  // 2026-11-23.
+  const needs = input.attention !== undefined && input.attention > 0
+    ? input.attention + (input.attention === 1 ? " needs you" : " need you")
+    : null;
+  // A nonzero figure says what is running, not that nothing needs the person:
+  // a failure beside a working job was dropped for the figure that did draw,
+  // and the band's one cue out of the pane went with it. `needs` is drawn at
+  // every roster state; "Nothing running" only when the figures agree there is
+  // nothing. Found by review, 2026-11-23.
+  const idle = input.counts !== null && figures.every(([count]) => count === 0);
+  const quiet = needs ?? (idle ? "Nothing running" : null);
+  let quietAt = -1;
+  if (quiet !== null) {
+    // The items themselves are no longer drawn here, so the line says how many
+    // there are and leaves the rows to the pane.
+    quietAt = parts.length;
+    parts.push(text({ dimColor: true }, quiet));
+    used += PART_GAP + quiet.length;
   }
   // What this session has spent, beside the figures: it is the one number about
   // this session a person wants without opening the pane, and the pane's own
@@ -482,72 +443,50 @@ export function bandTree(input: BandInput): Node {
     parts.push(chip(spend, "subtle"));
     used += PART_GAP + chipCells(spend);
   }
-  if (input.counts === null && input.note) {
-    // The note is the last part and the least of them, so it is cut to the
-    // room that is left rather than drawing the line past its width.
-    const note = fit(input.note, Math.max(0, input.width - used - PART_GAP));
-    if (note !== "") {
-      parts.push(text({ dimColor: true }, note));
-      used += PART_GAP + note.length;
+  if (input.counts === null) {
+    // With no figures the line still says what needs the person, and the note
+    // why the figures are absent takes the room that is left: the note is cut
+    // to fit, so a count of items must be drawn before it rather than after.
+    if (input.note) {
+      // The note is the last part and the least of them, so it is cut to the
+      // room that is left rather than drawing the line past its width.
+      const note = fit(input.note, Math.max(0, input.width - used - PART_GAP));
+      if (note !== "") {
+        parts.push(text({ dimColor: true }, note));
+        used += PART_GAP + note.length;
+      }
     }
   }
-  const dismiss = input.items.length > 0;
-  let dismissDrawn = dismiss;
-  // A band too narrow for the whole line gives up the product's name first,
-  // then the speech switch's state word: the verb still says which way a press
-  // goes, and nothing a person needs to read is cut.
-  const dismissWidth = dismiss ? PART_GAP + buttonCells("Dismiss") : 0;
-  let fixed = used + dismissWidth;
+  // The spend chip goes first, then the product's name, then the speech
+  // switch's state word, then pacer's, then figures from the least urgent end.
+  // The chip is a number a person can find on the pane's own tiles; a switch
+  // that lost its word would read as a control nobody can name. The fleet's
+  // switch is never given up, and the line is one row at every width.
+  if (spendAt >= 0 && used > input.width) {
+    parts.splice(spendAt, 1);
+    used -= PART_GAP + chipCells(spend as string);
+  }
+  let fixed = used;
   if (fixed > input.width) {
     const short = fleetLabel(input.open, input.surface, true);
     parts[0] = button(BAND_TOGGLE, short, input.onToggle, !input.open);
     used -= toggle.length - short.length;
-    fixed = used + dismissWidth;
+    fixed = used;
   }
   if (input.onSpeak !== undefined && fixed > input.width) {
     const speaking = input.speaking === true;
     const full = speakLabel(speaking, input.surface);
     const short = speakLabel(speaking, input.surface, true);
-    parts[1] = button(BAND_SPEAK, short, input.onSpeak, speaking);
+    parts[speakAt] = button(BAND_SPEAK, short, input.onSpeak, speaking);
     used -= full.length - short.length;
+    speakCells -= full.length - short.length;
   }
-  if (gear !== null && gearAt >= 0 && used + dismissWidth > input.width) {
+  if (gear !== null && gearAt >= 0 && used > input.width) {
     const full = gear.label(false);
     const short = gear.label(true);
     parts[gearAt] = button(gear.key, short, gear.press);
     used -= full.length - short.length;
-  }
-  // The spend chip goes before the item does: what needs a person is the reason
-  // the band is read, and a figure is still on the pane's own tiles. What
-  // decides it is the room the item needs, not only whether the fixed parts
-  // overflow: a line where the figures fit and the item does not gives the chip
-  // up too, so the item is drawn where it otherwise would not be.
-  //
-  // The item is a press when the pane can be opened from it, and a press is a
-  // button the host draws with chrome around its word: that chrome is budgeted
-  // here, because an item long enough to take all the room left is exactly the
-  // case where leaving it out draws the line past its width. The host then
-  // squeezes the item's label into a column one cell wide, which is the tall
-  // broken panel a long item used to produce.
-  const itemChrome = input.onOpen === undefined ? 0 : BUTTON_CHROME;
-  let room = input.width - used - PART_GAP - dismissWidth - itemChrome;
-  const crowded = input.items.length > 0 ? room <= 8
-    : used + dismissWidth + itemChrome > input.width;
-  if (spendAt >= 0 && crowded) {
-    parts.splice(spendAt, 1);
-    used -= PART_GAP + chipCells(spend as string);
-    room = input.width - used - PART_GAP - dismissWidth - itemChrome;
-  }
-  // What the line draws without the item: the switches, the figures and
-  // Dismiss. The item was cut to nothing above when that did not fit, so from
-  // here Dismiss goes first (it acts on an item the line has no room to show),
-  // then figures from the least urgent end. The fleet's switch is never given
-  // up, and the line is one row at every width.
-  if (used + dismissWidth > input.width) {
-    dismissDrawn = false;
-    // The room it was holding is free again, or the figures after it are
-    // dropped to make room for a button that is no longer drawn.
-    used -= dismissWidth;
+    gearCells -= full.length - short.length;
   }
   let dropped = 0;
   while (used > input.width && dropped < figureCells.length) {
@@ -556,38 +495,53 @@ export function bandTree(input: BandInput): Node {
   }
   if (dropped > 0) {
     parts.splice(figureStart, dropped);
+    // The count stands after the figures, so every figure given up moves it,
+    // and addressing the old place would cut a figure's text or put the count
+    // past the end of the line. Found by review, 2026-11-23.
+    if (quietAt >= figureStart + dropped) {
+      quietAt -= dropped;
+    }
   }
-  const [first, ...others] = input.items;
-  if (first !== undefined && room > 8) {
-    const failing = others.filter((item) => item.level === "error").length;
-    const waits = others.length - failing;
-    const rest = [failing > 0 ? failing + " more failing" : "",
-                  waits > 0 ? waits + " more waiting" : ""].filter(Boolean).join(", ");
-    const lead = fit(first.text, Math.max(4, room - (rest ? rest.length + 3 : 0)));
-    const words: Node[] = [
-      text({ color: first.level, bold: true, wrap: "truncate-end" }, lead),
-      ...(rest && lead.length + rest.length + 3 <= room
-        ? [text({ dimColor: true }, " · " + rest)] : []),
-    ];
-    // What the band leads with is the way into it: a press opens the pane,
-    // where the row it names is drawn with the rest of what it says.
-    parts.push(box({ flexDirection: "row", gap: 0, flexShrink: 1 },
-                   input.onOpen === undefined ? words
-                     : [{ type: "Button",
-                          props: { key: BAND_ITEM + first.key, label: lead,
-                                   onPress: () => input.onOpen?.(undefined, first.key) },
-                          children: pressable(words) }]));
+  // What needs a person is the line's one cue out of the pane, so it outranks
+  // the controls beside it: a control is named again inside the pane, while an
+  // item that needs the person is on no other line. The gear goes first, then
+  // the voice, and the count is cut only when the switch alone leaves no room.
+  // Found by review, 2026-11-23.
+  if (quiet !== null && used > input.width && gearCells > 0) {
+    parts.splice(gearAt, 1);
+    used -= gearCells;
+    gearCells = 0;
+    // The count is still in the line, and a part removed before it moves its
+    // place: addressing the old index would leave a hole where it was.
+    if (gearAt < quietAt) {
+      quietAt -= 1;
+    }
   }
-  const left = box({ flexDirection: "row", gap: 2, flexShrink: 1 }, parts);
-  const row = dismissDrawn
-    ? box({ flexDirection: "row", justifyContent: "space-between", gap: 2 }, [
-        left,
-        button(BAND_DISMISS, "Dismiss", input.onDismiss),
-      ])
-    : box({ flexDirection: "row", gap: 0 }, [left]);
+  if (quiet !== null && used > input.width && speakCells > 0) {
+    parts.splice(speakAt, 1);
+    used -= speakCells;
+    speakCells = 0;
+    if (speakAt < quietAt) {
+      quietAt -= 1;
+    }
+  }
+  if (quiet !== null && used > input.width) {
+    const before = used - PART_GAP - quiet.length;
+    const cut = fit(quiet, Math.max(0, input.width - before - PART_GAP));
+    if (cut === "") {
+      parts.splice(quietAt, 1);
+      used = before;
+    } else if (cut !== quiet) {
+      parts[quietAt] = text({ dimColor: true }, cut);
+      used = before + PART_GAP + cut.length;
+    }
+  }
+  const row = box({ flexDirection: "row", gap: 0 }, [
+    box({ flexDirection: "row", gap: 2, flexShrink: 1 }, parts),
+  ]);
   // A rule across the band sets it apart from whatever the session drew above it,
   // so the buttons read as the fleet's own line. It is drawn dim: it separates
-  // without competing with the figures and the item beside it.
+  // without competing with the figures beside it.
   return box({ flexDirection: "column", gap: 0, marginBottom: 0 }, [
     text({ dimColor: true }, BAND_RULE.repeat(Math.max(0, input.width))),
     row,

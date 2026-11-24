@@ -176,7 +176,13 @@ class ProjectTests(LoadCase):
 
     def test_a_machine_that_cannot_read_folders_draws_no_projects(self):
         (self.bin / "lsof").unlink()
-        result = self.read()
+        config = self.config()
+        # The PATH holds only the emptied stub folder: with the machine's own
+        # folders left on it, the reader found the real lsof and asked it about
+        # whatever live processes held this listing's pids, so a project appeared
+        # whenever one of them worked inside a repository.
+        self.environment["PATH"] = str(self.bin)
+        result = load.read_load(config, now=NOW, environ=self.environment)
         self.assertEqual(result["state"], "ready")
         self.assertTrue(all("project" not in row for row in result["processes"]))
 

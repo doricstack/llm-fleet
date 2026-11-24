@@ -10,6 +10,7 @@ Run with: python3 tests/test_mutation_check.py -v
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -48,9 +49,12 @@ class HarnessCase(unittest.TestCase):
 
     def run_harness(self, mutants, *extra):
         path = self.declare(mutants)
+        # The harness writes its report as UTF-8, so the test reads it as
+        # UTF-8 whatever this machine's locale is. Found by review, 2026-11-23.
         return subprocess.run([sys.executable, str(SCRIPT), "--root", str(self.repo),
                                "--mutants", str(path), *extra],
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", check=False)
 
 
 class OutcomeTests(HarnessCase):
@@ -58,7 +62,17 @@ class OutcomeTests(HarnessCase):
         result = self.run_harness([self.mutant("plus", "a + b", "a - b")])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("killed     plus", result.stdout)
+        self.assertIn("killed     plus\n", result.stdout)
         self.assertIn("1 mutants: 1 killed, 0 equivalent, 0 survived, 0 errors", result.stdout)
+
+    def test_a_mutant_whose_suite_hangs_is_a_kill_that_says_why(self):
+        # A timeout counts as a kill, because the mutant stopped the suite; the
+        # reason stays in the row so a hang caused by the machine's load does
+        # not read as an ordinary kill with nothing behind it.
+        mutant = self.mutant("hang", "return a + b", "while True:\n        a += 1")
+        result = self.run_harness([mutant], "--timeout", "2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("killed     hang  the suite did not finish within 2s", result.stdout)
 
     def test_a_survivor_fails_the_run_and_names_why_it_matters(self):
         result = self.run_harness([self.mutant("dead", "return a\n", "return -a\n",
@@ -108,12 +122,119 @@ class SafetyTests(HarnessCase):
         self.assertIn("red before any mutant", result.stderr)
         self.assertNotIn("killed", result.stdout)
 
+    def test_a_red_suite_says_what_it_said(self):
+        # A gate that reports "red" without the suite's own words costs a
+        # slice: on 2026-11-22 the copied tree ran clean outside the gate and
+        # the failing test's name was never printed.
+        (self.repo / "check.py").write_text(
+            "import sys\nprint('the fixture says why', file=sys.stderr)\nsys.exit(1)\n",
+            encoding="utf-8")
+        result = self.run_harness([self.mutant("plus", "a + b", "a - b")])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("red before any mutant", result.stderr)
+        self.assertIn("the fixture says why", result.stderr)
+
+    def test_a_red_suite_that_also_wrote_a_warning_keeps_its_failing_test(self):
+        # stdout usually names the failing test and stderr may still hold a
+        # warning; reading stderr in place of stdout dropped the name, and a
+        # combined tail let long stderr push the name out.
+        warnings = "".join("print('warning %d', file=sys.stderr)\n" % n for n in range(25))
+        (self.repo / "check.py").write_text(
+            "import sys\nprint('FAILED test_the_thing')\n" + warnings + "sys.exit(1)\n",
+            encoding="utf-8")
+        result = self.run_harness([self.mutant("plus", "a + b", "a - b")])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("FAILED test_the_thing", result.stderr)
+        self.assertIn("warning 24", result.stderr)
+
+    def test_a_failing_test_name_survives_a_long_tail_of_its_own_stream(self):
+        # Eleven lines on one stream put the failing test's name outside a
+        # ten-line tail; the tail alone then reported only the counts below it.
+        tail = "".join("print('%d')\n" % n for n in range(10))
+        (self.repo / "check.py").write_text(
+            "import sys\nprint('FAILED test_receipt')\n" + tail + "sys.exit(1)\n",
+            encoding="utf-8")
+        result = self.run_harness([self.mutant("plus", "a + b", "a - b")])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("FAILED test_receipt", result.stderr)
+        self.assertIn("\n9", result.stderr)
+
+    def test_unittest_failure_lines_are_kept_ahead_of_the_tail(self):
+        # unittest names a failure `FAIL:` and an error `ERROR:`, which the
+        # pytest-shaped filter missed, and it dropped a name past the third
+        # that fell outside the tail. Twelve names must all survive.
+        names = "".join("print('FAIL: test_case_%d')\nprint('filler %d')\n" % (n, n)
+                        for n in range(12))
+        (self.repo / "check.py").write_text(
+            "import sys\n" + names + "print('Ran 12 tests')\nsys.exit(1)\n",
+            encoding="utf-8")
+        result = self.run_harness([self.mutant("plus", "a + b", "a - b")])
+        self.assertEqual(result.returncode, 2)
+        for n in (0, 3, 11):
+            self.assertIn("FAIL: test_case_%d" % n, result.stderr)
+
+    def test_javascript_failure_lines_are_kept_ahead_of_the_tail(self):
+        # The javascript runner names a failed case in TAP (`not ok 3 - name`)
+        # or with a cross; neither is a Python shape, and a long baseline
+        # pushed both out of the ten-line tail.
+        names = "".join("print('not ok %d - case_%d')\nprint('filler %d')\n" % (n, n, n)
+                        for n in range(12))
+        # The runner's output is read as UTF-8, so the fixture writes it as
+        # UTF-8: on Windows a redirected stdout is the locale's code page, and
+        # the cross it printed there was an encoding error instead of a line.
+        (self.repo / "check.py").write_text(
+            "import sys\nsys.stdout.reconfigure(encoding='utf-8')\n"
+            + names + "print('✖ case_after')\nsys.exit(1)\n",
+            encoding="utf-8")
+        result = self.run_harness([self.mutant("plus", "a + b", "a - b")])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not ok 3 - case_3", result.stderr)
+        self.assertIn("not ok 11 - case_11", result.stderr)
+        self.assertIn("✖ case_after", result.stderr)
+
+    def test_the_report_keeps_a_cross_whatever_the_machine_s_encoding_says(self):
+        # The report re-emits the line the runner wrote, and a console whose
+        # code page cannot hold the cross escaped it: the caller then read the
+        # escape instead of the name. The report is written as UTF-8 whatever
+        # the locale says. Found by review, 2026-11-23.
+        (self.repo / "check.py").write_text(
+            "import sys\nsys.stdout.reconfigure(encoding='utf-8')\n"
+            "print('not ok 0 - case_0')\nprint('✖ case_after')\nsys.exit(1)\n",
+            encoding="utf-8")
+        path = self.declare([self.mutant("plus", "a + b", "a - b")])
+        environment = dict(os.environ, PYTHONIOENCODING="ascii", LC_ALL="C", LANG="C")
+        completed = subprocess.run([sys.executable, str(SCRIPT), "--root", str(self.repo),
+                                    "--mutants", str(path)], capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", env=environment,
+                                   check=False)
+        self.assertIn("✖ case_after", completed.stderr)
+
+    def test_a_retry_log_is_not_mistaken_for_a_named_failure(self):
+        # A bare `ERROR ` or `FAILED ` in the middle of a log line is a retry
+        # message, not a test's name. Reading those as names kept a hundred of
+        # them ahead of the tail and pushed the real failure out. A line that
+        # starts with the marker, as pytest writes it, is still a name. Found
+        # by review, 2026-11-23.
+        (self.repo / "check.py").write_text(
+            "import sys\n"
+            "print('ERROR tests/test_api.py::test_setup - ValueError: boom')\n"
+            + "".join("print('retry %d: ERROR upstream, FAILED attempt')\n" % n
+                      for n in range(40))
+            + "".join("print('filler %d')\n" % n for n in range(15))
+            + "sys.exit(1)\n",
+            encoding="utf-8")
+        result = self.run_harness([self.mutant("plus", "a + b", "a - b")])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("ERROR tests/test_api.py::test_setup - ValueError: boom", result.stderr)
+        self.assertNotIn("retry 0:", result.stderr)
+
     def test_a_suite_that_overruns_its_time_is_not_a_kill(self):
         (self.repo / "slow.py").write_text("import time\ntime.sleep(5)\n", encoding="utf-8")
         mutant = self.mutant("plus", "a + b", "a - b")
         mutant["suite"] = ["{python}", "slow.py"]
         result = self.run_harness([mutant], "--timeout", "0.5")
         self.assertEqual(result.returncode, 2)
+        self.assertIn("did not finish within", result.stderr)
 
     def test_a_runtime_placeholder_is_filled_from_the_command_line(self):
         mutant = self.mutant("plus", "a + b", "a - b")

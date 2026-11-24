@@ -1,0 +1,9 @@
+{
+  "sources": {
+    "agents": {
+      "inputPricePerMTok": {
+        "__proto__": 7
+      }
+    }
+  }
+}

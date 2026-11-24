@@ -58,13 +58,14 @@ class StarterTests(SetupCase):
         document = setup.starter({**self.environ, "CLAUDE_CONFIG_DIR": str(self.root / "gone")})
         self.assertEqual(document["providers"], [])
 
-    def test_a_home_known_only_as_the_user_profile_is_found_and_written_whole(self):
-        # Windows sets USERPROFILE and may set no HOME. The loader expands $HOME
-        # only, so a home found this way is written as the full path.
+    def test_a_home_known_only_as_the_user_profile_is_written_in_home_form(self):
+        # Windows sets USERPROFILE and may set no HOME. The loader reads HOME
+        # from USERPROFILE when it is absent, so the starter keeps the portable
+        # form and it resolves in a shell and in a host-spawned process alike.
         (self.home / ".claude").mkdir()
         document = setup.starter({"USERPROFILE": str(self.home), "PATH": ""})
         self.assertEqual(document["providers"],
-                         [{"id": "claude", "label": "Claude", "home": str(self.home / ".claude")}])
+                         [{"id": "claude", "label": "Claude", "home": "$HOME/.claude"}])
 
     def test_another_home_beside_the_default_is_found(self):
         # One home per provider route is the shape a multi-LLM machine has: each
@@ -205,6 +206,15 @@ class CommandLineTests(SetupCase):
         completed = self.run_setup()
         self.assertEqual(completed.returncode, 3)
         self.assertIn("left as it is", completed.stdout)
+
+    def test_a_home_known_only_as_the_user_profile_is_shown_in_home_form(self):
+        # A PowerShell session has USERPROFILE and no HOME; the loader reads the
+        # alias, so the line printed afterwards should name the same place the
+        # doctor does rather than the full path.
+        (self.home / ".claude").mkdir()
+        completed = self.run_setup(environ={"USERPROFILE": str(self.home), "PATH": ""})
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("~/.config/llm-fleet/config.json", completed.stdout)
 
     def test_a_named_path_is_written_there(self):
         chosen = self.root / "named.json"

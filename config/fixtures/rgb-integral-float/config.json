@@ -1,0 +1,7 @@
+{
+  "alerts": {
+    "tabTint": {
+      "failureRgb": [1.0, 2, 3]
+    }
+  }
+}

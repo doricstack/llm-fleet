@@ -20,7 +20,7 @@ import { THEME, themeFrom, type Theme } from "./palette.ts";
 
 /** The sections the pane carries, in the order a reader meets them. */
 export const SECTIONS = [
-  "load", "prs", "sessions", "session", "pacer", "worktrees", "skills",
+  "session", "load", "pacer", "prs", "worktrees", "sessions", "skills",
   "warnings", "keys",
 ];
 
@@ -33,7 +33,7 @@ export const SECTIONS = [
  * not be read. The values are the schema's own defaults at the revision this
  * was written, which is why they are here rather than nowhere.
  */
-const FOLDED_AT_START = new Set(["worktrees", "skills", "keys"]);
+const FOLDED_AT_START = new Set(["worktrees", "skills", "warnings", "keys"]);
 /** The sections left out while they have nothing to show, under the same terms. */
 const HIDDEN_WHEN_EMPTY = new Set(["warnings", "load"]);
 
@@ -159,11 +159,19 @@ function choiceFrom(value: unknown): SectionChoice | null {
     return null;
   }
   const body = value as { title?: unknown; visible?: unknown; collapsed?: unknown;
-                          legend?: unknown; hideWhenEmpty?: unknown; maxRows?: unknown };
+                          off?: unknown; legend?: unknown; hideWhenEmpty?: unknown;
+                          maxRows?: unknown };
   // Both fields must be booleans. A document that says `"collapsed": "yes"` is
   // not a document this pane understands, and half-reading it would draw a
   // section folded on the strength of a string.
   if (typeof body.visible !== "boolean" || typeof body.collapsed !== "boolean") {
+    return null;
+  }
+  // The switch is the third boolean, and one that is there and is not a boolean
+  // is refused the same way: `"off": "no"` read as truthy would take a section
+  // off the pane on the strength of a string. One that is not there at all is a
+  // reading an older build stored, and every section it names is switched on.
+  if (body.off !== undefined && typeof body.off !== "boolean") {
     return null;
   }
   // A legend is prose the pane draws, so a document that carries none, or
@@ -179,8 +187,8 @@ function choiceFrom(value: unknown): SectionChoice | null {
   // A ceiling is a whole number of rows of at least one, or no ceiling at all.
   const maxRows = typeof body.maxRows === "number" && Number.isInteger(body.maxRows)
     && body.maxRows >= 1 ? body.maxRows : undefined;
-  return { title, visible: body.visible, collapsed: body.collapsed, legend, hideWhenEmpty,
-           ...(maxRows !== undefined ? { maxRows } : {}) };
+  return { title, visible: body.visible, collapsed: body.collapsed, off: body.off === true,
+           legend, hideWhenEmpty, ...(maxRows !== undefined ? { maxRows } : {}) };
 }
 
 /**
@@ -238,7 +246,8 @@ export function paneConfigFrom(documents: unknown): PaneConfig | null {
       // it keeps its place and draws as not read, under its own key.
       order.push(name);
       sections[name] = custom[name] ?? { title: name.slice(CUSTOM_PREFIX.length), visible: true,
-                                         collapsed: false, legend: null, hideWhenEmpty: false };
+                                         collapsed: false, off: false, legend: null,
+                                         hideWhenEmpty: false };
       continue;
     }
     if (!SECTIONS.includes(name)) {
@@ -282,7 +291,7 @@ export function paneOptions(width: number, now: number,
       now,
       sectionOrder: SECTIONS,
       sections: Object.fromEntries(SECTIONS.map((name) => [
-        name, { title: null, visible: true, collapsed: FOLDED_AT_START.has(name),
+        name, { title: null, visible: true, collapsed: FOLDED_AT_START.has(name), off: false,
                 hideWhenEmpty: HIDDEN_WHEN_EMPTY.has(name) }])),
       keys: DEFAULT_KEYS,
       geometry: GEOMETRY,

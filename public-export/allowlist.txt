@@ -7,6 +7,7 @@ branding/ascii-logo.txt
 .claude-plugin/marketplace.json
 LICENSE
 .gitignore
+.standin-exemptions.json
 AGENTS.md
 CLAUDE.md
 Makefile

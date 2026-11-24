@@ -1,0 +1,15 @@
+{
+  "pane": {
+    "minimumColumns": 9007199254740993
+  },
+  "sources": {
+    "rates": {
+      "maxAgeSeconds": 9007199254740993
+    },
+    "agents": {
+      "inputPricePerMTok": {
+        "mythos-1": 1e400
+      }
+    }
+  }
+}

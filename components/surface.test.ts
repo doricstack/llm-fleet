@@ -11,6 +11,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import { elementTypes, renderedText } from "../plugins/llm-fleet/components/layout.ts";
@@ -55,6 +56,26 @@ function draw(request: SurfaceInput): { types: string[]; text: string } {
   return { types: elementTypes(tree), text: renderedText(tree).join("\n") };
 }
 
+/** Every row the tree draws, as the cells on it: what a line is made of. */
+function rowsOf(node: unknown): string[][] {
+  const rows: string[][] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value !== "object" || value === null) {
+      return;
+    }
+    const record = value as { props?: { flexDirection?: string }; children?: unknown };
+    const children = Array.isArray(record.children) ? record.children : [];
+    if (record.props?.flexDirection === "row" && children.length) {
+      rows.push(renderedText(value as never));
+    }
+    for (const child of children) {
+      walk(child);
+    }
+  };
+  walk(node);
+  return rows;
+}
+
 test("a reading becomes the pane, drawn with the host's own elements", () => {
   const drawn = draw(input());
   // Box for the shape, Text for what is written, Button for what a person can
@@ -94,6 +115,65 @@ test("a refused configuration names every error rather than the first", () => {
   }));
   assert.equal(drawn.text.includes("E_CONFIG_TYPE pane.width"), true);
   assert.equal(drawn.text.includes("E_CONFIG_RULE keys.open"), true);
+});
+
+test("each refusal is drawn on its own line, so none is cut by the one before it", () => {
+  // Joined into one sentence, the pane's width cut the line after the first
+  // error, and the second error's meaning is the part a person needs. Slots
+  // side by side in one row are cut from that row's end, so each refusal is a
+  // row of its own. Found by review, 2026-11-23.
+  const primitives = recordingPrimitives();
+  const tree = surfaceTree(input({
+    documents: { configErrors: [{ code: "E_CONFIG_TYPE", path: "pane.width" },
+                                { code: "E_CONFIG_RULE", path: "keys.open" }] } as never,
+  }), primitives);
+  const rows = rowsOf(tree).filter((row) => row.some((cell) => cell.includes("E_CONFIG_")));
+  assert.equal(rows.length, 2, JSON.stringify(rows));
+  for (const row of rows) {
+    assert.equal(row.filter((cell) => cell.trim() !== "").length, 1, JSON.stringify(row));
+  }
+  assert.equal(rows[1]?.join("").includes("two fields contradict each other"), true);
+  const lines = renderedText(tree);
+  assert.equal(lines.includes("the configuration was refused:"), true);
+});
+
+test("a refused configuration says what each code means, not just which rule broke", () => {
+  // A code alone says nothing a person can act on, and the malformed one stands
+  // for two causes the pane could not tell apart. Found by review, 2026-11-23.
+  const drawn = draw(input({
+    documents: { configErrors: [{ code: "E_CONFIG_MALFORMED", path: "config.json" }] } as never,
+  }));
+  assert.equal(drawn.text.includes("E_CONFIG_MALFORMED config.json: the file is not valid JSON"),
+               true);
+  assert.equal(drawn.text.includes("or its bytes are not UTF-8"), true);
+});
+
+test("a malformed refusal names the cause the loader found", () => {
+  // The loader can tell bytes that are not UTF-8 from text that is not JSON,
+  // and the repair differs: saving in UTF-8 is not the same fix as repairing
+  // the document. Found by review, 2026-11-23.
+  const bytes = draw(input({ documents: { configErrors: [
+    { code: "E_CONFIG_MALFORMED", path: "config.json", detail: "bytes" }] } as never }));
+  assert.equal(bytes.text.includes("the file's bytes are not UTF-8"), true);
+  assert.equal(bytes.text.includes("not valid JSON"), false);
+  const json = draw(input({ documents: { configErrors: [
+    { code: "E_CONFIG_MALFORMED", path: "config.json", detail: "json" }] } as never }));
+  assert.equal(json.text.includes("the file is not valid JSON"), true);
+  assert.equal(json.text.includes("bytes are not UTF-8"), false);
+});
+
+test("every refusal the schema names has a sentence, and no other code is invented", async () => {
+  // The sentences are the schema's own errorCodes table, kept in step here so a
+  // new code cannot reach the pane as a bare name. Found by review, 2026-11-23.
+  const schema = JSON.parse(
+    await readFile(new URL("../plugins/llm-fleet/config/schema.json", import.meta.url), "utf-8"));
+  const declared = new Map((schema.errorCodes as { code: string; meaning: string }[])
+    .map((entry) => [entry.code, entry.meaning]));
+  for (const [code, meaning] of declared) {
+    const drawn = draw(input({ documents: { configErrors: [{ code, path: "x" }] } as never }));
+    assert.equal(drawn.text.includes(code + " x: " + meaning), true,
+                 "the pane draws what " + code + " means");
+  }
 });
 
 test("a refusal and a reading are told apart before anything is drawn", () => {
@@ -153,7 +233,7 @@ test("a source named with nothing under it is not a source", () => {
 test("a refusal whose errors are not a list of errors is still drawn as a refusal", () => {
   for (const errors of ["nope", [7], null, []] as unknown[]) {
     const drawn = draw(input({ documents: { configErrors: errors } as never }));
-    assert.equal(drawn.text.includes("the configuration, which was refused"), true);
+    assert.equal(drawn.text.includes("the configuration was refused"), true);
     assert.equal(drawn.text.includes("undefined"), false);
   }
 });

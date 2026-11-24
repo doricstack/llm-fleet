@@ -13,9 +13,10 @@
  */
 
 /**
- * Which sections a person folded in this session, by section name: true for
- * folded, false for opened. Only what was pressed; the configuration decides
- * every section nobody touched.
+ * A press per section, by section name. As the fold: true for folded, false
+ * for opened. As the switch: true for off, false for on. Only what was pressed
+ * in this session; the configuration decides every section nobody touched, and
+ * none of it is kept in the store.
  */
 export type FleetFold = Record<string, boolean>;
 
@@ -43,8 +44,6 @@ export interface FleetStore {
   "voice": unknown;
   /** Whether speech is on in every session; absent is off. */
   "speech.on": boolean;
-  /** The folds a person left, for the next session. */
-  "folds": FleetFold;
   /** The person's own word on the key tips: false is off. */
   "key-tips": unknown;
   /** The voice one session picked, under that session's identifier. */
@@ -54,11 +53,11 @@ export interface FleetStore {
 declare module "claude-code" {
   interface PluginState {
     "llm-fleet": {
-      /** Read by `restoreFold` on the first paint; written on every press. */
+      /** This session's fold presses, and nothing else; read once by `restoreFold` so a reload keeps them, written on a fold press. */
       folded: FleetFold;
       /** The sections a person pressed to draw in full; read by `restoreShownAll` on the first paint and written on its press. */
       shownAll: FleetFold;
-      /** The sections a person put away; read by `restorePutAway` on the first paint and written on each picker press. */
+      /** This session's switch presses from the section picker: true off, false on; read once by `restorePutAway`, written on each picker press. */
       hidden: FleetFold;
     };
   }

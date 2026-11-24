@@ -90,17 +90,19 @@ class SnapshotCase(unittest.TestCase):
         result = snapshot.read_snapshot(self.config({}), now=1_700_000_000.0)
         pane = result["pane"]
         self.assertEqual(pane["state"], "ready")
-        # Pull requests lead, and the rest follow by how much they need a
-        # person; the warnings come last and keep out of sight while empty.
+        # This session leads, then the machine's load; the warnings fold away
+        # while empty, and a section a person rarely opens starts folded.
         self.assertEqual(pane["order"],
-                         ["load", "prs", "sessions", "session", "pacer",
-                          "worktrees", "skills", "warnings", "keys"])
+                         ["session", "load", "pacer", "prs", "worktrees", "sessions",
+                          "skills", "warnings", "keys"])
         self.assertEqual(pane["sections"]["warnings"]["hideWhenEmpty"], True)
         self.assertEqual(pane["sections"]["prs"]["hideWhenEmpty"], False)
         worktrees = pane["sections"]["worktrees"]
         self.assertEqual((worktrees["visible"], worktrees["collapsed"]), (True, True))
         sessions = pane["sections"]["sessions"]
         self.assertEqual((sessions["visible"], sessions["collapsed"]), (True, False))
+        self.assertEqual({name: body["off"] for name, body in pane["sections"].items()},
+                         {name: False for name in pane["order"]})
         # The legend travels too. It is prose the pane draws under a heading, and
         # a section whose legend stayed in the configuration draws its counts
         # with nothing saying what they count.
@@ -113,7 +115,7 @@ class SnapshotCase(unittest.TestCase):
         config = self.config({"pane": {
             "sectionOrder": ["warnings", "sessions"],
             "sections": {"sessions": {"visible": False, "collapsed": True},
-                         "warnings": {"visible": True, "collapsed": True}}}})
+                         "warnings": {"visible": True, "collapsed": True, "off": True}}}})
         pane = snapshot.read_snapshot(config, now=1_700_000_000.0)["pane"]
         # The order a person chose, not the packaged one: the pane reads its
         # sections out of this list.
@@ -121,6 +123,10 @@ class SnapshotCase(unittest.TestCase):
         for name, collapsed in (("sessions", True), ("warnings", True)):
             self.assertEqual(pane["sections"][name]["visible"], name != "sessions")
             self.assertEqual(pane["sections"][name]["collapsed"], collapsed)
+        # A switched-off section is still placed and still visible: it is drawn
+        # as a dimmed name in the picker, which a section hidden outright is not.
+        self.assertIs(pane["sections"]["warnings"]["off"], True)
+        self.assertIs(pane["sections"]["sessions"]["off"], False)
 
     def test_a_configuration_carrying_no_pane_section_still_travels(self):
         # `pane` with nothing under it is a document a view layer can read, not
@@ -311,7 +317,7 @@ class SnapshotCase(unittest.TestCase):
                                                                           "collapsed": False}}}})
         self.assertEqual(pane["order"], [])
         self.assertEqual(pane["sections"]["sessions"],
-                         {"title": None, "visible": True, "collapsed": False,
+                         {"title": None, "visible": True, "collapsed": False, "off": False,
                           "legend": None, "hideWhenEmpty": False, "maxRows": None})
 
     def test_a_section_s_row_limit_travels_with_the_reading(self):

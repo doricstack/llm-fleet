@@ -104,6 +104,7 @@ def pane_document(config: Mapping[str, Any]) -> dict[str, Any]:
             name: {"title": body.get("title"),
                    "visible": bool(body.get("visible", True)),
                    "collapsed": bool(body.get("collapsed", False)),
+                   "off": bool(body.get("off", False)),
                    "legend": body.get("legend"),
                    "hideWhenEmpty": bool(body.get("hideWhenEmpty", False)),
                    "maxRows": body.get("maxRows")}

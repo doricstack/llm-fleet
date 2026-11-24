@@ -39,7 +39,7 @@
           "legend": "No legend configured.",
           "timeoutSeconds": 8,
           "visible": true,
-          "collapsed": false,
+          "collapsed": false, "off": false,
           "hideWhenEmpty": false,
           "maxRows": 8
         },
@@ -51,7 +51,7 @@
           "legend": "No legend configured.",
           "timeoutSeconds": 3,
           "visible": true,
-          "collapsed": false,
+          "collapsed": false, "off": false,
           "hideWhenEmpty": true,
           "maxRows": 8
         }

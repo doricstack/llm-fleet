@@ -207,9 +207,19 @@
 | PUB-11 | Session scope | Preserve peer files and respect the requested Git scope. |
 | PUB-12 | Scaffolding authorization | Do not infer permission to commit, push, install, or release. |
 | PUB-13 | Personal folder | Refuse any export path under `personal/`, whatever the allowlist says. |
-| PUB-14 | Plugin version | Raise the version in `plugins/llm-fleet/.claude-plugin/plugin.json` with any change a person installing the plugin would notice, set both marketplace entries to the same number in that change, and tag a release `v<version>`; `tests/test_publication.py` fails when they drift. |
+| PUB-14 | Plugin version | Raise the version in `plugins/llm-fleet/.claude-plugin/plugin.json` with any change a person installing the plugin would notice, keep both marketplace entries without a version (the manifest is what the host installs, and a second number only earns a validation warning; `README.md` states the same rule), and tag a release `v<version>`; `tests/test_publication.py` fails when the pane's footer constant drifts from the manifest. |
 | PUB-16 | Installed copy | Run `make host-update` in the change that raises the version. The host installs a version and does not follow the tree: a home that installed an earlier one keeps loading it, or nothing, until the host's own update runs there, and a session already started does not pick it up. `make host-update` repairs every home and reads each record back; a release that skips it leaves the machine on the last build. |
 | PUB-15 | Plugin name | Keep the plugin named `llm-fleet` in the manifest, both marketplaces, every install line and every `$.state` reference; a rename moves the host's per-plugin state and store, so it is recorded in HANDOFF with the step that moves an installed copy. |
+
+## Design discipline
+
+| ID | Condition | Required action |
+| --- | --- | --- |
+| DES-1 | A review finding | Accept it as a fix only when it breaks a requirement written in `docs/pane-design.md`, `docs/configuration.md` or this file; a finding that breaks none is a question for the owner, and the answer is written down before any code changes. |
+| DES-2 | An area has taken two rounds of fixes | Stop patching it: rewrite that area's section of the design first, then rebuild the code from the section in one change, with a test for each requirement the section states. |
+| DES-3 | State that outlives a session | Only the configuration lasts. A press, a fold, a switch or a view lives in the session or the load; new state in the plugin's store needs a design section naming its one writer and what happens when two sessions write it. |
+| DES-4 | Someone installs the plugin | It runs from its own folder with nothing else on the machine: no checkout of this repository and no tooling beside it. A source it cannot reach is reported as unconfigured or unavailable, never as a failure of the pane. |
+| DES-5 | A platform claim | Linux and Windows run on every pull request and on main; macOS runs on the published repository's main and tags, where its minutes are free. A behavior is not called supported on a platform whose leg has not passed it. |
 
 ## Format rules
 

@@ -26,6 +26,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -143,24 +144,84 @@ def copy_tree(source: Path, destination: Path) -> None:
 
 RUNTIMES = {"{python}": sys.executable, "{node}": "node"}
 
+TIMEOUT_REASON = "the suite did not finish within "
+
 
 def command(suite: list[str]) -> list[str]:
     """A suite's argv, with the configured runtimes standing in for `{python}` and `{node}`."""
     return [RUNTIMES.get(part, part) for part in suite]
 
 
-def passes(suite: list[str], tree: Path, timeout: float) -> bool:
+def partial_text(value) -> str:
+    """What a timed-out run had captured, as text.
+
+    `TimeoutExpired` attaches its captured output as bytes even in text mode, so
+    it is decoded the way the suite's own output was read.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return value
+
+
+def passes(suite: list[str], tree: Path, timeout: float) -> tuple[bool, str]:
+    """Whether the suite passed, and the tail of what it said when it did not.
+
+    The baseline's output is the only account of why a suite is red, and a run
+    that discards it leaves a gate that says "red" and nothing else; that cost
+    a two-hour slice on 2026-11-22, where the copied tree ran clean outside the
+    gate and the failing test's name was never printed.
+    """
     # Python keeps a compiled copy of each module keyed on the source's size and
     # modification second. A mutant the same length as the text it replaces,
     # written in the second the copy was made, would run the compiled original
     # and survive having never been tested, so no compiled copy is kept.
     environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    # The suite's own encoding, not the machine's: a Node failure marker is
+    # UTF-8 and a non-UTF-8 locale read it as mojibake, which the tail below
+    # then could not recognise as a name. Found by review, 2026-11-23.
     try:
         completed = subprocess.run(command(suite), cwd=tree, capture_output=True,
-                                   timeout=timeout, check=False, env=environment)
-    except subprocess.TimeoutExpired:
-        return False
-    return completed.returncode == 0
+                                   timeout=timeout, check=False, env=environment,
+                                   text=True, encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired as expired:
+        # A suite that hung in teardown may already have named its failing test,
+        # and dropping that output left the timeout as the only account of a
+        # red run. Found by review, 2026-11-23.
+        said = "\n".join(part for part in (
+            partial_text(getattr(expired, "stdout", None)),
+            partial_text(getattr(expired, "stderr", None))) if part)
+        return False, (TIMEOUT_REASON + "%gs" % timeout
+                       + ("\n" + said if said else ""))
+    if completed.returncode == 0:
+        return True, ""
+    # Both streams, each cut to its own tail: a suite usually names the failing
+    # test on stdout and may still write a warning to stderr, and one combined
+    # tail let twenty lines of stderr push the failing test's name out. A tail
+    # alone can still drop the name when one stream is long, so every line that
+    # names a failure is kept ahead of the tail that holds the final counts.
+    def tail(text: str) -> str:
+        lines = (text or "").strip().splitlines()
+        kept = lines[-10:]
+        # pytest writes `FAILED name` and, for a collection or fixture error,
+        # `ERROR name`; unittest writes `FAIL:`/`ERROR:`, and the javascript
+        # runner either TAP's `not ok 3 - name` (indented under its parent
+        # when it is a subtest) or marks the case with a cross. Only a line
+        # that starts a failure counts: a bare `ERROR ` or `FAILED ` in the
+        # middle of a log line is a retry message, and counting those let a
+        # hundred log lines push the failing test's name out of the excerpt.
+        # No named line is dropped: a cap silently lost the eleventh name, and
+        # the point of keeping them is that the name is the whole account.
+        # Found by review, 2026-11-23.
+        named = [line for line in lines
+                 if line.startswith(("FAIL:", "ERROR:", "FAILED ", "ERROR "))
+                 or line.lstrip().startswith("not ok ")
+                 or "✖" in line]
+        return "\n".join([line for line in named if line not in kept] + kept)
+
+    tails = [tail(text) for text in (completed.stdout, completed.stderr)]
+    return False, "\n".join(tail for tail in tails if tail)
 
 
 def run(mutants: list[dict[str, Any]], source: Path, timeout: float) -> list[dict[str, str]]:
@@ -170,8 +231,10 @@ def run(mutants: list[dict[str, Any]], source: Path, timeout: float) -> list[dic
         tree = Path(scratch)
         copy_tree(source, tree)
         for suite in {tuple(mutant["suite"]) for mutant in mutants}:
-            if not passes(list(suite), tree, timeout):
-                raise MutationError("the suite is red before any mutant: " + " ".join(suite))
+            green, said = passes(list(suite), tree, timeout)
+            if not green:
+                raise MutationError("the suite is red before any mutant: "
+                                    + " ".join(suite) + ("\n" + said if said else ""))
         for mutant in mutants:
             target = tree / mutant["file"]
             try:
@@ -188,11 +251,17 @@ def run(mutants: list[dict[str, Any]], source: Path, timeout: float) -> list[dic
             target.write_text(original.replace(mutant["find"], mutant["replace"]),
                               encoding="utf-8")
             try:
-                survived = passes(mutant["suite"], tree, timeout)
+                green, said = passes(mutant["suite"], tree, timeout)
             finally:
                 target.write_text(original, encoding="utf-8")
-            if not survived:
-                outcome, detail = KILLED, ""
+            if not green:
+                # A suite the mutant stopped counts as a kill, and a timeout is
+                # one way it stops. The reason is kept so a hang that killed
+                # nothing reads as a hang rather than as an ordinary kill; a
+                # normal red suite's tail is already printed as the gate's
+                # baseline answer and is not repeated here.
+                detail = said if said.startswith(TIMEOUT_REASON) else ""
+                outcome = KILLED
             elif isinstance(mutant.get("equivalent"), str) and mutant["equivalent"].strip():
                 outcome, detail = EQUIVALENT, mutant["equivalent"]
             else:
@@ -203,6 +272,15 @@ def run(mutants: list[dict[str, Any]], source: Path, timeout: float) -> list[dic
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the declared mutants against their suites")
+    # The report names a failing test by the line its runner wrote, and that
+    # line can hold a character this machine's code page cannot encode: the
+    # console escaped it, and the caller read the escape instead of the name.
+    # The suite's own output is read as UTF-8, so the report is written as
+    # UTF-8. Found by review, 2026-11-23.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
     parser.add_argument("--mutants", default=str(DECLARATIONS))
     parser.add_argument("--root", default=str(ROOT))
     parser.add_argument("--only", action="append", default=[],
@@ -212,6 +290,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--node", default="node", help="the Node runtime a `{node}` suite runs on")
     args = parser.parse_args(argv)
     RUNTIMES["{node}"] = args.node
+    # The gate cancels a slice by signalling its process group. A SIGTERM that
+    # kills the interpreter outright skips the copied tree's cleanup, so the
+    # handler leaves through the with-blocks instead. Found by review,
+    # 2026-11-22.
+    signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))
     try:
         mutants = load(Path(args.mutants), Path(args.root))
         if args.only:

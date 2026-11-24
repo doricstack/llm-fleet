@@ -313,31 +313,63 @@ const BAND_PROPS = {
  * plugin, which is where a session answers them.
  */
 /**
- * The item the band leads with is a way into its row.
+ * The band's figure is a look at what it counts, not a mode.
  *
- * The pane draws no scroll container, so opening it at the top puts a row that
- * needs you below the fold. The press names the row instead, and the pane opens
- * on the section that row lives in with the rest folded out of the way.
+ * A press opens the pane narrowed to the rows the figure counted; the same
+ * press widens it again while the pane stays open. Without that second press a
+ * band figure stranded the pane on one state, and nothing inside it said how to
+ * get back.
  */
-test("the band's leading item opens the pane, not the whole fleet", async ($, on) => {
-  mock.clock(on, { now: AT * 1000 });
-  // A reading with a job that waits on the person, which is what puts an item
-  // in front of the band in the first place.
+test("the band's figure narrows the pane it opens, and the same press widens it", async ($, on) => {
+  const clock = mock.clock(on, { now: AT * 1000 });
   mock.store(on, { [READING_KEY]: { at: AT, documents: RICH } });
   const open: string[] = [];
   on("session.id", () => ({ value: "another-session" }) as never);
   on("ui.panes", () => ({ value: open.map((id) => ({ id })) }) as never);
+  // The host opens a pane that is already open as a no-op, so the stand-in for
+  // it does the same: a duplicate would make the second press look like a
+  // second open.
   on("ui.open", (_engine, e) => {
-    open.push((e as { id: string }).id);
+    const id = (e as { id: string }).id;
+    if (!open.includes(id)) {
+      open.push(id);
+    }
     return { value: { isPlaced: true } } as never;
+  });
+  on("ui.close", (_engine, e) => {
+    const at = open.indexOf((e as { id: string }).id);
+    if (at >= 0) {
+      open.splice(at, 1);
+    }
+    return { value: undefined } as never;
   });
   const band = await $.ui.mount({ plugin: "llm-fleet", surface: "terminal",
                                   component: "AbovePrompt", props: BAND_PROPS as never });
-  const drawn = JSON.stringify(await band.drawn());
-  const key = /"key":"(fleet\.band\.item\.[^"]+)"/.exec(drawn)?.[1];
-  expect(typeof key).toBe("string");
+  // One mount, drawn again as the state changes: the kit refuses a second live
+  // instance under the same requestId, and a drawing reads the state it lands on.
+  const mounted = await $.ui.mount({
+    plugin: "llm-fleet", surface: "terminal", component: "Pane", requestId: "fleet",
+    props: WIDE as never });
+  const pane = async () => texts(await mounted.drawn()).join("\n");
   expect(open).toEqual([]);
-  await band.press({ key: key as string });
+  await band.press({ key: "fleet.band.focus.working" });
+  expect(open).toEqual(["fleet"]);
+  // Narrowed: the working job is drawn, and the waiting row and the pull
+  // request, which the figure did not count, are not. A dropped row slides out
+  // rather than vanishing, so the pane is read once the slide has run.
+  await pane();
+  await clock.advance(400);
+  const narrowed = await pane();
+  expect(narrowed).toContain("Review adapter behavior");
+  expect(narrowed).not.toContain("Draft the migration");
+  expect(narrowed).not.toContain("Speed up the reader");
+  // The same press widens it, and the pane stays open rather than closing: the
+  // press is the figure's, and the switch above is the way to shut the pane.
+  await band.press({ key: "fleet.band.focus.working" });
+  expect(open).toEqual(["fleet"]);
+  const widened = await pane();
+  expect(widened).toContain("Speed up the reader");
+  await band.press({ key: "fleet.band.focus.working" });
   expect(open).toEqual(["fleet"]);
 });
 
@@ -957,10 +989,7 @@ test("finished jobs, subagent tasks and interactive counts are drawn", async ($,
   await $.session.start({ surface: "terminal", cwd: "/tmp" } as never).catch(() => undefined);
   for (const surface of SURFACES) {
     const pane = await $.ui.mount({ plugin: "llm-fleet", surface: surface, component: "Pane", requestId: "fleet", props: WIDE as never });
-    let words = "";
-    for (let attempt = 0; attempt < 20 && !words.includes("hidden from the band"); attempt += 1) {
-      words = texts(await pane.drawn()).join("\n");
-    }
+    const words = texts(await pane.drawn()).join("\n");
     // A job that finished is drawn quiet under the live ones, with its last word.
     expect(words).toContain("Tidy the changelog");
     expect(words).toContain(" · finished 1h ago");
@@ -971,7 +1000,6 @@ test("finished jobs, subagent tasks and interactive counts are drawn", async ($,
     // The roster's interactive count, by the name the provider is shown under.
     expect(words).toContain("Interactive sessions:");
     expect(words).toContain("One 2");
-    expect(words).toContain("1 hidden from the band; /llm-fleet unhide shows them again.");
     expect(words).toContain("Esc or x closes this pane");
   }
 });

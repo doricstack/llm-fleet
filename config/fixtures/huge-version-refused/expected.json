@@ -1,0 +1,5 @@
+{
+  "errors": [
+    {"code": "E_CONFIG_VALUE", "path": "schemaVersion"}
+  ]
+}

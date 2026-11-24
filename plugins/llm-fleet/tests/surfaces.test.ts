@@ -14,7 +14,7 @@
 
 import { expect, mock, test } from "claude-code/testing";
 
-import { FOLDS_KEY, FRESH_WORKTREES, READING_KEY, TAB_HELPER, TIPS_KEY } from "../hooks/llm-fleet.ts";
+import { FRESH_WORKTREES, READING_KEY, TAB_HELPER, TIPS_KEY } from "../hooks/llm-fleet.ts";
 
 const AT = 1790000000;
 
@@ -127,7 +127,7 @@ test("/keys tips off keeps the word in the store and takes the tip off the hint 
   expect(TIPS_KEY).toBe("key-tips");
 });
 
-test("/worktrees opens the pane, probes the worktrees on the next look, and keeps the folds for the next session", async ($, on) => {
+test("/worktrees opens the pane on Worktrees and probes the worktrees on the next look", async ($, on) => {
   const clock = mock.clock(on, { now: AT * 1000 });
   engine(on);
   mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
@@ -156,7 +156,51 @@ test("/worktrees opens the pane, probes the worktrees on the next look, and keep
   const text = strings(await pane.drawn());
   expect(text).toContain("Worktrees");
   expect(text).not.toContain("Review adapter behavior");
-  expect(FOLDS_KEY).toBe("folds");
+});
+
+/**
+ * The way back out of a one-section open.
+ *
+ * A command that opens the pane on one section draws the rest folded, which
+ * is a layout the person did not build; running it again is the way back. The
+ * open was a view and moved no fold, so the pane drawn after it is the one that
+ * stood before, with nothing to put back.
+ */
+test("/worktrees run a second time closes the pane, and the pane drawn next is the one before it", async ($, on) => {
+  mock.clock(on, { now: AT * 1000 });
+  engine(on);
+  mock.store(on, { [READING_KEY]: { at: AT, documents: READING } });
+  const open: string[] = [];
+  on("ui.panes", () => ({ value: open.map((id) => ({ id })) }) as never);
+  on("ui.open", (_engine, e) => {
+    const id = (e as { id: string }).id;
+    if (!open.includes(id)) {
+      open.push(id);
+    }
+    return { value: { isPlaced: true } } as never;
+  });
+  on("ui.close", (_engine, e) => {
+    const at = open.indexOf((e as { id: string }).id);
+    if (at >= 0) {
+      open.splice(at, 1);
+    }
+    return { value: undefined } as never;
+  });
+  // No session is started: the command names its section before any reading
+  // is held, and the view applies once the paint has one to draw.
+  const first = await $.command.run({ command: "worktrees", args: "" } as never);
+  expect(JSON.stringify(first)).toContain("llm-fleet pane opened on Worktrees");
+  expect(open).toEqual(["fleet"]);
+  const second = await $.command.run({ command: "worktrees", args: "" } as never);
+  expect(JSON.stringify(second)).toContain("llm-fleet pane closed");
+  expect(open).toEqual([]);
+  // The pane drawn next is the one the first command was a view over, not the
+  // one it left: the session it folded away is drawn again.
+  const pane = await $.ui.mount({ plugin: "llm-fleet", surface: "terminal", component: "Pane",
+                                  requestId: "fleet",
+                                  props: { title: "llm-fleet", isFocused: true, bodyColumns: 120,
+                                           placement: "dock" } as never });
+  expect(strings(await pane.drawn())).toContain("Review adapter behavior");
 });
 
 test("/keys opens the pane on Keys", async ($, on) => {

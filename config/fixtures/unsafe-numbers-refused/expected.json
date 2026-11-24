@@ -1,0 +1,7 @@
+{
+  "errors": [
+    {"code": "E_CONFIG_VALUE", "path": "pane.minimumColumns"},
+    {"code": "E_CONFIG_VALUE", "path": "sources.agents.inputPricePerMTok.mythos-1"},
+    {"code": "E_CONFIG_VALUE", "path": "sources.rates.maxAgeSeconds"}
+  ]
+}

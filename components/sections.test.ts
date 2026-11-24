@@ -22,6 +22,10 @@ function reading(overrides: Record<string, unknown> = {}): ReaderDocuments {
     trials: { state: "empty" }, progress: { state: "empty" },
     prs: { state: "empty", prs: [], errors: [] },
     skills: { state: "empty" }, worktrees: { state: "empty" },
+    // The machine's load, switched off: absent from the read is not the same
+    // as the load source answering that it found nothing, and the section
+    // draws when a source did not answer.
+    load: { state: "empty" },
     ...overrides,
   } as unknown as ReaderDocuments;
 }
@@ -39,9 +43,14 @@ test("a section that hides while empty is left out until it has something, or so
   assert.equal(quiet.groups.some((group) => group.title === "Pull requests"), true);
 });
 
-test("pull requests lead the pane when nothing reorders it", () => {
+test("this session leads the pane when nothing reorders it", () => {
   const pane = paneFrom(snapshotFrom(reading(), AT), paneOptions(120, AT, null));
-  assert.equal(pane.groups[0]?.title, "Pull requests");
+  assert.equal(pane.groups[0]?.title, "This session");
+  // Load and pacer keep out of sight while empty, so the next heading drawn is
+  // pull requests, and worktrees sit above the background sessions.
+  const titles = pane.groups.map((group) => group.title);
+  assert.equal(titles[1], "Pull requests");
+  assert.ok(titles.indexOf("Worktrees") < titles.indexOf("Background sessions"), titles.join());
 });
 
 test("an empty group is one with no rows and nothing wrong", () => {
@@ -55,14 +64,21 @@ test("an empty group is one with no rows and nothing wrong", () => {
                             rows: [{ title: "a", meta: [], slot: [] }] }), false);
 });
 
-test("warnings lead the pane while a source is failing, wherever the order put them", () => {
+test("a failing source keeps its section where the configuration put it", () => {
+  // A failing reader used to lift its section above the calm ones, which moved
+  // every digit below it: the hotkey a person learned became another section's
+  // on a reading they did not ask for. The heading's tone says what is wrong,
+  // in place. Found by review, 2026-11-23.
   const options = paneOptions(120, AT, null);
   const failing = paneFrom(snapshotFrom(reading({ prs: { state: "failed", prs: [],
     errors: [{ source: "prs:owner/project", reason: "timed out" }] } }), AT), options);
-  assert.equal(failing.groups[0]?.title, "Warnings");
-  assert.equal(failing.groups[0]?.rows.length, 1);
-  // The rest keep the order they were given, behind it.
-  assert.equal(failing.groups[1]?.title, "Pull requests");
+  const titles = failing.groups.map((group) => group.title);
+  assert.equal(titles[0], "This session", titles.join("|"));
+  const warnings = failing.groups.find((group) => group.title === "Warnings");
+  assert.equal(warnings?.rows.length, 1);
+  // The order it keeps is the configured one: every drawn section sits where
+  // the order puts it, and warnings sits after Pull requests.
+  assert.ok(titles.indexOf("Warnings") > titles.indexOf("Pull requests"), titles.join("|"));
   // A person who hid warnings is not overruled.
   const hidden = { ...options, sections: { ...options.sections,
     warnings: { ...options.sections.warnings, visible: false } } };
@@ -102,5 +118,32 @@ test("a section past its row limit draws the first rows and counts the rest besi
   const whole = paneFrom(snapshotFrom(reading({ prs: { state: "ready", prs: pulls, errors: [] } }),
                                       AT), base);
   assert.equal(whole.groups.find((entry) => entry.title === "Pull requests")?.rows.length, 5);
+});
+
+test("a source that did not answer shows no figures at all", () => {
+  // A roster-only reading, and an explicitly unavailable one, both drew
+  // "0 open" and "No open pull requests...": a statement about pull requests
+  // that nothing had read. Found by review, 2026-11-23.
+  const options = paneOptions(120, AT, null);
+  const missing = { ...reading() } as Record<string, unknown>;
+  delete missing.prs;
+  for (const documents of [missing, reading({ prs: { state: "unavailable" } })]) {
+    const group = paneFrom(snapshotFrom(documents as ReaderDocuments, AT), options)
+      .groups.find((entry) => entry.title === "Pull requests");
+    assert.ok(group);
+    const summary = group.summary.map((slot) => slot.text).join(" ");
+    assert.equal(summary.includes("0 open"), false, summary);
+    assert.equal(summary.includes("unknown"), true, summary);
+  }
+});
+
+test("a source missing from the reading is unavailable, never an answered empty", () => {
+  const snapshot = snapshotFrom({} as ReaderDocuments, AT);
+  for (const name of ["roster", "prs", "skills", "worktrees", "load"] as const) {
+    assert.equal((snapshot[name] as { state: string }).state, "unavailable", name);
+  }
+  // A person's own sections, and pacer, are the gaps that read as a switch.
+  assert.equal(snapshot.custom.state, "disabled");
+  assert.equal(snapshot.pacer.state, "disabled");
 });
 

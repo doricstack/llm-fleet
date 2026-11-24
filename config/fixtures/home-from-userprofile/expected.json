@@ -1,0 +1,32 @@
+{
+  "config": {
+    "stateDir": "/fixture/pc/llm-fleet/state",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "agents": {
+        "state": "unconfigured"
+      },
+      "rates": {
+        "state": "ready"
+      },
+      "skills": {
+        "enabled": true,
+        "state": "unavailable",
+        "directory": "/fixture/pc/skills"
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/pc/llm-fleet/state/typing"
+      }
+    }
+  }
+}

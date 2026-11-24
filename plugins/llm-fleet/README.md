@@ -45,14 +45,14 @@ A session started before the update has no pane until it restarts. From a checko
 - A row that holds more than its two lines says so on its figures: press them to open the rest (path, provider, cleanup line, check list), and press again to close it.
 - A section heading folds it, and the keys section lists every binding the pane draws.
 - The skills heading counts the findings in your own skills, apart from the ones under plugin installs, synced copies and built-ins, which it states beside that number. It counts what the scan found rather than the rows the pane had room to draw, so a count never shrinks to the size of the section.
-- On the band above the prompt, the figures open the pane narrowed to their state, what this session has spent sits beside them on a chip, and the item the band leads with opens the pane where its row lives. A skill finding reaches the band only when it is in one of your own skills; one under a plugin install or another tool's folder stays in the pane.
+- On the band above the prompt, the figures open the pane narrowed to their state and the same figure pressed again widens it; what this session has spent sits beside them on a chip. A skill finding reaches the band only when it is in one of your own skills; one under a plugin install or another tool's folder stays in the pane.
 - The Pacer section draws every slot as a row of columns: the slot's own name, the project the run works for, its worktree, and how long it has been running. A slot pacer reserves is named rather than numbered. The project is read from the folder the run started in; a slot whose folder cannot be read shows its Worktree and no project rather than a guess.
 - What a row offers is copied or opened from its title: a job's attach line, a worktree's cleanup line, a pull request's page, a skill report command.
 
 ## Commands
 
 - `/llm-fleet` opens or closes the pane, and `/llm-fleet close` only closes it.
-- `/llm-fleet unhide` brings back the band items you dismissed.
+- `/llm-fleet unhide` clears item dismissals recorded by an earlier version, so their alerts return.
 - `/llm-fleet doctor` and `/llm-fleet setup` are the two commands from the first run.
 - `/worktrees` opens the pane on its worktrees section with a fresh probe.
 - `/keys` opens the pane on its keys section, and `/keys tips off` turns off the key tip under the prompt.
@@ -66,7 +66,7 @@ Three options live in `/config` under the plugin, because they are needed before
 - **Configuration file**: a full path to your configuration when it is not in the default place.
 - **Desktop notifications**: off by default; turn it on to add a desktop notification to the in-session toast. It is asked for rather than given, because a notification puts itself in front of whatever you are working in.
 
-Everything else is in the configuration file. Each section can be shown or hidden (`pane.sections.<name>.visible`), folded at the start (`collapsed`), and capped at a row count (`maxRows`), and the order is the one you set. Sessions, background jobs, agent cards and this session's own cost, context and limits are on from the start. Pull requests, worktrees, pacer, skill scans and a recorded statusline payload are sources you switch on, and the doctor names the key each one needs. Speech is off until you set `speech.enabled` and a speech command. A key the schema does not know is refused by name rather than ignored. The full list of settings, with defaults, is in [the configuration reference](https://github.com/doricstack/llm-fleet/blob/main/docs/configuration.md).
+Everything else is in the configuration file. Each section can be shown or hidden (`pane.sections.<name>.visible`), folded at the start (`collapsed`), switched off at the start (`off`: no card, its name dim in the section picker, one press there draws it for the session), and capped at a row count (`maxRows`), and the order is the one you set. Every new session opens on these folds and switches; a press lasts for that session only. Sessions, background jobs, agent cards and this session's own cost, context and limits are on from the start. Pull requests, worktrees, pacer, skill scans and a recorded statusline payload are sources you switch on, and the doctor names the key each one needs. Speech is off until you set `speech.enabled` and a speech command. A key the schema does not know is refused by name rather than ignored. The full list of settings, with defaults, is in [the configuration reference](https://github.com/doricstack/llm-fleet/blob/main/docs/configuration.md).
 
 ## What it reads
 
@@ -123,7 +123,7 @@ The outside commands run with your Anthropic variables and the common provider A
 - The starter configuration, once, from `/llm-fleet setup`, and never over a file already there.
 - Small records under its state directory (`$XDG_STATE_HOME/llm-fleet`, `%LOCALAPPDATA%\llm-fleet` or `~/.local/state/llm-fleet`): which alert was claimed, which reply was sent, whose turn the voice is, each terminal tab's color, and the rate cards last read with the time each was read (`records/rate-cards.json`).
 - Speech clips in the system temporary folder while speech is on, each removed once played.
-- Your folds, focus and speech choice, in Claude Code's own plugin store.
+- In Claude Code's own plugin store: the last reading, pacer's slot counts, the band items you dismissed, the replies sent, which session reads for the others, your speech and voice choice, and whether key tips are on. Your folds are never written there: a fold or switch you press lives in that session alone.
 
 ### The environment it reads
 

@@ -58,13 +58,16 @@ test("this session's figures reach the pane from the document that carried them"
   assert.equal(bare.some((value) => value.includes("$")), false);
 });
 
-test("an absent document reads as an empty source, not as a failure", () => {
+test("an absent document reads as unavailable, never as an answered empty", () => {
+  // A reading that never named a source is not evidence the source was empty:
+  // shown as empty, the pane drew "0 open" and "none" over a question nothing
+  // asked. Found by review, 2026-11-23.
   const snapshot = snapshotFrom({}, NOW);
-  assert.equal(snapshot.roster.state, "empty");
+  assert.equal(snapshot.roster.state, "unavailable");
   assert.equal(snapshot.pacer?.state, "disabled");
-  assert.equal(snapshot.prs.state, "empty");
-  assert.equal(snapshot.skills.state, "empty");
-  assert.equal(snapshot.worktrees.state, "empty");
+  assert.equal(snapshot.prs.state, "unavailable");
+  assert.equal(snapshot.skills.state, "unavailable");
+  assert.equal(snapshot.worktrees.state, "unavailable");
   assert.deepEqual(snapshot.roster.jobs, []);
 });
 
@@ -119,6 +122,22 @@ test("a provider map keeps the states it was given and refuses the rest", () => 
   assert.equal(snapshot.roster.providers.off?.state, "disabled");
   assert.equal(snapshot.roster.providers.odd?.state, "unavailable");
   assert.equal(snapshot.roster.providers.shapeless?.state, "unavailable");
+});
+
+test("each roster source is read from its own state, not from the map that holds them", () => {
+  // `sources` is a map of source name to state word. Asking the map for a state
+  // of its own found none and marked both sources failed, so a ready jobs read
+  // and a switched-off interactive read reached the pane as two failures.
+  const named = snapshotFrom({ roster: { state: "ready",
+    sources: { jobs: "ready", interactive: "disabled" } } }, NOW);
+  assert.deepEqual(named.roster.sources, { jobs: "ready", interactive: "disabled" });
+  // A word this layer does not know is the source failing, as it is for a document.
+  const odd = snapshotFrom({ roster: { state: "ready",
+    sources: { jobs: "ready", interactive: "sleepy" } } }, NOW);
+  assert.deepEqual(odd.roster.sources, { jobs: "ready", interactive: "failed" });
+  // A roster that sent no map at all is the fallback, not a failure.
+  assert.deepEqual(snapshotFrom({ roster: { state: "ready" } }, NOW).roster.sources,
+                   { jobs: "empty", interactive: "empty" });
 });
 
 test("a pull request without a number keeps it absent and its checks unknown", () => {
@@ -430,9 +449,9 @@ test("a process under load reaches the pane only with the figures that read", ()
   assert.equal(snapshot.load.processes[0]?.project_root, "/p/repo");
   // A project without a root keeps the name and invents no path.
   assert.equal(snapshot.load.processes[1]?.project_root, undefined);
-  // A reading from before the load was read carries an empty document rather
-  // than a failed one: nobody asked this machine about its load.
-  assert.equal(snapshotFrom({}, NOW).load.state, "empty");
+  // A reading from before the load was read names no load at all: nobody asked
+  // this machine about it, and "empty" would say the machine was idle.
+  assert.equal(snapshotFrom({}, NOW).load.state, "unavailable");
 });
 
 test("the machine's own figures reach the pane only where they are numbers", () => {

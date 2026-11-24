@@ -77,7 +77,7 @@ A source you have not configured is drawn as unconfigured, never as an empty lis
 | `/llm-fleet close` | closes the pane without opening it |
 | `/llm-fleet setup` | writes a starter configuration holding the homes it finds |
 | `/llm-fleet doctor` | names what the pane is missing and the setting that fixes each |
-| `/llm-fleet unhide` | brings back the band items you dismissed |
+| `/llm-fleet unhide` | clears item dismissals an earlier version recorded |
 | `/worktrees` | opens the pane on worktrees, with a fresh probe |
 | `/keys` | opens the pane on its keys section |
 | `/speak` | picks this session's voice, once you have set a speech command |

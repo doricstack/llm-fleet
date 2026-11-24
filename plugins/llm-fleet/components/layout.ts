@@ -304,6 +304,14 @@ export type Group = {
   disabledText?: string;
   emptyText?: string;
   /**
+   * The lines a section draws in place of its one-sentence message.
+   *
+   * A refusal lists every error it found, and joining them into one line let a
+   * narrow pane cut the line mid-sentence: each refusal is drawn whole, on its
+   * own line. Found by review, 2026-11-23.
+   */
+  messageLines?: string[];
+  /**
    * What this section's counts mean, as the configuration words it.
    *
    * Drawn under the heading while the section is open. It is the one line that
@@ -531,6 +539,15 @@ export function countLabel(bar: Bar | undefined): Slot {
 
 /** The wording a group with nothing to show uses, by why it has nothing. */
 export function groupMessage(group: Group): Slot[] {
+  if (group.messageLines !== undefined && group.messageLines.length) {
+    // A refusal names each error it found, and one line holding several of
+    // them is cut mid-sentence by a narrow pane: each is drawn whole. Found by
+    // review, 2026-11-23.
+    const color: Color | undefined = group.state === "failed" ? "error"
+      : group.state === "unavailable" || group.state === "stale" ? "warning" : undefined;
+    return group.messageLines.map((text) =>
+      (color === undefined ? { text, dim: true } : { text, color }));
+  }
   const age = ageText(group.staleSeconds ?? 0);
   switch (group.state) {
     case "paused":
@@ -1198,8 +1215,11 @@ export function renderGroup(given: Group, width: number, narrowAt: number,
   if ((!group.rows.length || group.state !== "ready")
       && (!leaving || group.state === "failed" || group.state === "stale")) {
     const message = groupMessage(group);
-    if (message.length) {
-      parts.push(line(message));
+    // Each line of the message is its own row: a refusal names several errors,
+    // and slots drawn side by side in one row are cut from that row's end,
+    // taking a later error's meaning with them. Found by review, 2026-11-23.
+    for (const slot of message) {
+      parts.push(line([slot]));
     }
   }
   // What the section knows beyond its rows, while it is open: a folded section

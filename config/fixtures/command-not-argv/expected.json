@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": "E_CONFIG_TYPE",
+      "path": "pane.custom.disk.command"
+    }
+  ]
+}

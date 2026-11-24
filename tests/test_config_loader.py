@@ -16,9 +16,11 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import ntpath
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -209,6 +211,21 @@ class ContractTests(unittest.TestCase):
             self.assertIn(field["type"], declared_types, field)
             self.assertLessEqual(set(field), declared_keys, field)
 
+    def test_numeric_and_key_limits_are_declared(self) -> None:
+        """Both loaders read one declared bound, not two language coincidences."""
+        self.assertEqual(self.schema["numberLimits"]["safeInteger"], 2**53 - 1)
+        ranges = self.schema["keyForbiddenRanges"]
+        self.assertTrue(ranges, "the schema declares no key binding ranges")
+        previous_end = -1
+        for start, end in ranges:
+            self.assertLessEqual(start, end)
+            self.assertGreater(start, previous_end, "ranges overlap or are unsorted")
+            previous_end = end
+        # The characters the two languages disagreed on, plus the ordinary
+        # space and tab every binding form already refused.
+        for code in (0x09, 0x20, 0x85, 0xFEFF):
+            self.assertTrue(any(start <= code <= end for start, end in ranges), hex(code))
+
     def test_field_paths_are_unique_and_complete(self) -> None:
         paths = [field["path"] for field in self.schema["fields"]]
         self.assertEqual(len(paths), len(set(paths)), "duplicate field path")
@@ -297,6 +314,23 @@ class ContractTests(unittest.TestCase):
                 names.append(name)
         self.assertEqual(len(names), len(set(names)), "legacy name declared twice")
         self.assertNotIn(self.schema["environment"]["selector"], names)
+
+    def test_an_environment_alias_names_declared_variables_only(self) -> None:
+        # Both loaders fill an alias without asking what it points at, so a
+        # typo would read as an unset variable and refuse every document that
+        # names it. The alias target is a name the loader reads from the real
+        # environment and a document may not write, so it stays out of the
+        # declared variables; the name it fills must be one of them.
+        declared = set(self.schema["environment"]["variables"])
+        aliases = self.schema["environment"].get("aliases", {})
+        # A loop over an empty table asserts nothing, so the table itself is
+        # checked first. Found by review, 2026-11-23.
+        self.assertTrue(aliases, "the schema declares no environment alias")
+        self.assertEqual(aliases.get("HOME"), "USERPROFILE")
+        for name, target in aliases.items():
+            self.assertIn(name, declared, name)
+            self.assertNotEqual(name, target, name)
+            self.assertNotIn(target, aliases, target)
 
     def test_rules_reference_declared_fields(self) -> None:
         declared = {field["path"] for field in self.schema["fields"]}
@@ -427,6 +461,21 @@ class ResolutionTests(ConfigTestCase):
         (located / "config.json").write_text('{"stateDir": "./here"}', encoding="utf-8")
         resolved = self.load(environ={"HOME": str(self.root)})
         self.assertEqual(resolved["stateDir"], str(located / "here"))
+
+    def test_a_default_place_that_is_not_a_regular_file_is_skipped(self) -> None:
+        # A device where the default document would sit is not a document: the
+        # load falls through to the packaged defaults rather than reading it or
+        # refusing the file Python never even looked at. The TypeScript loader
+        # holds the same rule, so the two agree on one tree. Found by review,
+        # 2026-11-23.
+        if os.name != "posix":
+            self.skipTest("a device path stands at no place a config file would take here")
+        located = self.root / ".config" / "llm-fleet"
+        located.mkdir(parents=True)
+        os.symlink(os.devnull, located / "config.json")
+        resolved = self.load(environ={"HOME": str(self.root)})
+        self.assertEqual(resolved["stateDir"],
+                         os.path.normpath(str(self.root / ".local" / "state" / "llm-fleet")))
 
     def test_xdg_config_home_outranks_the_home_fallback(self) -> None:
         fallback = self.root / ".config" / "llm-fleet"
@@ -579,6 +628,88 @@ class ResolutionTests(ConfigTestCase):
         self.assertEqual(accepted["schemaVersion"], 1)
         self.assert_errors([("E_CONFIG_TYPE", "greeting")], {"greeting": 7},
                            schema_file=str(custom))
+
+
+class PlatformEnvironmentTests(ConfigTestCase):
+    """The variable names a document may use, and how a Windows-written file is read."""
+
+    def test_home_is_read_from_userprofile_when_it_is_absent(self) -> None:
+        resolved = self.load({"stateDir": "$HOME/fleet"},
+                             environ={"USERPROFILE": HOME})
+        self.assertEqual(resolved["stateDir"], path_of("fleet"))
+
+    def test_home_in_the_environment_outranks_userprofile(self) -> None:
+        resolved = self.load({"stateDir": "$HOME/fleet"},
+                             environ={"HOME": "/fixture/shell",
+                                      "USERPROFILE": "/fixture/pc"})
+        self.assertEqual(resolved["stateDir"], os.path.normpath("/fixture/shell/fleet"))
+
+    def test_an_empty_home_is_treated_as_absent(self) -> None:
+        resolved = self.load({"stateDir": "$HOME/fleet"},
+                             environ={"HOME": "", "USERPROFILE": HOME})
+        self.assertEqual(resolved["stateDir"], path_of("fleet"))
+
+    def test_the_default_place_is_found_under_userprofile(self) -> None:
+        located = self.root / ".config" / "llm-fleet"
+        located.mkdir(parents=True)
+        (located / "config.json").write_text('{"stateDir": "./here"}', encoding="utf-8")
+        resolved = self.load(environ={"USERPROFILE": str(self.root)})
+        self.assertEqual(resolved["stateDir"], str(located / "here"))
+
+    def test_userprofile_is_not_a_name_a_document_may_use(self) -> None:
+        self.assert_errors([("E_CONFIG_UNRESOLVED_VAR", "stateDir")],
+                           {"stateDir": "$USERPROFILE/fleet"},
+                           environ={"USERPROFILE": HOME})
+
+    def test_a_byte_order_mark_is_read_as_the_same_document(self) -> None:
+        path = self.root / "config.json"
+        path.write_bytes(b"\xef\xbb\xbf" + json.dumps({"stateDir": "/marked"}).encode("utf-8"))
+        resolved = self.load(environ={"HOME": HOME}, config_path=str(path))
+        self.assertEqual(resolved["stateDir"], os.path.normpath("/marked"))
+
+    def test_a_second_byte_order_mark_is_malformed(self) -> None:
+        # utf-8-sig drops one mark and leaves the next character in the
+        # document, where json refuses it. The TypeScript loader reads the
+        # same bytes the same way; found by review, 2026-11-22.
+        path = self.root / "config.json"
+        path.write_bytes(b"\xef\xbb\xbf\xef\xbb\xbf"
+                         + json.dumps({"stateDir": "/marked"}).encode("utf-8"))
+        self.assert_errors([("E_CONFIG_MALFORMED", "")], document=None,
+                           environ={"HOME": HOME, "FLEET_CONFIG": str(path)})
+
+    def test_bytes_that_are_not_utf8_are_malformed_rather_than_unreadable(self) -> None:
+        path = self.root / "config.json"
+        path.write_bytes(b"\xff\xfe{\x00}\x00")
+        self.assert_errors([("E_CONFIG_MALFORMED", "")], document=None,
+                           environ={"HOME": HOME, "FLEET_CONFIG": str(path)})
+
+    def test_one_ansi_byte_in_an_otherwise_valid_document_is_malformed(self) -> None:
+        # A Windows editor saving as ANSI puts one such byte in a path; a
+        # decoder that replaces it would return a path with U+FFFD in it.
+        path = self.root / "config.json"
+        path.write_bytes('{"stateDir": "/tmp/café"}'.encode("latin-1"))
+        self.assert_errors([("E_CONFIG_MALFORMED", "")], document=None,
+                           environ={"HOME": HOME, "FLEET_CONFIG": str(path)})
+
+    def test_a_malformed_refusal_names_which_cause_it_was(self) -> None:
+        # Bytes that are not UTF-8 and text that is not JSON both read as
+        # E_CONFIG_MALFORMED, and the repair differs. The entry says which,
+        # so the pane can name the one that happened. Found by review,
+        # 2026-11-23.
+        path = self.root / "config.json"
+        path.write_bytes(b"\xff\xfe{\x00}\x00")
+        with self.assertRaises(loader.ConfigError) as caught:
+            self.load(environ={"HOME": HOME}, config_path=str(path))
+        self.assertEqual([entry.get("detail") for entry in caught.exception.errors], ["bytes"])
+        text = self.root / "text.json"
+        text.write_bytes(b"{ not json")
+        with self.assertRaises(loader.ConfigError) as caught:
+            self.load(environ={"HOME": HOME}, config_path=str(text))
+        self.assertEqual([entry.get("detail") for entry in caught.exception.errors], ["json"])
+
+    def test_the_environment_a_load_reads_names_the_alias_it_filled(self) -> None:
+        environment = loader.resolved_environment({"USERPROFILE": HOME})
+        self.assertEqual(environment["HOME"], HOME)
 
 
 class ProviderStateTests(ConfigTestCase):
@@ -814,14 +945,44 @@ class LayoutTests(ConfigTestCase):
     def test_section_order_defaults_to_the_documented_order(self) -> None:
         resolved = self.load()
         self.assertEqual(resolved["pane"]["sectionOrder"],
-                         ["load", "prs", "sessions", "session", "pacer",
-                          "worktrees", "skills", "warnings", "keys"])
+                         ["session", "load", "pacer", "prs", "worktrees", "sessions",
+                          "skills", "warnings", "keys"])
 
     def test_section_collapse_defaults_match_the_pane(self) -> None:
         sections = self.load()["pane"]["sections"]
         for name, expected in (("worktrees", True), ("skills", True), ("keys", True),
-                               ("sessions", False), ("pacer", False)):
+                               ("warnings", True), ("sessions", False), ("pacer", False)):
             self.assertEqual(sections[name]["collapsed"], expected, name)
+
+    def test_no_section_starts_switched_off_unless_the_document_says_so(self) -> None:
+        sections = self.load()["pane"]["sections"]
+        self.assertEqual(len(sections), 9)
+        for name, body in sections.items():
+            self.assertIs(body["off"], False, name)
+        chosen = self.load({"pane": {"sections": {"keys": {"off": True}}}})["pane"]["sections"]
+        self.assertIs(chosen["keys"]["off"], True)
+        # Choosing one switch leaves that section's other choices and every other
+        # section's switch as they were.
+        self.assertIs(chosen["keys"]["collapsed"], True)
+        self.assertIs(chosen["skills"]["off"], False)
+
+    def test_a_switch_that_is_not_a_boolean_is_refused(self) -> None:
+        self.assert_errors([("E_CONFIG_TYPE", "pane.sections.keys.off")],
+                           {"pane": {"sections": {"keys": {"off": "yes"}}}})
+        self.assert_errors([("E_CONFIG_TYPE", "pane.sections.skills.off")],
+                           {"pane": {"sections": {"skills": {"off": 1}}}})
+
+    def test_a_custom_section_can_start_switched_off(self) -> None:
+        custom = {"disk": {"title": "Disk", "command": ["python3", "disk.py"], "off": True}}
+        resolved = self.load({"pane": {"custom": custom}})["pane"]["custom"]["disk"]
+        self.assertIs(resolved["off"], True)
+        self.assertIs(resolved["collapsed"], False)
+        plain = {"disk": {"title": "Disk", "command": ["python3", "disk.py"]}}
+        self.assertIs(self.load({"pane": {"custom": plain}})["pane"]["custom"]["disk"]["off"], False)
+        self.assert_errors([("E_CONFIG_TYPE", "pane.custom.disk.off")],
+                           {"pane": {"custom": {"disk": {"title": "Disk",
+                                                         "command": ["python3", "disk.py"],
+                                                         "off": "no"}}}})
 
     def test_unknown_section_is_refused(self) -> None:
         self.assert_errors([("E_CONFIG_VALUE", "pane.sectionOrder[0]")],
@@ -869,6 +1030,15 @@ class LayoutTests(ConfigTestCase):
                            {"alerts": {"tabTint": {"failureRgb": [1, 2]}}})
         self.assert_errors([("E_CONFIG_VALUE", "alerts.tabTint.waitingRgb[1]")],
                            {"alerts": {"tabTint": {"waitingRgb": [1, 999, 3]}}})
+
+    def test_a_color_component_with_no_fraction_is_the_integer_it_writes(self) -> None:
+        # JSON Schema counts 1.0 as an integer, and the TypeScript parser cannot
+        # tell 1.0 from 1 after parsing: refusing here would refuse a document
+        # the other loader accepts, on a value the person cannot even see.
+        resolved = self.load({"alerts": {"tabTint": {"failureRgb": [1.0, 2, 3]}}})
+        self.assertEqual(resolved["alerts"]["tabTint"]["failureRgb"], [1, 2, 3])
+        self.assert_errors([("E_CONFIG_VALUE", "alerts.tabTint.failureRgb[0]")],
+                           {"alerts": {"tabTint": {"failureRgb": [1.5, 2, 3]}}})
 
     def test_a_tab_tint_entry_goes_stale_after_at_least_thirty_seconds(self) -> None:
         # The heartbeat says each level again every third of it: below thirty
@@ -962,6 +1132,129 @@ class LayoutTests(ConfigTestCase):
 
     def test_tones_default_to_silence(self) -> None:
         self.assertIsNone(self.load()["alerts"]["tones"])
+
+
+class SharedRuleTests(ConfigTestCase):
+    """Rules both loaders state once and read from the schema."""
+
+    def test_a_number_beyond_the_safe_range_is_refused_rather_than_rounded(self) -> None:
+        self.assert_errors(
+            [("E_CONFIG_VALUE", "sources.rates.maxAgeSeconds")],
+            {"sources": {"rates": {"maxAgeSeconds": 9007199254740993}}},
+        )
+        self.assert_errors(
+            [("E_CONFIG_VALUE", "pane.minimumColumns")],
+            {"pane": {"minimumColumns": 9007199254740993}},
+        )
+
+    def test_an_integer_valued_number_beyond_the_safe_range_is_refused(self) -> None:
+        self.assert_errors(
+            [("E_CONFIG_VALUE", "sources.agents.cacheWrite5mMultiplier")],
+            {"sources": {"agents": {"cacheWrite5mMultiplier": 1e300}}},
+        )
+
+    def test_a_number_beyond_the_double_range_is_refused(self) -> None:
+        path = self.write_config(
+            '{"sources": {"agents": {"inputPricePerMTok": {"mythos-1": 1e400}}}}')
+        with self.assertRaises(ConfigError) as caught:
+            load_config(config_path=path, environ={"HOME": HOME}, platform="darwin")
+        self.assertEqual([(entry["code"], entry["path"]) for entry in caught.exception.errors],
+                         [("E_CONFIG_VALUE", "sources.agents.inputPricePerMTok.mythos-1")])
+
+    def test_a_number_literal_past_the_conversion_limit_is_refused_at_its_field(self) -> None:
+        path = self.write_config('{"schemaVersion": ' + "1" + "0" * 4300 + "}")
+        with self.assertRaises(ConfigError) as caught:
+            load_config(config_path=path, environ={"HOME": HOME}, platform="darwin")
+        self.assertEqual([(entry["code"], entry["path"]) for entry in caught.exception.errors],
+                         [("E_CONFIG_VALUE", "schemaVersion")])
+
+    def test_a_prototype_named_map_key_is_kept(self) -> None:
+        resolved = self.load({"sources": {"agents": {"inputPricePerMTok": {"__proto__": 7}}}})
+        prices = resolved["sources"]["agents"]["inputPricePerMTok"]
+        self.assertEqual(prices["__proto__"], 7)
+        self.assertEqual(prices["fable-5-1"], 10)
+
+    def test_a_key_binding_refuses_every_declared_character(self) -> None:
+        for character in ("\u0085", "\ufeff", "\u001c"):
+            with self.subTest(character=hex(ord(character))):
+                self.assert_errors([("E_CONFIG_VALUE", "keys.close")],
+                                   {"keys": {"close": "a" + character + "b"}})
+
+    def test_section_order_reports_the_position_the_document_wrote(self) -> None:
+        self.assert_errors(
+            [("E_CONFIG_TYPE", "pane.sectionOrder[0]"),
+             ("E_CONFIG_RULE", "pane.sectionOrder[1]")],
+            {"pane": {"sectionOrder": [None, "custom:missing"]}},
+        )
+
+    def test_a_carried_default_is_never_expanded_a_second_time(self) -> None:
+        resolved = self.load(environ={"USERPROFILE": "/fixture/cash$"})
+        expected = loader.normalize_path("/fixture/cash$/.local/state/llm-fleet")
+        self.assertEqual(resolved["stateDir"], expected)
+        self.assertEqual(resolved["mods"]["typing"]["stateDir"],
+                         loader.normalize_path(expected + "/typing"))
+
+    def test_a_missing_tmpdir_falls_through_to_a_writable_temp(self) -> None:
+        real = tempfile.mkdtemp(prefix="fleet-temp-")
+        self.addCleanup(lambda: shutil.rmtree(real, ignore_errors=True))
+        saved = {name: os.environ.get(name) for name in ("TMPDIR", "TEMP", "TMP")}
+
+        def restore() -> None:
+            tempfile.tempdir = None
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+        self.addCleanup(restore)
+        for name in saved:
+            os.environ.pop(name, None)
+        os.environ["TMPDIR"] = os.path.join(real, "absent")
+        os.environ["TEMP"] = real
+        tempfile.tempdir = None
+        resolved = self.load()
+        self.assertEqual(resolved["speech"]["tempDirectory"], loader.normalize_path(real))
+
+
+class PathRuleTests(ConfigTestCase):
+    """The one path rule, proved off this platform with the platform named."""
+
+    def test_a_windows_rooted_path_is_absolute_and_a_drive_relative_one_is_not(self) -> None:
+        self.assertTrue(loader.is_absolute_path("/fleet/config.json", "win32"))
+        self.assertTrue(loader.is_absolute_path("C:\\fleet\\config.json", "win32"))
+        self.assertTrue(loader.is_absolute_path("\\\\server\\share\\x", "win32"))
+        self.assertFalse(loader.is_absolute_path("D:state", "win32"))
+        self.assertFalse(loader.is_absolute_path("C:fleet", "win32"))
+        self.assertTrue(loader.is_absolute_path("/\\", "win32"))
+
+    def test_a_windows_component_with_its_own_drive_replaces_the_base(self) -> None:
+        self.assertEqual(loader.join_path("C:\\cfg", "D:state", "win32"), "D:state")
+        self.assertEqual(loader.join_path("C:\\cfg", "D:\\state", "win32"), "D:\\state")
+        self.assertEqual(loader.join_path("C:\\cfg", "\\fleet\\x", "win32"), "C:\\fleet\\x")
+        self.assertEqual(loader.join_path("C:\\cfg", "C:fleet", "win32"), "C:\\cfg\\fleet")
+        self.assertEqual(loader.join_path("C:\\cfg", "\\\\srv\\sh", "win32"), "\\\\srv\\sh")
+
+    def test_a_component_of_two_leading_separators_keeps_both(self) -> None:
+        self.assertEqual(loader.join_path("/cfg", "/x", "posix"), "/x")
+        self.assertEqual(loader.join_path("//cfg", "", "posix"), "//cfg")
+
+    def test_a_trailing_separator_folds_away_and_two_leading_ones_stay(self) -> None:
+        self.assertEqual(loader.normalize_path("/fleet/", "posix"), "/fleet")
+        self.assertEqual(loader.normalize_path("//fleet", "posix"), "//fleet")
+        self.assertEqual(loader.normalize_path("C:\\cfg\\", "win32"), "C:\\cfg")
+        self.assertEqual(loader.normalize_path("//fleet", "win32"),
+                         ntpath.normpath("//fleet"))
+        self.assertEqual(loader.normalize_path("//server/share", "win32"),
+                         ntpath.normpath("//server/share"))
+        self.assertEqual(loader.normalize_path("//server/share/", "win32"),
+                         ntpath.normpath("//server/share/"))
+        self.assertEqual(loader.normalize_path("\\\\", "win32"), ntpath.normpath("\\\\"))
+
+    def test_a_selector_with_a_trailing_separator_names_the_file(self) -> None:
+        path = self.write_config({"stateDir": "/fleet/state"})
+        resolved = self.load(config_path=path + os.sep)
+        self.assertEqual(resolved["stateDir"], loader.normalize_path("/fleet/state"))
 
 
 class FixtureParityTests(ConfigTestCase):

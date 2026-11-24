@@ -82,6 +82,18 @@ class CustomReaderTests(CustomCase):
         ])
         self.assertEqual((section["visible"], section["collapsed"], section["hideWhenEmpty"]),
                          (True, False, False))
+        self.assertIs(section["off"], False)
+
+    def test_a_section_switched_off_in_the_configuration_reads_as_off(self):
+        # The picker draws a switch per section; one configured off starts
+        # switched off in every session, so the reading has to carry it.
+        command = self.printing("disk", {"rows": [{"title": "root"}]})
+        result = self.read({"disk": {"title": "Disk", "command": command,
+                                     "off": True, "collapsed": True}})
+        section = result["sections"]["disk"]
+        self.assertIs(section["off"], True)
+        self.assertIs(section["collapsed"], True)
+        self.assertEqual(section["title"], "Disk")
 
     def test_a_bar_is_drawn_only_from_figures_the_command_gave(self):
         command = self.printing("bars", {"rows": [
@@ -185,6 +197,7 @@ class ShippedExampleTests(CustomCase):
         self.assertIn("custom:disk", config["pane"]["sectionOrder"])
         disk = config["pane"]["custom"]["disk"]
         self.assertEqual((disk["title"], disk["timeoutSeconds"], disk["collapsed"]), ("Disk", 5, True))
+        self.assertIs(disk["off"], False)
         self.assertFalse(disk["hideWhenEmpty"])
 
     def test_the_shipped_example_command_draws_a_bar_per_disk(self):

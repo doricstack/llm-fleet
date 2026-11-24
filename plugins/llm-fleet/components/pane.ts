@@ -87,6 +87,11 @@ export type SectionChoice = {
   title?: string | null;
   visible: boolean;
   collapsed: boolean;
+  /**
+   * Whether the section starts switched off: not drawn, and named dim in the
+   * section picker, where one press switches it on for this session. Absent is on.
+   */
+  off?: boolean;
   legend?: string | null;
   /** Leave the section out while it has nothing to show and nothing is wrong with it. */
   hideWhenEmpty?: boolean;
@@ -152,12 +157,24 @@ export type PaneOptions = {
   /** The tones the configuration draws states in; the packaged theme when absent. */
   theme?: Theme;
   /**
-   * The fold a person pressed, by section, which outranks the configured one.
+   * The folds a person pressed in this session, by section: true folded, false
+   * open. Presses only.
    *
    * A section's configured fold is where it starts, not where it stays: this is
-   * what a press changes, and it lives for the session rather than on disk.
+   * what a press changes, and it lives for the session rather than on disk. A
+   * press outranks a filter, the pane's own open on what failed and the
+   * configuration; only a one-section view outranks it.
    */
   folded?: Record<string, boolean>;
+  /**
+   * The section a one-section view names, or null when there is none.
+   *
+   * The view draws its section open and whole, even when it is switched off,
+   * and folds every other. It changes no fold and no switch, so the paint after
+   * it ends draws what was drawn before it. A view on a section the
+   * configuration does not draw is ignored.
+   */
+  viewSection?: string | null;
   /**
    * The sections a person pressed to draw in full, by section.
    *
@@ -167,12 +184,13 @@ export type PaneOptions = {
    */
   shownAll?: Record<string, boolean>;
   /**
-   * The sections a person put away, by section name.
+   * The switches a person pressed in this session, by section name: true off,
+   * false on. Presses only, which outrank the configuration's `off`.
    *
-   * A section put away is not drawn among the cards, but it keeps its name in
-   * the picker, so the press that put it away brings it back. It lives beside
-   * the folds because it is a preference about the pane, not a filter on the
-   * rows a person is reading now.
+   * A section switched off is not drawn among the cards, but it keeps its name
+   * in the picker, dim, so a press there switches it on. It lives beside the
+   * folds because it is a preference about the pane, not a filter on the rows a
+   * person is reading now.
    */
   putAway?: Record<string, boolean>;
   /**
@@ -201,8 +219,6 @@ export type PaneOptions = {
   cleared?: string[];
   /** Why replies are paused, when the helper last refused one for the whole machine. */
   paused?: RepliesPaused | null;
-  /** How many items still on the band a person dismissed from it. */
-  hidden?: number;
   /** Whether the surface draws a text field, so a reply is typed rather than copied. */
   fields?: boolean;
   /**
@@ -220,17 +236,12 @@ export type PaneOptions = {
    * It opens the sections that hold a failure on those rows and folds the rest
    * where they are. Nothing leaves the pane: the section picker names every
    * section, and a heading the pane drops is a place the picker promises and
-   * the pane does not draw.
+   * the pane does not draw. It is worked out on each paint from the reading
+   * being drawn and never held, and a fold the person pressed outranks it: a
+   * section the configuration folded opens itself for a failure, and a section
+   * the person folded stays folded on the next paint.
    */
   focusAuto?: boolean;
-  /**
-   * The folds the person pressed themselves, which outrank the pane's own open.
-   *
-   * Only presses are here, not the folds the configuration asks for: a section
-   * the configuration folded opens itself for a failure, and a section the
-   * person folded stays folded on the next paint.
-   */
-  pressedFolds?: Record<string, boolean>;
   /** The rows a person pressed open, by the key the row carries. */
   details?: Record<string, true>;
 };
@@ -248,21 +259,105 @@ export const DETAILS_PREFIX = "fleet.details.";
 /**
  * Whether a row is one the focused figure counted.
  *
- * The words are the states the rows carry: a job works or waits, a pull request
- * and a pacer run pass or fail. A figure for working counts
- * every live state, because a lapse of one word is not a different outcome.
+ * The test is the one the figure's own count makes, written against the state
+ * word: a job that waits is the one its provider calls blocked, a job that
+ * worked is one short of a terminal state, and a failure is failed or error.
+ * A pull request carries the same failed word. Reading the words the same way
+ * in both places is what keeps a figure and its press from disagreeing, and the
+ * press draws one section's rows only, so a worktree's "active" or a pacer
+ * slot's "working" is never mistaken for what the figure counted.
  */
 export function focusMatches(state: string | undefined, focus: Focus): boolean {
+  if (state === undefined) {
+    return false;
+  }
   if (focus === "failed") {
     // A job whose provider says error ended in failure the same way, and the
     // figure counts both, so the press must draw both.
     return state === "failed" || state === "error";
   }
   if (focus === "waiting") {
-    // A job that waits on a person carries the word its provider uses for it.
-    return state === "waiting" || state === "blocked";
+    // A job that waits on a person carries the word the roster counts.
+    return state === "blocked";
   }
-  return state === "working" || state === "running" || state === "active";
+  return state !== "blocked" && !TERMINAL_STATES.has(state);
+}
+
+/**
+ * The sections whose rows each headline figure counts.
+ *
+ * A figure counts one source's rows and says nothing about another's, so the
+ * press that narrows the pane to it draws those rows and no others: a worktree
+ * carries the word "active" for a fact the working figure never counted, and a
+ * pacer slot carries "working" and "waiting" for its own. The failed figure
+ * counts a job and a pull request alike, and those are the two it draws.
+ */
+const FOCUS_SECTIONS: Record<Focus, readonly string[]> = {
+  working: ["sessions"],
+  waiting: ["sessions"],
+  failed: ["sessions", "prs"],
+};
+
+/** The section a group is drawn for, read from the key its own fold carries. */
+function sectionOf(group: Group): string {
+  const key = group.toggle?.key ?? "";
+  return key.startsWith(TOGGLE_PREFIX) ? key.slice(TOGGLE_PREFIX.length) : "";
+}
+
+/** The fold each section of a pane was drawn with, by section name: true folded. */
+export function drawnFolds(pane: Pane): Record<string, boolean> {
+  const folds: Record<string, boolean> = {};
+  for (const group of pane.groups) {
+    const name = sectionOf(group);
+    if (name !== "") {
+      folds[name] = group.collapsed === true;
+    }
+  }
+  return folds;
+}
+
+/** Everything that can decide whether a drawn section is folded. */
+export type FoldInputs = {
+  /** The one-section view: null when there is none, true on this section, false on another. */
+  viewed: boolean | null;
+  /** This session's fold press on the section: true folded, false open, undefined none. */
+  pressed: boolean | undefined;
+  /** Whether a filter is at work and holds rows in this section. */
+  filtered: boolean;
+  /**
+   * The pane's own open on what failed: true when it is at work and this
+   * section holds a failure. A failure elsewhere has no say here.
+   */
+  failed: boolean;
+  /** The configuration's `collapsed`. */
+  configured: boolean;
+};
+
+/**
+ * Whether a drawn section is folded: the strongest input that has a say wins.
+ *
+ * A one-section view opens its section and folds every other. Under it, a fold
+ * the person pressed in this session; under that, a filter, which opens the
+ * sections holding its rows; under that, the pane's own open on what failed,
+ * which opens the sections holding a failure and folds nothing; and the
+ * configuration last, which is what every section without a failure keeps. The
+ * order is docs/pane-design.md's, and this is the one place it is written as
+ * code.
+ */
+export function sectionFolded(inputs: FoldInputs): boolean {
+  if (inputs.viewed !== null) {
+    return !inputs.viewed;
+  }
+  if (inputs.pressed !== undefined) {
+    return inputs.pressed;
+  }
+  if (inputs.filtered) {
+    return false;
+  }
+  if (inputs.failed) {
+    return false;
+  }
+  return inputs.configured;
 }
 
 /** The address a press carries back for a job's attach command. */
@@ -1302,11 +1397,20 @@ function errorRow(error: { source: string; reason: string }): Row {
  * A group that failed does not report a count at all: the header says the count
  * is unknown, because a zero there would read as nothing running.
  */
-function summary(slots: Slot[], group: GroupState): Slot[] {
-  if (group === "paused") {
+function summary(slots: Slot[], group: GroupState, figuresFromRead = false): Slot[] {
+  if (group === "paused" || group === "disabled") {
     return [];
   }
-  return group === "failed" ? [{ text: "unknown", color: "error" }] : slots;
+  // A source that did not answer has no figures: an unavailable group drawing
+  // "0 open" or "none" states a fact about a machine nothing read. The figures
+  // a reading did carry stay: a refused process list does not unread the
+  // machine's CPU and memory, and stating them over the list it could not get
+  // is what the heading is for. A builder says whether its slots are such a
+  // reading, because a placeholder is shaped like a figure.
+  if (group === "failed" || group === "unavailable") {
+    return figuresFromRead ? slots : [{ text: "unknown", color: "error" }];
+  }
+  return slots;
 }
 
 function countSlot(count: number, label: string,
@@ -1380,19 +1484,26 @@ const CUSTOM_TEXT = { disabled: "This section is switched off in configuration."
                       empty: "The command printed no rows." };
 
 function sectionGroup(name: string, rows: Row[], state: GroupState, summarySlots: Slot[],
-                      options: PaneOptions, extra: Partial<Group> = {}): Group {
+                      options: PaneOptions, extra: Partial<Group> = {},
+                      figuresFromRead = false): Group {
   const choice = options.sections[name];
   const wording = SECTION_TEXT[name] ?? (name.startsWith(CUSTOM_PREFIX) ? CUSTOM_TEXT : undefined);
   const title = titleOf(name, options);
-  // What a person pressed outranks what the configuration chose: the configured
-  // fold is where a section starts, and a press is where it stays for this session.
-  const collapsed = options.folded?.[name] ?? choice?.collapsed ?? false;
+  // The configured fold is where a section starts. What outranks it, a press,
+  // a filter, a failure or a view, is decided once for the whole pane, in
+  // `paneFrom`, by `sectionFolded`.
+  const collapsed = choice?.collapsed ?? false;
   // A section past its ceiling draws the first rows and says how many it held
   // back: one long section must not push every section after it off the pane.
   // A ceiling holds the rest of a long section back so one section cannot push
   // every section after it off the pane. A press on the section's control puts
-  // that ceiling out of the way for the rest of the session.
-  const ceiling = options.shownAll?.[name] === true ? undefined : choice?.maxRows;
+  // that ceiling out of the way for the rest of the session. A pane narrowed to
+  // one figure puts it out of the way too: the press asked for exactly the rows
+  // that figure counted, and a failure a ceiling hid behind a passing row is a
+  // figure whose row cannot be reached.
+  const ceiling = options.focus
+    ? undefined
+    : options.shownAll?.[name] === true ? undefined : choice?.maxRows;
   const held = ceiling !== undefined && rows.length > ceiling ? rows.length - ceiling : 0;
   let withheld: Row[] = [];
   if (held > 0) {
@@ -1408,7 +1519,7 @@ function sectionGroup(name: string, rows: Row[], state: GroupState, summarySlots
     rows = [...rows, { key: "show-all", title: "show all rows", dim: true, meta: [], slot: [],
                        press: { key, label: "show all rows", onPress: pressTo(options, key) } }];
   }
-  const stated = summary(summarySlots, state);
+  const stated = summary(summarySlots, state, figuresFromRead);
   return {
     name: title,
     title,
@@ -2110,7 +2221,8 @@ function loadGroup(load: Load, options: PaneOptions): Group {
   }
   parts.push(countSlot(processes.length, "of " + load.total + " shown", "subtle"));
   const summary = combine(parts);
-  const group = sectionGroup("load", rows, partial(rows, load.state), summary, options);
+  const group = sectionGroup("load", rows, partial(rows, load.state), summary, options, {},
+                             system !== null);
   // The two figures are the section's only meaning that a shape does not tell
   // on its own: a percentage and a byte count, in columns wide enough to hold
   // them. The names are drawn in the same cells the rows draw: same width, same
@@ -2151,7 +2263,6 @@ function warningGroup(errors: { source: string; reason: string }[], roster: Rost
   const rows = errors.map(errorRow);
   const interactive = interactiveLine(roster);
   const sessions = Object.values(roster.interactive).reduce((sum, count) => sum + count, 0);
-  const hidden = options.hidden ?? 0;
   // The warning list is the collected reader errors, not a source: an empty one
   // states a count and claims nothing about what was read.
   const summary: Slot[] = rows.length
@@ -2164,10 +2275,6 @@ function warningGroup(errors: { source: string; reason: string }[], roster: Rost
   const notes: Slot[][] = [];
   if (interactive) {
     notes.push(interactive);
-  }
-  if (hidden > 0) {
-    notes.push([{ text: hidden + " hidden from the band; /llm-fleet unhide shows them again.",
-                  dim: true }]);
   }
   if (notes.length) {
     group.notes = notes;
@@ -2520,11 +2627,8 @@ function keyGroup(options: PaneOptions): Group {
   return sectionGroup("keys", rows, "ready", summary, options);
 }
 
-/**
- * The whole pane: the groups the configuration asks for, in the order it asks for
- * them, and a header that says what was observed and what could not be read.
- */
-export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
+/** Every section's groups, by section name, before the pane decides which are drawn. */
+function builtGroups(snapshot: Snapshot, options: PaneOptions): Record<string, Group[]> {
   const built: Record<string, Group[]> = {
     sessions: rosterGroups(snapshot.roster, options),
     session: [sessionGroup(snapshot.session, options)],
@@ -2545,17 +2649,46 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
                                  options)];
     }
   }
+  return built;
+}
+
+/**
+ * Whether a section is switched off: this session's press on its name in the
+ * picker when there is one, and the configuration's `off` when there is none.
+ */
+export function switchedOff(name: string, options: PaneOptions): boolean {
+  return options.putAway?.[name] ?? options.sections[name]?.off ?? false;
+}
+
+/**
+ * The whole pane: the groups the configuration asks for, in the order it asks for
+ * them, and a header that says what was observed and what could not be read.
+ */
+export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
+  // A one-section view names a section, and it counts only when that section is
+  // one the configuration draws: in the order, not hidden, and built. A view on
+  // any other is ignored, so the pane is drawn as if nobody asked. While a view
+  // stands the filter is not read: the view draws its section whole, and the
+  // filter is there again, untouched, on the paint after the view ends.
+  const asked = options.viewSection ?? null;
+  let view = asked !== null && options.sectionOrder.includes(asked)
+    && options.sections[asked]?.visible !== false ? asked : null;
+  let built = builtGroups(snapshot, view === null ? options : { ...options, focus: null });
+  if (view !== null && !built[view]?.length) {
+    view = null;
+    built = builtGroups(snapshot, options);
+  }
   // The picker lists every section the configuration made visible, in the order
-  // it asked for, whether or not a person has put it away: a section missing
-  // from the picker is one that was hidden with no press left to bring it back.
-  // A section the configuration itself hid is not listed, because no press made
-  // it go and no press should pretend to return it.
-  const hidden = options.putAway ?? {};
+  // it asked for, whether or not it is switched off: a section missing from the
+  // picker is one that was hidden with no press left to bring it back. A
+  // section the configuration itself hid is not listed, because no press made
+  // it go and no press should pretend to return it. A switched-off name is dim
+  // even while a view draws its section, because the view moved no switch.
   const picker: PickerItem[] = options.sectionOrder
     .filter((name) => built[name] !== undefined && options.sections[name]?.visible !== false)
     .map((name): PickerItem => {
       const title = titleOf(name, options);
-      return { name, title, hidden: hidden[name] === true,
+      return { name, title, hidden: switchedOff(name, options),
                press: { key: HIDE_PREFIX + name, label: title,
                         onPress: pressTo(options, HIDE_PREFIX + name) } };
     });
@@ -2565,15 +2698,20 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     if (choice && choice.visible === false) {
       continue;
     }
-    // A section a person put away draws no card while it is away; its name in
-    // the picker is what the press acts on until it comes back.
-    if (hidden[name] === true) {
+    // A section switched off draws no card; its name in the picker is what the
+    // press acts on. The section a view names is drawn whatever its switch
+    // says, and whether or not it has anything to show: the person asked for it.
+    if (name !== view && switchedOff(name, options)) {
       continue;
     }
+    // A press in the picker that switched the section on in this session is
+    // the person asking for it too, so one press on a dim name always draws
+    // its card, empty or not. Nobody asked for a section that is merely on.
+    const wanted = name === view || options.putAway?.[name] === false;
     const found = built[name];
     if (found) {
       groups.push(...found.filter((group) => group !== undefined
-        && !(choice?.hideWhenEmpty === true && emptyGroup(group))));
+        && (wanted || !(choice?.hideWhenEmpty === true && emptyGroup(group)))));
     }
   }
   // The order is the one the configuration asks for, and nothing moves out of
@@ -2582,15 +2720,10 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   // learned for a section became another section's on a reading they did not
   // ask for. What needs the person is said where it is instead, by the heading's
   // tone and count and by the band above the prompt, and the order is set once
-  // in configuration.
-  // A failing source is the most urgent thing on the pane, so its warnings lead
-  // while they hold anything, wherever the order placed them; a person who hid
-  // the section was never given it to move.
-  const warned = groups.findIndex((group) => group.toggle?.key === TOGGLE_PREFIX + "warnings"
-                                            && group.rows.length > 0);
-  if (warned > 0) {
-    groups.unshift(...groups.splice(warned, 1));
-  }
+  // in configuration. A failing reader kept its section aloft even while the
+  // section was folded, which moved the digit below it for a reason the person
+  // could not see; the heading's tone says the same thing in place. Found by
+  // review, 2026-11-23.
   // A press on a figure narrows the pane to the rows that figure counted. A
   // section left with nothing to say leaves the pane rather than drawing an
   // empty card: the filter is a deliberate mode, and a heading over no rows is
@@ -2599,8 +2732,9 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   // said otherwise: a pane opened while something is wrong is opened for that.
   // The choice is theirs from then on, and it is what the figures, Show all and
   // the band record, not this.
-  let focus = options.focus ?? null;
-  const automatic = focus === null && options.focusAuto === true && failedOutcomes(snapshot) > 0;
+  const focus = view === null ? options.focus ?? null : null;
+  const automatic = view === null && focus === null && options.focusAuto === true
+    && failedOutcomes(snapshot) > 0;
   /** The rows a narrowed pane draws, across every section. */
   const focusedRows = (built: Group[]): number =>
     built.reduce((count, group) => count + group.rows.length, 0);
@@ -2608,38 +2742,50 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   // a section left with no such row leaves the pane rather than drawing an
   // empty card.
   if (focus !== null) {
+    const counted = FOCUS_SECTIONS[focus];
     for (let index = groups.length - 1; index >= 0; index -= 1) {
-      const kept = groups[index]?.rows.filter((row) => focusMatches(row.state, focus)) ?? [];
-      if (groups[index] && kept.length === 0) {
+      const group = groups[index];
+      if (group === undefined) {
+        continue;
+      }
+      // A row a section's ceiling held back cannot reach here: a focused pane
+      // draws its sections without a ceiling, so every row the figure counted
+      // is a row the press can draw.
+      const kept = counted.includes(sectionOf(group))
+        ? group.rows.filter((row) => focusMatches(row.state, focus))
+        : [];
+      if (kept.length === 0) {
         groups.splice(index, 1);
-      } else if (groups[index]) {
-        groups[index].rows = kept;
-        // A section left folded would count its row on the heading and draw
-        // none of it, and a narrowed pane is opened for the rows it keeps.
-        groups[index].collapsed = false;
+        continue;
       }
+      group.rows = kept;
     }
-  } else if (automatic) {
-    // The pane's own open leaves every section where it stands, because the
-    // section picker names them all and a heading the pane drops is a place the
-    // picker promises and the pane does not draw. A section holding a failure is
-    // drawn open on its failed rows; every other section is folded where it is,
-    // whole, so the fleet is one press away rather than absent. A fold the
-    // person pressed outranks both: the next paint must not undo a press.
-    const pressed = options.pressedFolds ?? {};
-    for (const group of groups) {
-      const key = group.toggle?.key ?? "";
-      const name = key.startsWith(TOGGLE_PREFIX) ? key.slice(TOGGLE_PREFIX.length) : "";
-      if (name !== "" && pressed[name] !== undefined) {
-        continue;
-      }
-      const failed = group.rows.filter((row) => focusMatches(row.state, "failed"));
-      if (failed.length === 0) {
-        group.collapsed = true;
-        continue;
-      }
-      group.rows = failed;
-      group.collapsed = false;
+  }
+  // Every fold is decided here, once, from what stands on this paint, and
+  // nothing decided is kept. A section left in a narrowed pane holds the
+  // filter's rows, so the filter opens it: folded, it would count its row on
+  // the heading and draw none of it. The pane's own open leaves every section
+  // where it stands, because the section picker names them all and a heading
+  // the pane drops is a place the picker promises and the pane does not draw:
+  // a section holding a failure is drawn open on its failed rows, and every
+  // other keeps the fold the configuration gives it, because the open only
+  // opens. A fold the person pressed outranks both, and its section keeps its
+  // rows: the next paint must not undo a press.
+  const pressed = options.folded ?? {};
+  for (const group of groups) {
+    const name = sectionOf(group);
+    const press = name === "" ? undefined : pressed[name];
+    const failing = automatic
+      ? group.rows.filter((row) => focusMatches(row.state, "failed")) : [];
+    group.collapsed = sectionFolded({
+      viewed: view === null ? null : name === view,
+      pressed: press,
+      filtered: focus !== null,
+      failed: failing.length > 0,
+      configured: group.collapsed === true,
+    });
+    if (press === undefined && failing.length > 0) {
+      group.rows = failing;
     }
   }
   // A row that holds more than its two lines gets the press that opens them,
@@ -2665,10 +2811,26 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   const workingNow = jobs.filter((job) => working(job) || active(job)).length;
   const waitingNow = jobs.filter(waiting).length;
   const failedNow = failedOutcomes(snapshot);
+  // The working and waiting figures come from a roster that answered, or from
+  // rows a refused read still holds: those are a reading. A failed or
+  // unavailable read with no rows leaves the array empty, and counting it drew
+  // "0 working" over a question nothing asked. Found by review, 2026-11-23.
+  const rosterAnswered = snapshot.roster.state === "ready"
+    || snapshot.roster.state === "empty" || jobs.length > 0;
+  // The failed figure spans two sources, so each half stands on its own read. A
+  // failing check the pull-request reader did report is a failed outcome
+  // whatever the roster did, and a failed job stands while the pull requests
+  // went unread: dropping either hides the one thing the pane knew. A zero is
+  // drawn only when both halves were read, because a nought against an unread
+  // half is the figure claiming what nobody asked.
+  const pulls = snapshot.prs.prs;
+  const pullsAnswered = snapshot.prs.state === "ready" || snapshot.prs.state === "empty"
+    || pulls.length > 0;
+  const failedAnswered = (rosterAnswered && pullsAnswered) || failedNow > 0;
   const counts = combine([
-    primaryCount(workingNow, "working", "text"),
-    countSlot(waitingNow, "waiting", "warning"),
-    countSlot(failedNow, "failed", "error"),
+    rosterAnswered ? primaryCount(workingNow, "working", "text") : [],
+    rosterAnswered ? countSlot(waitingNow, "waiting", "warning") : [],
+    failedAnswered ? countSlot(failedNow, "failed", "error") : [],
   ]);
   // Each label names what its figure counts, because the three do not count the
   // same thing. Two of them are background sessions and the third is every
@@ -2677,8 +2839,11 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
   // them makes. "Outcomes" is the word that holds both, and it is short enough
   // to be drawn whole at the width the three figures share.
   //
-  // A reading that failed draws no cards at all: the pane does not have those
-  // counts, and a card is the loudest place to be wrong.
+  // A reading that failed draws no cards for the figures it could not read: the
+  // pane does not have those counts, and a card is the loudest place to be
+  // wrong. The failed figure stands on its own, because a failure the other
+  // reader reported is a count the pane does have, and its card is the press
+  // that reaches the row.
   const readable = snapshot.roster.state === "ready";
   // Each figure is also the way in to what it counted: pressing it narrows the
   // pane to those rows, and the line under the controls says so and offers the
@@ -2692,11 +2857,15 @@ export function paneFrom(snapshot: Snapshot, options: PaneOptions): Pane {
     press: { key: FOCUS_PREFIX + which, label: label,
              onPress: pressTo(options, FOCUS_PREFIX + which) },
   });
-  const cards = readable
-    ? [card("Working sessions", workingNow, "success", "working"),
-       card("Waiting on you", waitingNow, "warning", "waiting"),
-       card("Failed outcomes", failedNow, "error", "failed")]
-    : [];
+  const cards = [
+    ...(readable
+      ? [card("Working sessions", workingNow, "success", "working"),
+         card("Waiting on you", waitingNow, "warning", "waiting")]
+      : []),
+    ...(failedAnswered
+      ? [card("Failed outcomes", failedNow, "error", "failed")]
+      : []),
+  ];
   const unreadable = unreadableSources(snapshot);
   const shownRows = focus === null ? 0 : focusedRows(groups);
   return {

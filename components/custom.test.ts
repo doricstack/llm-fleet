@@ -31,6 +31,8 @@ function documents(order: string[], custom: unknown): ReaderDocuments {
     trials: { state: "empty" }, progress: { state: "empty" },
     prs: { state: "empty", prs: [], errors: [] },
     skills: { state: "empty" }, worktrees: { state: "empty" },
+    session: { state: "ready" },
+    load: { state: "ready", total: 0, processes: [], system: null, errors: [] },
     custom,
   } as unknown as ReaderDocuments;
 }

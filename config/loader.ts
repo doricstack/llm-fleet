@@ -18,9 +18,9 @@
  * it directly, without a build step.
  */
 
-import { readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, normalize, resolve as resolvePath } from "node:path";
+import { readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, posix, resolve as resolvePath, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const SCHEMA_NAME = "schema.json";
@@ -50,6 +50,8 @@ export type Probe = (path: string) => string;
 export interface ConfigErrorEntry {
   code: string;
   path: string;
+  /** Which of a code's causes this failure was, where it has more than one. */
+  detail?: string;
 }
 
 export interface Field {
@@ -103,10 +105,12 @@ export interface Rule {
 export interface Schema {
   schemaVersion: number;
   supportedSchemaVersions: number[];
-  environment: { selector: string; variables: string[] };
+  environment: { selector: string; variables: string[]; aliases?: Record<string, string> };
   configFile: { firstResolvable: string[] };
   types: string[];
   defaultKinds: string[];
+  numberLimits: { safeInteger: number };
+  keyForbiddenRanges: [number, number][];
   fieldKeys: string[];
   resolvedKeys: string[];
   providerResolutionKeys: string[];
@@ -157,12 +161,32 @@ function compareEntries(left: ConfigErrorEntry, right: ConfigErrorEntry): number
   return 0;
 }
 
-export function error(code: string, path: string): ConfigErrorEntry {
-  return { code, path };
+export function error(code: string, path: string, detail?: string): ConfigErrorEntry {
+  return detail === undefined ? { code, path } : { code, path, detail };
 }
 
 export function schemaPath(): string {
   return resolvePath(dirname(fileURLToPath(import.meta.url)), SCHEMA_DIRECTORY, SCHEMA_NAME);
+}
+
+/**
+ * A file's bytes as text, with the byte order mark a decoder strips by itself.
+ *
+ * A Windows editor may write the file with a byte order mark, which reads as
+ * the same text once it is dropped, and may save in an ANSI code page, which
+ * has no text to give. A decoder that is not fatal would replace each such
+ * byte with U+FFFD and hand a mangled path to the rest of the load; the Python
+ * loader reads as utf-8-sig and refuses the same bytes, so this returns null
+ * and the caller reports the document malformed. TextDecoder drops the first
+ * mark itself; a second one is a character in the document and json refuses
+ * it, which is what the Python loader does with the same bytes.
+ */
+function decodeUtf8(bytes: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (caught) {
+    return null;
+  }
 }
 
 /** Read the schema. A broken schema is a packaging defect, not user error. */
@@ -172,12 +196,20 @@ export function loadSchema(path?: string): Schema {
   if (cached) {
     return cached;
   }
+  let text: string | null;
+  try {
+    text = decodeUtf8(readFileSync(location));
+  } catch (caught) {
+    throw new ConfigError([error(CODE_UNREADABLE, "schema")]);
+  }
+  if (text === null) {
+    throw new ConfigError([error(CODE_MALFORMED, "schema")]);
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(location, "utf8"));
+    parsed = JSON.parse(text);
   } catch (caught) {
-    const failure = caught instanceof SyntaxError ? CODE_MALFORMED : CODE_UNREADABLE;
-    throw new ConfigError([error(failure, "schema")]);
+    throw new ConfigError([error(CODE_MALFORMED, "schema")]);
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new ConfigError([error(CODE_ROOT_TYPE, "schema")]);
@@ -194,12 +226,570 @@ export function filesystemProbe(path: string): string {
   }
 }
 
-function environmentOf(environ?: Record<string, string>): Record<string, string> {
+/** Whether a path is absolute, by the one rule both loaders implement.
+ *
+ * Python 3.13 changed `ntpath.isabs` so a rooted path with no drive, such as
+ * `/fleet/config.json`, no longer counts. The loader states the rule itself so
+ * the answer does not move with the interpreter: a path that begins with a
+ * separator, or a drive with its root, is absolute; a drive-relative path such
+ * as `D:state` is not.
+ */
+export function isAbsolutePath(value: string, platform: string = process.platform): boolean {
+  if (!platform.startsWith("win")) {
+    return posix.isAbsolute(value);
+  }
+  if (value.startsWith("\\") || value.startsWith("/")) {
+    return true;
+  }
+  // The drive and root the Python loader reads, so both answer the same.
+  const [drive, root] = splitRoot(value);
+  return drive !== "" && root !== "";
+}
+
+/** Split a Windows path into drive, root, and tail, as CPython's `splitroot`. */
+function splitRoot(value: string): [string, string, string] {
+  const normp = value.replace(/\//g, "\\");
+  if (normp.slice(0, 1) === "\\") {
+    if (normp.slice(1, 2) === "\\") {
+      // A UNC share or a device path: the drive runs through the share name.
+      const start = normp.slice(0, 8).toUpperCase() === "\\\\?\\UNC\\" ? 8 : 2;
+      const index = normp.indexOf("\\", start);
+      if (index === -1) {
+        return [value, "", ""];
+      }
+      const index2 = normp.indexOf("\\", index + 1);
+      if (index2 === -1) {
+        return [value, "", ""];
+      }
+      return [value.slice(0, index2), value.slice(index2, index2 + 1),
+              value.slice(index2 + 1)];
+    }
+    // Rooted with no drive, such as `\Windows`.
+    return ["", value.slice(0, 1), value.slice(1)];
+  }
+  if (normp.slice(1, 2) === ":") {
+    if (normp.slice(2, 3) === "\\") {
+      // A drive with its root, such as `C:\Windows`.
+      return [value.slice(0, 2), value.slice(2, 3), value.slice(3)];
+    }
+    // A drive-relative path, such as `C:Windows`.
+    return [value.slice(0, 2), "", value.slice(2)];
+  }
+  return ["", "", value];
+}
+
+/** Fold a Windows path exactly as CPython's `ntpath.normpath` folds it. */
+function ntpathNormpath(value: string): string {
+  const path = value.replace(/\//g, "\\");
+  const [drive, root, tail] = splitRoot(path);
+  const prefix = drive + root;
+  const parts = tail.split("\\");
+  let index = 0;
+  while (index < parts.length) {
+    if (!parts[index] || parts[index] === ".") {
+      parts.splice(index, 1);
+    } else if (parts[index] === "..") {
+      if (index > 0 && parts[index - 1] !== "..") {
+        parts.splice(index - 1, 2);
+        index -= 1;
+      } else if (index === 0 && root) {
+        parts.splice(index, 1);
+      } else {
+        index += 1;
+      }
+    } else {
+      index += 1;
+    }
+  }
+  if (!prefix && parts.length === 0) {
+    parts.push(".");
+  }
+  return prefix + parts.join("\\");
+}
+
+/** Fold a path the way Python's own path module does, both loaders alike. */
+export function normalizePath(value: string, platform: string = process.platform): string {
+  const windows = platform.startsWith("win");
+  if (windows) {
+    // Python's Windows rules are ported rather than approximated: Node's own
+    // normalizer folds some UNC and separator-only forms differently.
+    return ntpathNormpath(value);
+  }
+  if (value === "//") {
+    return "//";
+  }
+  let result = posix.normalize(value);
+  // Python keeps exactly two leading separators, where Node folds them to one.
+  if (/^\/\/(?!\/)/.test(value) && !result.startsWith("//")) {
+    result = `/${result}`;
+  }
+  // Python drops a trailing separator unless the path is a root.
+  while (result.length > 1 && result !== "//" && result.endsWith("/")) {
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+
+/** Join a Windows path exactly as CPython's `ntpath.join` joins it. */
+function ntpathJoin(base: string, value: string): string {
+  const sep = "\\";
+  const seps = "\\/";
+  const colonSeps = ":\\/";
+  let [drive, root, path] = splitRoot(base);
+  const [childDrive, childRoot, childPath] = splitRoot(value);
+  if (childRoot) {
+    // The second path is absolute: it replaces the first, keeping the drive
+    // of the first only when it names none of its own.
+    if (childDrive || !drive) {
+      drive = childDrive;
+    }
+    root = childRoot;
+    path = childPath;
+  } else {
+    if (childDrive && childDrive !== drive) {
+      if (childDrive.toLowerCase() !== drive.toLowerCase()) {
+        // A different drive: the first path is ignored entirely.
+        return childDrive + childRoot + childPath;
+      }
+      drive = childDrive;
+    }
+    if (path && !seps.includes(path.slice(-1))) {
+      path += sep;
+    }
+    path += childPath;
+  }
+  if (path && !root && drive && !colonSeps.includes(drive.slice(-1))) {
+    return `${drive}${sep}${path}`;
+  }
+  return drive + root + path;
+}
+
+/** Join and fold a relative value, matching Python's path module on both. */
+export function joinPath(base: string, value: string, platform: string = process.platform): string {
+  if (!platform.startsWith("win")) {
+    // posixpath.join: a rooted value replaces the base, one separator joins
+    // otherwise. Node's own join folds the leading double separator away.
+    if (value.startsWith("/") || base === "") {
+      return normalizePath(value, platform);
+    }
+    const joined = base.endsWith("/") ? base + value : `${base}/${value}`;
+    return normalizePath(joined, platform);
+  }
+  return ntpathNormpath(ntpathJoin(base, value));
+}
+
+/** Drop trailing separators, as pathlib does before it reads a selected file. */
+function stripTrailingSeparators(value: string, platform: string = process.platform): string {
+  const windows = platform.startsWith("win");
+  const module = windows ? win32 : posix;
+  const root = module.parse(value).root;
+  // pathlib folds only the platform's own separator: off Windows a backslash
+  // is a character in the name, and stripping it read a different file.
+  const trailing = windows ? /[\\/]$/ : /\/$/;
+  let result = value;
+  while (result.length > root.length && trailing.test(result)) {
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+
+/**
+ * Fold repeated separators the way GetFullPathName folds them, keeping the two
+ * that make a UNC name a UNC name. `ntpath.normpath` leaves a doubled
+ * separator inside a UNC name alone, and the native call folds it.
+ */
+function nativeSeparators(value: string): string {
+  const lead = value.startsWith("\\\\") ? "\\\\" : "";
+  return lead + value.slice(lead.length).replace(/[\\/]+/g, "\\");
+}
+
+/**
+ * Drop the one `..` GetFullPathName drops from the end of a name, and only
+ * from a name that does not end a separator with it. The installed Windows-only
+ * abspath table pins both halves: `//server/..` answers `\\server\`, while
+ * `//server/../` keeps the `..` it ends a separator after, and `//../../`
+ * answers `\\..\..\`. Found by review, 2026-11-23.
+ */
+function dropTrailingParent(value: string): string {
+  if (/[\\/]$/.test(value) || !value.endsWith("\\..")) {
+    return value;
+  }
+  return value.slice(0, -3) + "\\";
+}
+
+/**
+ * A Windows name made absolute as the platform makes it.
+ *
+ * Python's `abspath` is `_getfullpathname(normpath(path))` (ntpath.py). The
+ * `normpath` half is ported above and checked against CPython's own answers;
+ * the native half makes a relative name absolute, resolves a drive-relative
+ * name from its own drive, folds a `..` above a share root the way the table
+ * pins it, folds repeated separators, and drops trailing dots and spaces from
+ * each component, as GetFullPathNameW does. Two of its behaviors are outside
+ * what a pure model reproduces: a device name (`C:\nul` becomes `\\.\nul`) and
+ * the 8.3 long-name expansion, which reads the filesystem. A drive's own
+ * current directory is a third: the OS keeps it per drive, Windows also keeps
+ * it in the environment block as `=C:`, and it is taken from there where it is
+ * known and the drive root, that drive's default, otherwise.
+ * docs/configuration.md names that boundary rather than claiming parity.
+ */
+function windowsAbspath(value: string, cwd: string,
+                        driveCwd: Record<string, string> = {}): string {
+  // The drive prefix is taken off before the name is folded: `D:..` is drive
+  // D's current directory one level up, and trimming its trailing dots as if
+  // they were a component's would turn the name into the bare drive. A prefix
+  // and nothing after it is the drive's directory as written, which the fold
+  // below would spell `D:.`. Found by review, 2026-11-24.
+  const drivePrefix = /^[A-Za-z]:/.exec(value);
+  const head = drivePrefix === null ? "" : drivePrefix[0];
+  // Behind a drive prefix a run of separators names the drive's root, not a
+  // share: `D:\\one` is `D:\one`, where feeding the run to the fold would read
+  // its doubled backslashes as a UNC prefix and keep the `..` beneath them.
+  // Only a name with no drive can open a share, and that one is left as
+  // written. Found by review, 2026-11-24.
+  const rest = head === ""
+    ? value
+    : value.slice(head.length).replace(/^[\\/]+/, "\\");
+  // A name made only of parents keeps every one of them when a drive is what
+  // it climbs from: the drive's directory is joined below, and dropping a
+  // parent here would lose a level, so `D:..\..` from `D:\one\two` is `D:\`.
+  // A rooted name has nothing joined beneath it and drops the one the system
+  // drops, `\\..\..` becoming `\\..\`. The name is classified after it is
+  // folded, so a dot component that normalizes away cannot hide a parents-only
+  // name from the test. Found by review, 2026-11-24.
+  const foldedRest = rest === ""
+    ? ""
+    : nativeSeparators(ntpathNormpath(trimTrailingDotsAndSpaces(ntpathNormpath(rest))));
+  const parentsOnly = head !== "" && /^\.\.(?:\\\.\.)*\\?$/.test(foldedRest);
+  const folded = rest === ""
+    ? head
+    : head + (parentsOnly ? foldedRest : dropTrailingParent(foldedRest));
+  const [foldDrive, foldRoot] = splitRoot(folded);
+  const [cwdDrive] = splitRoot(cwd);
+  if (foldRoot && !foldDrive) {
+    // A rooted name with no drive takes the current drive's root.
+    return cwdDrive ? cwdDrive + folded : folded;
+  }
+  if (isAbsolutePath(folded, "win32")) {
+    return folded;
+  }
+  if (foldDrive) {
+    // A drive-relative name: `C:temp` is drive C's own current directory, not
+    // the process's. Answered from the drive, it names one folder; answered as
+    // written, its destination changes with the caller. A drive whose
+    // directory the caller does not know falls back to its root, that drive's
+    // default.
+    const tail = folded.slice(foldDrive.length);
+    const base = foldDrive.toLowerCase() === cwdDrive.toLowerCase()
+      ? normalizePath(cwd, "win32")
+      : driveCwd[foldDrive.toUpperCase()];
+    const start = base !== undefined && isAbsolutePath(base, "win32")
+      ? base
+      : foldDrive + "\\";
+    return tail === "" ? start : joinPath(start, tail, "win32");
+  }
+  return joinPath(cwd, folded, "win32");
+}
+
+/** Drop the trailing dots and spaces GetFullPathNameW drops from a name. */
+function trimTrailingDotsAndSpaces(value: string): string {
+  return value.split(/([\\/]+)/).map((part) =>
+    part === "" || /[\\/]/.test(part) || part === "." || part === ".."
+      ? part
+      : part.replace(/[. ]+$/, "")
+  ).join("");
+}
+
+/**
+ * One temporary-directory candidate, absolutized as `gettempdir` absolutizes
+ * it. The current directory spelled "." comes back as written, the one value
+ * Python skips. On Windows the resolution is the system's own, so a rooted
+ * name with no drive takes the current drive; a bare share root keeps the
+ * spelling `ntpath.abspath` gives it, with no separator added.
+ */
+export function tempCandidatePath(value: string, platform: string = process.platform,
+                                  cwd: string = process.cwd(),
+                                  driveCwd: Record<string, string> = {}): string {
+  if (value === ".") {
+    return value;
+  }
+  if (platform.startsWith("win")) {
+    // The resolution is the one `ntpath.abspath` gives, which the installed
+    // Windows-only abspath tests pin for these shapes; docs/configuration.md
+    // names what a pure model cannot reproduce. The process directory is a
+    // parameter so a drive-qualified one can be named from a test that runs
+    // where no drive exists, and each drive's own current directory is another:
+    // the OS keeps it per drive and Windows also keeps it in the environment,
+    // which the search reads (`driveCurrentDirectories`).
+    return windowsAbspath(value, cwd, driveCwd);
+  }
+  return isAbsolutePath(value, platform)
+    ? normalizePath(value, platform)
+    : joinPath(cwd, value, platform);
+}
+
+/**
+ * The platform temporary directory, found the way Python's `gettempdir` finds
+ * it: each candidate in turn, absolutized first, and the first that is a
+ * writable directory wins. Node's `os.tmpdir` stops at the first name in the
+ * environment, even when that name points at nothing, so the two loaders would
+ * resolve different folders.
+ */
+export type TempProbe = (directory: string) => boolean;
+
+/**
+ * How many names the probe tries before it calls a folder unusable.
+ *
+ * CPython's own count belongs to the interpreter: the default-tempdir probe
+ * tries 100 names in 3.11 and 20 in 3.14, and no one number matches both. The
+ * floor this repository supports is 3.11 and the Windows PC runs 3.14, so the
+ * newer bound is used: the loader refuses after 20 names where 3.11 would try
+ * 100, which can send it to another candidate on a 3.11 machine whose first 20
+ * probe names are all taken; it never answers a folder the newer interpreter
+ * would refuse, and it never leaves more probe files behind than 3.14 would.
+ * Found by review, 2026-11-24.
+ */
+const TEMP_NAME_ATTEMPTS = 20;
+
+function uniqueName(): string {
+  return ".fleet-tmp-" + process.pid + "-" + Math.random().toString(36).slice(2);
+}
+
+/** The four bytes CPython writes into the file it makes, `b'blat'`. */
+const PROBE_BYTES = "blat";
+
+function existsAsDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a refused name is one CPython would try again.
+ *
+ * On Windows a PermissionError with the folder still there is not a refusal:
+ * a scanner or an indexer holding the file it just made is the usual cause,
+ * and CPython moves to the next name. A share-mode refusal on the removal
+ * reaches Node as EBUSY where CPython sees EACCES, so both count. Everywhere
+ * else, and for any folder that is gone, the answer is final.
+ */
+function retryableOnWindows(caught: unknown, directory: string, platform: string,
+                            isDirectory: (path: string) => boolean): boolean {
+  const code = (caught as { code?: unknown }).code;
+  if (!platform.startsWith("win")) {
+    return false;
+  }
+  return (code === "EACCES" || code === "EPERM" || code === "EBUSY") && isDirectory(directory);
+}
+
+/**
+ * Whether a file can be made in a folder, asked the way `gettempdir` asks.
+ *
+ * Python's temporary-directory search opens a file with a unique name, writes
+ * four bytes into it, and removes it: a folder that passes an existence or
+ * permission check but cannot accept a write (a full volume, an exhausted
+ * quota, a write ACL) is not a temporary directory. A folder made and removed
+ * is not the same proof, a probe that makes only a folder accepts one that
+ * takes no file, and an empty file is accepted by a volume that holds nothing
+ * else. Found by review, 2026-11-23 and 2026-11-24.
+ */
+export function canCreateInDirectory(directory: string,
+                                     makeName: () => string = uniqueName,
+                                     removeName: (name: string) => void = unlinkSync,
+                                     platform: string = process.platform,
+                                     isDirectory: (path: string) => boolean = existsAsDirectory): boolean {
+  for (let attempt = 0; attempt < TEMP_NAME_ATTEMPTS; attempt += 1) {
+    const name = join(directory, makeName());
+    try {
+      writeFileSync(name, PROBE_BYTES, { flag: "wx", mode: 0o600 });
+    } catch (caught) {
+      const code = (caught as { code?: unknown }).code;
+      // A refused name is somebody else's file and is left alone; a write that
+      // made the file and then failed has this probe's name to give back, as
+      // CPython unlinks its file whatever the write did. Found by review,
+      // 2026-11-24.
+      if (code !== "EEXIST") {
+        try {
+          removeName(name);
+        } catch {
+          // Nothing to give back, and the refusal below is the answer.
+        }
+      }
+      if (code === "EEXIST") {
+        continue;
+      }
+      if (retryableOnWindows(caught, directory, platform, isDirectory)) {
+        continue;
+      }
+      return false;
+    }
+    try {
+      removeName(name);
+    } catch (caught) {
+      // Python rejects a folder whose file it cannot remove, and this answer
+      // is about the same question: a folder that takes a file and will not
+      // give it back is not a temporary directory. On Windows the refusal is
+      // retried under another name while the folder stands, as Python does.
+      // Found by review, 2026-11-23 and 2026-11-24.
+      if (retryableOnWindows(caught, directory, platform, isDirectory)) {
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+  // Every name tried was taken: CPython reports no usable temporary directory
+  // rather than calling the folder good, and so does this.
+  return false;
+}
+
+/**
+ * Each drive's own current directory, as Windows keeps it.
+ *
+ * The OS holds a process's per-drive directories in the environment block as
+ * `=C:=C:\some\dir` entries. Node marks those entries non-enumerable, so a scan
+ * of the keys does not see them at all; each drive's name is asked for
+ * directly, which the same store answers. A key of that shape names a drive;
+ * an empty value, which an unset drive can carry, names no directory. On a
+ * system that has no such entries the map is empty, and a drive-relative name
+ * then resolves from the drive root as the system resolves it.
+ * Found by review, 2026-11-24.
+ */
+export function driveCurrentDirectories(platform: string = process.platform,
+                                        environ: Record<string, string | undefined> = process.env
+                                        ): Record<string, string> {
+  const found: Record<string, string> = {};
+  if (!platform.startsWith("win")) {
+    return found;
+  }
+  for (let letter = "A".charCodeAt(0); letter <= "Z".charCodeAt(0); letter += 1) {
+    const drive = String.fromCharCode(letter) + ":";
+    // Windows answers either spelling, so a record handed to this helper is
+    // asked under both: a lower-case key is a directory, not a miss.
+    const upper = environ["=" + drive];
+    const lower = environ["=" + drive.toLowerCase()];
+    const value = typeof upper === "string" && upper !== "" ? upper : lower;
+    if (typeof value === "string" && value !== "") {
+      found[drive] = value;
+    }
+  }
+  return found;
+}
+
+export function systemTempDirectory(platform: string = process.platform,
+                                    probe: TempProbe = canCreateInDirectory,
+                                    driveCwds: Record<string, string> =
+                                      driveCurrentDirectories(platform)): string {
+  const candidates: string[] = [];
+  for (const name of ["TMPDIR", "TEMP", "TMP"]) {
+    const value = process.env[name];
+    if (value) {
+      candidates.push(value);
+    }
+  }
+  if (platform.startsWith("win")) {
+    // Python's own Windows list: the user's temp folder, the system temp
+    // folder, then these four, so a machine with none of its variables set
+    // still gets one. `~\AppData\Local\Temp` and `%SYSTEMROOT%\Temp` are
+    // expanded before they are tried; a machine whose home cannot be found
+    // keeps the literal spelling, which then fails the test and is skipped,
+    // as Python's unexpanded name would.
+    let appData = "~\\AppData\\Local\\Temp";
+    try {
+      appData = join(homedir(), "AppData", "Local", "Temp");
+    } catch (caught) {
+      appData = "~\\AppData\\Local\\Temp";
+    }
+    candidates.push(appData);
+    const systemRoot = process.env["SYSTEMROOT"] || process.env["SystemRoot"];
+    if (systemRoot) {
+      candidates.push(join(systemRoot, "Temp"));
+    }
+    candidates.push("C:\\temp", "C:\\tmp", "\\temp", "\\tmp");
+  } else {
+    candidates.push("/tmp", "/var/tmp", "/usr/tmp");
+  }
+  candidates.push(process.cwd());
+  const runningHere = platform === process.platform;
+  for (const candidate of candidates) {
+    // A drive-relative name is resolved from its drive's own current
+    // directory, which the map above holds where Windows keeps it and which is
+    // the drive root otherwise, the directory the system resolves the name
+    // from. The candidate is never skipped: Python probes the folder the name
+    // resolves to, and so does this search. Found by review, 2026-11-24.
+    try {
+      const absolute = tempCandidatePath(candidate, platform, process.cwd(), driveCwds);
+      // The filesystem this code runs on decides what exists. A platform named
+      // for a test only selects the candidate list and the spelling returned,
+      // so the one path a test can reach is probed as the running system
+      // spells it. The probe is a parameter so a folder that cannot take a
+      // file can be produced where no full disk exists.
+      const target = runningHere ? absolute : candidate;
+      if (!probe(target)) {
+        continue;
+      }
+      return absolute;
+    } catch (caught) {
+      continue;
+    }
+  }
+  throw new Error("no usable temporary directory");
+}
+
+function hasOwn(target: JsonObject, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(target, key);
+}
+
+/**
+ * Write a key the document named as an own property.
+ *
+ * Plain assignment to `__proto__` sets the prototype instead of a property, so
+ * a priced model by that name would vanish from the result while the Python
+ * loader kept it. A key the document wrote is always kept.
+ */
+function putOwn(target: JsonObject, key: string, value: JsonValue): void {
+  Object.defineProperty(target, key, {
+    value, enumerable: true, writable: true, configurable: true,
+  });
+}
+
+function keyForbidden(value: string, schema: Schema): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) as number;
+    for (const [start, end] of schema.keyForbiddenRanges) {
+      if (code >= start && code <= end) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Whether a path is a regular file, so reading it cannot block or fail. */
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch (caught) {
+    return false;
+  }
+}
+
+function environmentOf(
+  environ: Record<string, string> | undefined,
+  schema: Schema,
+): Record<string, string> {
   const source = environ === undefined ? process.env : environ;
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) {
     if (typeof value === "string") {
       result[key] = value;
+    }
+  }
+  for (const [name, alias] of Object.entries(schema.environment.aliases ?? {})) {
+    if (!result[name] && result[alias]) {
+      result[name] = result[alias];
     }
   }
   return result;
@@ -256,13 +846,13 @@ function resolvePathValue(
   if (!expanded.text) {
     return { path: null, code: CODE_VALUE };
   }
-  if (isAbsolute(expanded.text)) {
-    return { path: normalize(expanded.text), code: null };
+  if (isAbsolutePath(expanded.text)) {
+    return { path: normalizePath(expanded.text), code: null };
   }
   if (configDirectory === null) {
     return { path: null, code: CODE_VALUE };
   }
-  return { path: normalize(join(configDirectory, expanded.text)), code: null };
+  return { path: joinPath(configDirectory, expanded.text), code: null };
 }
 
 class Context {
@@ -304,18 +894,32 @@ function defaultValue(field: Field, context: Context): { value: JsonValue | type
     }
     if ("resolvedBy" in record) {
       if (record.resolvedBy === "systemTemp") {
-        return { value: normalize(tmpdir()), code: null };
+        return { value: systemTempDirectory(), code: null };
       }
       if (record.resolvedBy === "underStateDir") {
         if (context.stateDir === null) {
           return { value: SKIP, code: null };
         }
-        return { value: normalize(join(context.stateDir, record.relative as string)), code: null };
+        return { value: joinPath(context.stateDir, record.relative as string), code: null };
       }
       return { value: null, code: CODE_VALUE };
     }
   }
   return { value: fallback === undefined ? null : fallback, code: null };
+}
+
+/**
+ * Whether a default is a path this loader already computed for the machine.
+ *
+ * Such a value is environment data, not document text: expanding it a second
+ * time would read a `$` inside a profile path as the start of a variable and
+ * refuse the default the schema declares.
+ */
+function isCarriedDefault(field: Field): boolean {
+  const fallback = field.default;
+  return field.type === "path" && fallback !== null && fallback !== undefined
+    && typeof fallback === "object" && !Array.isArray(fallback)
+    && "resolvedBy" in (fallback as JsonObject);
 }
 
 function scalar(
@@ -341,8 +945,24 @@ function scalar(
     return value;
   }
   if (kind === "integer") {
-    if (typeof value !== "number" || !Number.isInteger(value)) {
+    if (typeof value !== "number") {
       errors.push(error(CODE_TYPE, path));
+      return INVALID;
+    }
+    // A value the parser could not carry exactly, or one no JSON number may
+    // hold, is refused rather than rounded: the literal's last digits were
+    // already lost when it was parsed. The bound is declared once, in the
+    // schema, and the Python loader refuses the same value at the same path.
+    if (!Number.isFinite(value)) {
+      errors.push(error(CODE_VALUE, path));
+      return INVALID;
+    }
+    if (!Number.isInteger(value)) {
+      errors.push(error(CODE_TYPE, path));
+      return INVALID;
+    }
+    if (Math.abs(value) > context.schema.numberLimits.safeInteger) {
+      errors.push(error(CODE_VALUE, path));
       return INVALID;
     }
     if (field.minimum !== undefined && value < field.minimum) {
@@ -362,6 +982,15 @@ function scalar(
   if (kind === "number") {
     if (typeof value !== "number") {
       errors.push(error(CODE_TYPE, path));
+      return INVALID;
+    }
+    if (!Number.isFinite(value)) {
+      errors.push(error(CODE_VALUE, path));
+      return INVALID;
+    }
+    if (Number.isInteger(value)
+        && Math.abs(value) > context.schema.numberLimits.safeInteger) {
+      errors.push(error(CODE_VALUE, path));
       return INVALID;
     }
     if (field.minimum !== undefined && value < field.minimum) {
@@ -394,7 +1023,10 @@ function scalar(
       errors.push(error(CODE_TYPE, path));
       return INVALID;
     }
-    if (!value || /\s/.test(value)) {
+    // One keystroke: a character the schema refuses cannot be bound, and the
+    // same ranges apply in both loaders so neither accepts a binding the
+    // other drops.
+    if (!value || keyForbidden(value, context.schema)) {
       errors.push(error(CODE_VALUE, path));
       return INVALID;
     }
@@ -543,14 +1175,14 @@ function mapField(
     }
     const checked = scalar(inner, item, context, keyPath, errors);
     if (checked !== INVALID) {
-      resolved[key] = checked;
+      putOwn(resolved, key, checked);
     }
   }
   const fallback = field.default;
   if (fallback !== null && typeof fallback === "object" && !Array.isArray(fallback)) {
     for (const [key, item] of Object.entries(fallback as JsonObject)) {
-      if (!(key in resolved)) {
-        resolved[key] = item;
+      if (!hasOwn(resolved, key)) {
+        putOwn(resolved, key, item);
       }
     }
   }
@@ -568,7 +1200,7 @@ function mapField(
  * so hiding one section renamed it "Section".
  */
 function inherited(fallback: JsonObject, key: string, item: JsonValue): JsonValue {
-  const shipped = fallback[key];
+  const shipped = hasOwn(fallback, key) ? fallback[key] : undefined;
   if (shipped === null || typeof shipped !== "object" || Array.isArray(shipped)
       || item === null || typeof item !== "object" || Array.isArray(item)) {
     return item;
@@ -593,6 +1225,10 @@ function recordField(
     declared.set(entry.name as string, entry);
   }
   const resolved: JsonObject = {};
+  // A key the document carries but that failed its check is still the author
+  // saying something, so it is present, not absent: reporting it required as
+  // well would name two defects for one line.
+  const present = new Set(Object.keys(value as JsonObject));
   for (const [key, item] of Object.entries(value as JsonObject)) {
     const keyPath = `${path}.${key}`;
     const entry = declared.get(key);
@@ -602,15 +1238,15 @@ function recordField(
     }
     const checked = scalar(entry, item, context, keyPath, errors);
     if (checked !== INVALID) {
-      resolved[key] = checked;
+      putOwn(resolved, key, checked);
     }
   }
   for (const [name, entry] of declared) {
-    if (name in resolved) {
+    if (hasOwn(resolved, name) || present.has(name)) {
       continue;
     }
     if (entry.default !== undefined) {
-      resolved[name] = entry.default;
+      putOwn(resolved, name, entry.default);
     } else {
       errors.push(error(CODE_REQUIRED, `${path}.${name}`));
     }
@@ -641,6 +1277,7 @@ function objectField(
     Object.assign(fallback, field.default as JsonObject);
   }
   const resolved: JsonObject = {};
+  const present = new Set(Object.keys(value as JsonObject));
   for (const [key, item] of Object.entries(value as JsonObject)) {
     const keyPath = `${path}.${key}`;
     if (field.keyValues !== undefined && !field.keyValues.includes(key)) {
@@ -648,8 +1285,8 @@ function objectField(
       continue;
     }
     if (field.recordFields !== undefined) {
-      resolved[key] = recordField(field.recordFields, inherited(fallback, key, item),
-                                  context, keyPath, errors);
+      putOwn(resolved, key, recordField(field.recordFields, inherited(fallback, key, item),
+                                        context, keyPath, errors));
       continue;
     }
     if (field.valueFields !== undefined) {
@@ -659,7 +1296,7 @@ function objectField(
       }
       const checked = scalar(entry, item, context, keyPath, errors);
       if (checked !== INVALID) {
-        resolved[key] = checked;
+        putOwn(resolved, key, checked);
       }
       continue;
     }
@@ -667,32 +1304,34 @@ function objectField(
     if (field.valueType === "stringArray" || field.valueType === "pathArray") {
       const checked = arrayValue(inner, item, context, keyPath, errors);
       if (checked !== INVALID) {
-        resolved[key] = checked;
+        putOwn(resolved, key, checked);
       }
     } else {
       const checked = scalar(inner, item, context, keyPath, errors);
       if (checked !== INVALID) {
-        resolved[key] = checked;
+        putOwn(resolved, key, checked);
       }
     }
   }
   for (const key of field.keyValues || []) {
-    if (key in resolved) {
+    // A key the document carries but that failed its check is present, not
+    // absent; reporting it required as well names two defects for one line.
+    if (hasOwn(resolved, key) || present.has(key)) {
       continue;
     }
     const keyPath = `${path}.${key}`;
-    if (key in fallback) {
-      resolved[key] = fallback[key];
+    if (hasOwn(fallback, key)) {
+      putOwn(resolved, key, fallback[key]);
       continue;
     }
     if (field.recordFields !== undefined) {
-      resolved[key] = recordField(field.recordFields, {}, context, keyPath, errors);
+      putOwn(resolved, key, recordField(field.recordFields, {}, context, keyPath, errors));
       continue;
     }
     if (field.valueFields !== undefined && declared.has(key)) {
       const entry = declared.get(key) as Field;
       if (entry.default !== undefined) {
-        resolved[key] = entry.default;
+        putOwn(resolved, key, entry.default);
       } else {
         errors.push(error(CODE_REQUIRED, keyPath));
       }
@@ -735,8 +1374,8 @@ function providers(
     const resolved: JsonObject = {};
     for (const [name, field] of declared) {
       const keyPath = `${itemPath}.${name}`;
-      if (!(name in record)) {
-        resolved[name] = field.default === undefined ? null : field.default;
+      if (!hasOwn(record, name)) {
+        putOwn(resolved, name, field.default === undefined ? null : field.default);
         if (field.required) {
           errors.push(error(CODE_REQUIRED, keyPath));
         }
@@ -744,11 +1383,11 @@ function providers(
       }
       const single = scalar(field, record[name], context, keyPath, errors);
       if (single !== INVALID) {
-        resolved[name] = single;
+        putOwn(resolved, name, single);
       }
     }
     for (const [name, field] of declared) {
-      if (field.requiredWhenEnabled && !(name in record) && resolved.enabled === true) {
+      if (field.requiredWhenEnabled && !hasOwn(record, name) && resolved.enabled === true) {
         errors.push(error(CODE_REQUIRED, `${itemPath}.${name}`));
       }
     }
@@ -806,7 +1445,7 @@ function lookup(source: JsonObject, path: string): { present: boolean; value: Js
   let current: JsonValue = source;
   for (const part of path.split(".")) {
     if (current === null || typeof current !== "object" || Array.isArray(current)
-        || !(part in current)) {
+        || !hasOwn(current as JsonObject, part)) {
       return { present: false, value: null };
     }
     current = (current as JsonObject)[part];
@@ -822,6 +1461,13 @@ function unknownKeys(
 ): void {
   for (const [key, value] of Object.entries(source)) {
     const path = prefix ? `${prefix}.${key}` : key;
+    if (key.includes(".")) {
+      // A key that spells a path is not a nested object. The document looks
+      // like it sets a declared field, resolves to nothing, and would leave
+      // the setting silently unapplied.
+      errors.push(error(CODE_UNKNOWN_KEY, path));
+      continue;
+    }
     if (known.has(path)) {
       continue;
     }
@@ -914,8 +1560,8 @@ function groupState(
   return "ready";
 }
 
-function applyRules(schema: Schema, flat: Record<string, JsonValue>,
-                   errors: ConfigErrorEntry[]): void {
+function applyRules(schema: Schema, flat: Record<string, JsonValue>, document: JsonObject,
+                    errors: ConfigErrorEntry[]): void {
   for (const rule of schema.rules) {
     if (rule.rule === "memberOf") {
       const value = flat[rule.field as string];
@@ -970,10 +1616,11 @@ function applyRules(schema: Schema, flat: Record<string, JsonValue>,
           errors.push(error(CODE_RULE, `${rule.container}.${key}`));
         }
       }
-      const order = flat[rule.field as string];
+      const order = lookup(document, rule.field as string);
+      const declaredOrder = order.present ? order.value : flat[rule.field as string];
       const prefix = rule.prefix as string;
-      if (Array.isArray(order)) {
-        for (const [index, item] of order.entries()) {
+      if (Array.isArray(declaredOrder)) {
+        for (const [index, item] of declaredOrder.entries()) {
           if (typeof item === "string" && item.startsWith(prefix)
               && !names.includes(item.slice(prefix.length))) {
             errors.push(error(CODE_RULE, `${rule.field}[${index}]`));
@@ -1017,7 +1664,7 @@ function readConfig(
       errors.push(error(expanded.code, `$${selector}`));
       return { directory: null, document: {} };
     }
-    if (expanded.text === null || !isAbsolute(expanded.text)) {
+    if (expanded.text === null || !isAbsolutePath(expanded.text)) {
       errors.push(error(CODE_VALUE, `$${selector}`));
       return { directory: null, document: {} };
     }
@@ -1028,7 +1675,11 @@ function readConfig(
       if (expanded.code !== null) {
         continue;
       }
-      if (expanded.text && filesystemProbe(expanded.text) === "file") {
+      // The first default place that holds a document, read as the Python
+      // loader reads it: a device or a FIFO is not a document, and the place
+      // after it is what a load there would find. Selecting one here refused a
+      // file Python never even looked at. Found by review, 2026-11-23.
+      if (expanded.text && isRegularFile(expanded.text)) {
         selected = expanded.text;
       }
       break;
@@ -1037,18 +1688,30 @@ function readConfig(
   if (selected === null) {
     return { directory: null, document: {} };
   }
-  const kind = filesystemProbe(selected);
+  // Python's pathlib drops trailing separators before it stats a selected
+  // file, so a selector ending in one still names that file. The stat, the
+  // kind check, and the read all use the same stripped path.
+  const target = stripTrailingSeparators(selected);
+  const kind = filesystemProbe(target);
   if (kind === "missing") {
     errors.push(error(CODE_FILE_NOT_FOUND, `$${selector}`));
     return { directory: null, document: {} };
   }
-  if (kind !== "file") {
+  if (kind !== "file" || !isRegularFile(target)) {
+    // A device or a FIFO can exist under a path that is not a directory and
+    // still is not a document; reading it can block or answer nothing. The
+    // Python loader refuses both, and a load must read the same in either.
     errors.push(error(CODE_FILE_NOT_REGULAR, `$${selector}`));
     return { directory: null, document: {} };
   }
   let text: string;
   try {
-    text = readFileSync(selected, "utf8");
+    const decoded = decodeUtf8(readFileSync(target));
+    if (decoded === null) {
+      errors.push(error(CODE_MALFORMED, ROOT_PATH, "bytes"));
+      return { directory: null, document: {} };
+    }
+    text = decoded;
   } catch (caught) {
     errors.push(error(CODE_UNREADABLE, `$${selector}`));
     return { directory: null, document: {} };
@@ -1057,14 +1720,14 @@ function readConfig(
   try {
     document = JSON.parse(text);
   } catch (caught) {
-    errors.push(error(CODE_MALFORMED, ROOT_PATH));
+    errors.push(error(CODE_MALFORMED, ROOT_PATH, "json"));
     return { directory: null, document: {} };
   }
   if (document === null || typeof document !== "object" || Array.isArray(document)) {
     errors.push(error(CODE_ROOT_TYPE, ROOT_PATH));
     return { directory: null, document: {} };
   }
-  return { directory: dirname(resolvePath(selected)), document: document as JsonObject };
+  return { directory: dirname(resolvePath(target)), document: document as JsonObject };
 }
 
 function assemble(schema: Schema, flat: Record<string, JsonValue>, probe: Probe,
@@ -1125,7 +1788,7 @@ export interface LoadOptions {
  */
 export function loadConfig(options: LoadOptions = {}): JsonObject {
   const schema = loadSchema(options.schemaFile);
-  const environ = environmentOf(options.environ);
+  const environ = environmentOf(options.environ, schema);
   const probe = options.probe === undefined ? filesystemProbe : options.probe;
   const platform = options.platform === undefined ? process.platform : options.platform;
   const errors: ConfigErrorEntry[] = [];
@@ -1152,6 +1815,15 @@ export function loadConfig(options: LoadOptions = {}): JsonObject {
         errors.push(error(fallback.code, path));
         continue;
       }
+      if (isCarriedDefault(field)) {
+        // Already resolved from the machine; expanding it again would read a
+        // `$` in an environment value as a variable.
+        flat[path] = fallback.value;
+        if (path === "stateDir" && typeof fallback.value === "string") {
+          context.stateDir = fallback.value;
+        }
+        continue;
+      }
       raw = fallback.value;
     }
     const value = fieldValue(field, raw, context, path, errors, probe);
@@ -1162,7 +1834,7 @@ export function loadConfig(options: LoadOptions = {}): JsonObject {
       }
     }
   }
-  applyRules(schema, flat, errors);
+  applyRules(schema, flat, located.document, errors);
   if (errors.length) {
     throw new ConfigError(errors);
   }

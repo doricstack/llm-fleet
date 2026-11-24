@@ -1,0 +1,27 @@
+{
+  "config": {
+    "stateDir": "/fixture/cash$/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "agents": {
+        "state": "unconfigured"
+      },
+      "rates": {
+        "state": "ready"
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/cash$/.local/state/llm-fleet/typing"
+      }
+    }
+  }
+}

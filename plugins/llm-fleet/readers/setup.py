@@ -102,11 +102,11 @@ def provider_homes(environ: Mapping[str, str]) -> list[str]:
 def starter(environ: Mapping[str, str]) -> dict[str, Any]:
     """The starter document: the schema version and the providers found, nothing else.
 
-    A path is written in `$HOME` form only when `HOME` is set, because that is the
-    variable the loader expands: a home found through `USERPROFILE` alone is
-    written as the full path.
+    A path is written in `$HOME` form when the machine gives a home at all: the
+    loader reads `HOME`, and reads it from `USERPROFILE` where Windows leaves it
+    unset, so the same starter resolves in a shell and in a host-spawned process.
     """
-    home = environ.get("HOME")
+    home = _user_home(environ)
     providers: list[dict[str, Any]] = []
     for index, path in enumerate(provider_homes(environ)):
         # The first home found is `claude`, the configured one when there is
@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="print the starter and write nothing")
     args = parser.parse_args(argv)
     environ = dict(os.environ)
-    home = environ.get("HOME")
+    home = _user_home(environ)
     result = run(environ, args.path, args.dry_run)
     shown = _shown(result.get("path"), home)
     if result["state"] == "dry-run":

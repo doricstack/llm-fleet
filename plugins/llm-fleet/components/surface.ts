@@ -53,7 +53,7 @@ export type SurfaceInput = {
 
 /** A pane holding one group and one sentence, which is all a reader needs here. */
 function notice(state: Group["state"], text: string, input: SurfaceInput,
-                primitives: Primitives) {
+                primitives: Primitives, messageLines?: string[]) {
   const group: Group = {
     name: "the fleet",
     title: "llm-fleet",
@@ -62,6 +62,7 @@ function notice(state: Group["state"], text: string, input: SurfaceInput,
     state,
     emptyText: text,
     failure: text,
+    ...(messageLines === undefined ? {} : { messageLines }),
   };
   // The close control is drawn while the machine is read too: a pane that can
   // only be closed once a reading lands is a pane the person waits on.
@@ -122,20 +123,57 @@ export function isReading(documents: ReaderDocuments | null): boolean {
  * errors are not a list, or whose entries are not objects, is named as a refusal
  * this pane could not read. Reading a field off whatever happens to be there
  * throws inside a paint, and a throw there is a blank pane.
+ *
+ * Each code carries the sentence the schema pairs with it. A code alone says
+ * nothing a person can act on, and E_CONFIG_MALFORMED stands for two causes the
+ * pane could not otherwise tell apart: bytes that are not UTF-8 and a document
+ * that is not JSON. Found by review, 2026-11-23.
  */
-function refusals(documents: ReaderDocuments): string {
+const REFUSAL_MEANINGS: Record<string, string> = {
+  E_CONFIG_VERSION: "schemaVersion is not a supported version",
+  E_CONFIG_FILE_NOT_FOUND: "the selected config file does not exist",
+  E_CONFIG_FILE_NOT_REGULAR: "the selected config path is not a regular file",
+  E_CONFIG_UNREADABLE: "the selected config file could not be read",
+  E_CONFIG_MALFORMED: "the file is not valid JSON, or its bytes are not UTF-8",
+  E_CONFIG_ROOT_TYPE: "the document root is not an object",
+  E_CONFIG_UNKNOWN_KEY: "a key is not declared by this schema",
+  E_CONFIG_TYPE: "a value has the wrong JSON type",
+  E_CONFIG_VALUE: "a value is outside the declared bounds or form",
+  E_CONFIG_REQUIRED: "an enabled group or provider is missing a required field",
+  E_CONFIG_UNRESOLVED_VAR: "a path references an undeclared or unset variable",
+  E_CONFIG_RULE: "two fields contradict each other",
+};
+
+/** Which cause a malformed file was, when the loader could tell. */
+const MALFORMED_DETAILS: Record<string, string> = {
+  bytes: "the file's bytes are not UTF-8",
+  json: "the file is not valid JSON",
+};
+
+function refusalTexts(documents: ReaderDocuments): string[] {
   const errors = (documents as { configErrors?: unknown }).configErrors;
   if (!Array.isArray(errors) || errors.length === 0) {
-    return "no error this pane could read";
+    return [];
   }
   return errors.map((entry) => {
     if (typeof entry !== "object" || entry === null) {
       return "an error this pane could not read";
     }
-    const { code, path } = entry as { code?: unknown; path?: unknown };
+    const { code, path, detail } = entry as { code?: unknown; path?: unknown; detail?: unknown };
+    // The loader knows which cause it hit; the code alone names both. Naming
+    // the wrong repair for a file whose bytes are fine is worse than silence.
+    const malformed = typeof detail === "string"
+      ? MALFORMED_DETAILS[detail] : undefined;
+    const meaning = malformed ?? (typeof code === "string" ? REFUSAL_MEANINGS[code] : undefined);
     return (typeof code === "string" ? code : "an unnamed error")
-         + (typeof path === "string" ? " " + path : "");
-  }).join(", ");
+         + (typeof path === "string" ? " " + path : "")
+         + (meaning === undefined ? "" : ": " + meaning);
+  });
+}
+
+function refusals(documents: ReaderDocuments): string {
+  const texts = refusalTexts(documents);
+  return texts.length === 0 ? "no error this pane could read" : texts.join(", ");
 }
 
 export function surfaceTree(input: SurfaceInput, primitives: Primitives) {
@@ -149,8 +187,14 @@ export function surfaceTree(input: SurfaceInput, primitives: Primitives) {
                   input, primitives);
   }
   if (isRefusal(input.documents)) {
+    // Each refusal gets its own line: joined into one sentence it was cut at
+    // the pane's width, and the meaning at the end is the part a person needs.
+    // Found by review, 2026-11-23.
+    const texts = refusalTexts(input.documents);
     return notice("unavailable", "the configuration, which was refused: "
-                                + refusals(input.documents), input, primitives);
+                                + refusals(input.documents), input, primitives,
+                  texts.length === 0 ? ["the configuration was refused: no error this pane could read"]
+                    : ["the configuration was refused:", ...texts]);
   }
   if (!isReading(input.documents)) {
     // Neither of the two shapes a read can answer with. That is a broken read,

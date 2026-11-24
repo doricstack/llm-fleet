@@ -1,0 +1,43 @@
+{
+  "config": {
+    "stateDir": "/fixture/runner/.local/state/llm-fleet",
+    "speech": {
+      "tempDirectory": "<TEMP>"
+    },
+    "sources": {
+      "jobs": {
+        "state": "unconfigured"
+      },
+      "interactive": {
+        "state": "unconfigured"
+      },
+      "agents": {
+        "state": "unconfigured",
+        "inputPricePerMTok": {
+          "__proto__": 7,
+          "fable-5-1": 10,
+          "opus-5-5": 4,
+          "opus-5": 5,
+          "opus-4-8": 5,
+          "opus-4-7": 5,
+          "sonnet-5-5": 2,
+          "sonnet-5": 2,
+          "haiku-5-5": 0.1,
+          "haiku-4-5": 1,
+          "deepseek-flash": 0.3,
+          "deepseek-v4-pro": 1.32,
+          "kimi-k2.7-code": 0.95,
+          "mimo-v2.6-flash": 0.14
+        }
+      },
+      "rates": {
+        "state": "ready"
+      }
+    },
+    "mods": {
+      "typing": {
+        "stateDir": "/fixture/runner/.local/state/llm-fleet/typing"
+      }
+    }
+  }
+}

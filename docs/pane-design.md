@@ -117,25 +117,23 @@ refusal, so the version a person quotes is always on the pane they are reading.
 The band is the pane's switch, and it is always drawn: a command typed while a
 turn runs waits for the turn to end, and a press on the band runs at once. The
 switch leads and says which way a press goes, Open fleet or Close fleet. After
-it come the figures on chips, a figure at zero left out, then what this session
-has spent on a chip, stated by the pane's own rule so both surfaces name the same
-money, then the worst thing that needs a person in its own color
-with the rest counted, and Dismiss at the right when there is something to
-dismiss. A line too narrow gives the spend chip up before the item, since the
-figure is still on the pane's own tiles and the item is what the band is read
-for. Errors sort ahead of waits. This
-session's own job is left out. A dismissal holds across sessions until the item
-changes, and `/llm-fleet unhide` brings everything back.
+it come the figures on chips, a figure at zero left out, and what this session
+has spent on a chip, stated by the pane's own rule so both surfaces name the
+same money. The band names no item: the figures count what is running, each is a
+press that opens the pane narrowed to the rows it counted, and the same press
+again widens the pane. Beside them one dim count, `N need you`, says how many
+things need a person, drawn at every roster state because a failure can sit
+outside every figure; with nothing needing a person and every figure at zero
+the line reads `Nothing running`. A long line gives the spend
+chip up first, then the switch's short word, and never a figure while there is
+room for one. This session's own job is left out.
 
-An item is a condition, not an occurrence, and its key says so. A run pacer
-refused is one item per repository and reason, however often it repeats, and
-the line says how many times: a machine that refuses the same run all afternoon
-asks its person once, and one dismissal holds for every repeat. A different
-reason, or a different repository, is a new item; a pull request whose head
-moves is a new one too, since its checks were run again.
+Keys dismissed by an earlier version, when the band still carried one item in a
+sentence with a Dismiss button, keep quieting their alerts until `/llm-fleet
+unhide` clears them; nothing on this band writes one.
 
 ```text
-[ Close fleet ]  2 working  2 waiting  1 failed  Pacer refused 3 runs in my-project: memory pressure . 2 more waiting   [ Dismiss ]
+[ Close fleet ]  2 working  2 waiting  1 failed
 ```
 
 ## Agent cards
@@ -217,9 +215,7 @@ first failing check is named where the verdict would be.
 The pane draws no list of what happened while the person was away. A section
 that gathered the day's events was read once and then passed over, and the
 sections below it already state what needs a person now: a failed run, a job
-waiting on input, a pull request whose checks fail. The session's end waits for
-the folds still being written, for two seconds at most, so a press made just
-before it closes lands and a host that stopped answering does not hold the end.
+waiting on input, a pull request whose checks fail.
 
 ## Measured progress only
 
@@ -263,6 +259,83 @@ Stale:          2 observed jobs, as of 3m ago. Refresh failed.
 Only a successful read can produce a healthy empty state. A failure before the
 first successful read must leave a visible error and a retry path, not an endless
 loading label. Never hide source errors inside a collapsed group alone.
+
+## Who owns a fold
+
+The configuration is the only fold that lasts. `pane.sections.<id>.collapsed`
+says whether a section starts folded and `pane.sections.<id>.off` whether it
+starts switched off, and every new session opens on exactly those, whatever an
+earlier session pressed. Nothing about a fold or a switch is written to the
+plugin's store, so two sessions never race over one, and a person who wants a
+different start edits the configuration (Navin, 2026-11-24: "my default is
+always the ones we choose first time in config").
+
+This session's presses are held in the host's state, presses only, so a hot
+reload keeps them and nothing else reads them. A heading press records the one
+section it names; Collapse all and Expand all record one press per drawn
+section; a press in the section picker records that section's switch. A press
+is never written anywhere else, and a press in one session changes nothing in
+another. The store keys older builds wrote, `folds` and `folds-written`, are
+neither read nor written.
+
+A switched-off section is not drawn. Its name stays in the section picker,
+dimmed, and a press on it switches it on for this session; a second press
+switches it off again. `visible: false` is different: that section is never
+drawn and is not in the picker.
+
+Views are the session's choices about what to look at. A one-section open
+(`/worktrees`, `/keys`) names a section; a band figure or Show all names a
+filter. A view is held in the load's memory and is never written to the store or
+to the host's state. A view changes no fold and no switch, so ending it puts
+nothing back: the drawing simply stops reading it. Every change to a view goes
+through one function that runs to the end without waiting, and anything that
+finishes later checks the view's generation before it acts, so a band open that
+lands after Escape changes nothing. The second press of the same one-section
+command, a fold press on any heading, Show all and a second press of the same
+figure end a view; closing the pane or Escape end none, so a filter is still
+there when the pane is opened again. A view on a section the configuration does
+not draw is ignored by the paint.
+
+The open on what failed is not a view and is never held. It is worked out on
+each paint from the reading being drawn, so a failure that cleared while the
+pane was shut opens nothing. It only opens: a section holding a failure is
+drawn open, and every other section keeps its press or its configured fold,
+so a section the configuration opens stays open.
+
+An explicit ask draws a section even when it is empty and set to hide while
+empty: a one-section view, and a switch press that turned the section on in
+this session. One press on a dim name in the picker always draws its card. A
+standing filter still narrows what is drawn.
+
+The drawing is derived, and nothing derived is stored. Whether a section is
+drawn: a one-section view draws its section even when it is switched off; else
+this session's switch press; else the configuration's `off`. Whether a drawn
+section is open, the strongest of these wins: a one-section view (its section
+open, every other folded); this session's fold press; a filter forcing open the
+sections holding its rows; the open on what failed; the configuration's
+`collapsed`.
+
+These follow from it and are held by tests: no press, view or paint writes the
+store; a new load with no session state draws the configuration exactly, even
+over a store an older build filled; a reload draws this session's presses;
+ending a view draws what was drawn before it without reading anything; a late
+band result after Escape changes nothing; a switched-off section is dimmed in
+the picker and drawn after one press; and the drawing for every mix of the
+inputs is one table the suite enumerates.
+
+The host's own documentation settles the rest. It says a read followed by a
+write races across sessions; this design has no cross-session write at all.
+Whether one command reaches two live loads at once is not documented; a reload
+replaces the module, and a view in one load's memory makes the answer
+irrelevant, because each load ends or keeps its own view. Presses are written
+to the host's state as the load's whole map, so if two loads of one session
+were ever live together, a press in one could replace a press the other made
+on another section; that is the one limit this design accepts.
+
+The configuration reaches a session through a reading. A new session draws
+the newest reading in the store, which carries the configuration as it stood
+when that reading was taken, so an edit to the configuration shows on the
+next read rather than at once.
 
 ## Shared rendering
 

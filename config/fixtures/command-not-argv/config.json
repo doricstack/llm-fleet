@@ -1,0 +1,9 @@
+{
+  "pane": {
+    "custom": {
+      "disk": {
+        "command": false
+      }
+    }
+  }
+}

@@ -21,12 +21,12 @@ import { test } from "node:test";
 import { elementTypes, renderedText } from "../plugins/llm-fleet/components/layout.ts";
 import { recordingPrimitives } from "../plugins/llm-fleet/components/mount.ts";
 import { SECTIONS } from "../plugins/llm-fleet/components/options.ts";
-import { AFTER_PAINT_MS, AHEAD_SECONDS, CLAIM_KEY, END_WRITES_MS, COUNTS_KEY, FOLDS_KEY, FRAME_MS, FRESH_RATES, FRESH_WORKTREES, HIDDEN_KEY, LIVE_MS, LOOK_MS,
+import { AHEAD_SECONDS, CLAIM_KEY, COUNTS_KEY, FRAME_MS, FRESH_RATES, FRESH_WORKTREES, HIDDEN_KEY, LIVE_MS, LOOK_MS,
          MARK, PANE, LIVE_CLAIM_KEY, READER, READING_KEY, REPLIED_LIMIT, SPEECH_ON_KEY, SPEECH_POLL_MS,
          SETTINGS_MS, SETTINGS_ONLY, STALE_SECONDS, TAB_HELPER, TIPS_KEY, alertConfigFrom, repliedLimitFrom,
-         CLOCK_MS, STREAM_MS, needsSessionRead, notPlaced, sectionOfKey, PACER_ARM_MS,
+         CLOCK_MS, STREAM_MS, needsSessionRead, notPlaced, PACER_ARM_MS,
          register } from "../plugins/llm-fleet/hooks/llm-fleet.ts";
-import { BAND_DISMISS, BAND_PACER, BAND_SPEAK, BAND_TOGGLE }
+import { BAND_PACER, BAND_SPEAK, BAND_TOGGLE }
   from "../plugins/llm-fleet/components/band.ts";
 import type { CommandEvent, Engine, Next, On, PromptHintEvent, RenderEvent, StartupEvent }
   from "../plugins/llm-fleet/hooks/engine.ts";
@@ -204,6 +204,10 @@ function versionsOf(session: object): Record<string, number> {
 }
 
 function stub(options: { exitCode?: number; stdout?: string; placed?: boolean;
+                         /** Whether the host's open refuses, as a window too narrow to place it does. */
+                         openRejects?: () => boolean;
+                         /** Holds an open until the promise it answers settles, so a second press can land first. */
+                         gateOpen?: (request: { id: string }) => Promise<void> | undefined;
                          panes?: { id: string }[]; held?: boolean;
                          stored?: unknown; session?: Record<string, unknown>;
                          refusesState?: boolean; heldState?: boolean;
@@ -338,6 +342,13 @@ function stub(options: { exitCode?: number; stdout?: string; placed?: boolean;
     },
     ui: {
       open: async (request) => {
+        const held = options.gateOpen?.(request);
+        if (held !== undefined) {
+          await held;
+        }
+        if (options.openRejects?.() === true) {
+          throw new Error("the host refused the pane");
+        }
         calls.opened.push(request.id);
         return { isPlaced: options.placed !== false };
       },
@@ -790,6 +801,80 @@ test("unhide brings back what was dismissed from the band, and opens nothing", a
   assert.deepEqual(driven.calls.closed, []);
 });
 
+/** Item keys an earlier version recorded when a band item was dismissed. */
+function legacyDismissals(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => "job:job-" + index + ":blocked:1789999900");
+}
+
+/** A reading whose band carries the limit a person configured, or none. */
+function limitedReading(limit: number | null): Record<string, unknown> {
+  return { ...OUTPUT,
+           band: limit === null ? { state: "ready" }
+             : { state: "ready", hiddenLimit: limit, waitingJobSeconds: 86400 } };
+}
+
+test("the dismissed keys are cut to the reading's limit, whichever lands first", async () => {
+  for (const hiddenFirst of [true, false]) {
+    // A limit above the keys kept leaves every one of them: nothing is cut.
+    const drawn = async (limit: number): Promise<string> => {
+      const driven = stub({ memory: { [HIDDEN_KEY]: legacyDismissals(250) },
+                            stdout: JSON.stringify(limitedReading(limit)),
+                            hiddenDelayTurns: hiddenFirst ? 0 : 150 });
+      await driven.start();
+      await drain(400);
+      return String((await driven.run("unhide") as { text: string }).text);
+    };
+    assert.match(await drawn(300), /^250 dismissed band items shown again/,
+                 String(hiddenFirst));
+    // A limit of ten keeps the newest ten, so the other 240 are let go.
+    assert.match(await drawn(10), /^10 dismissed band items shown again/,
+                 String(hiddenFirst));
+  }
+});
+
+test("a reading that carries no limit leaves the dismissed keys as they were", async () => {
+  const driven = stub({ memory: { [HIDDEN_KEY]: legacyDismissals(250) },
+                        stdout: JSON.stringify(limitedReading(null)), hiddenDelayTurns: 150 });
+  await driven.start();
+  await drain(400);
+  const answer = await driven.run("unhide") as { text: string };
+  assert.match(answer.text, /^250 dismissed band items shown again/);
+});
+
+test("a reading the paint finds after the keys were read keeps them within its limit", async () => {
+  // The keys land first, then the reading the last session left, and this
+  // session's own look finds nothing newer to take.
+  const driven = stub({ held: false, memory: { [HIDDEN_KEY]: legacyDismissals(250) },
+                        readingDelays: [20, 80],
+                        stored: { at: 1790000000, documents: limitedReading(10) } });
+  await driven.band(400);
+  await driven.start();
+  await drain(200);
+  const answer = await driven.run("unhide") as { text: string };
+  assert.match(answer.text, /^10 dismissed band items shown again/);
+});
+
+test("a reading another session left cuts the dismissed keys to its limit as it is drawn", async () => {
+  const driven = stub({ held: false, memory: { [HIDDEN_KEY]: legacyDismissals(250) },
+                        stored: { at: 1790000000, documents: limitedReading(10) } });
+  await driven.start();
+  await drain(200);
+  const answer = await driven.run("unhide") as { text: string };
+  assert.match(answer.text, /^10 dismissed band items shown again/);
+});
+
+test("a reading another session writes cuts the dismissed keys to its limit when it lands", async () => {
+  const memory: Record<string, unknown> = { [HIDDEN_KEY]: legacyDismissals(250) };
+  const driven = stub({ held: false, stored: { at: 1790000000 - 1, documents: OUTPUT }, memory });
+  await driven.start();
+  await drain(200);
+  memory[READING_KEY] = { at: 1790000000 + 1, documents: limitedReading(10) };
+  driven.tick(LOOK_MS);
+  await drain();
+  const answer = await driven.run("unhide") as { text: string };
+  assert.match(answer.text, /^10 dismissed band items shown again/);
+});
+
 test("the entry continues the engine's own startup rather than answering for it", async () => {
   const driven = stub();
   // The engine uses a session.start hook's result and skips a hook that returns
@@ -1114,6 +1199,34 @@ test("a press on a headline figure narrows the pane, and its clear control widen
   assert.equal(wide.includes("Review adapter behavior"), true);
 });
 
+test("Expand all is the way back from a narrowed pane, not a fold press that draws nothing", async () => {
+  const mixed = { ...OUTPUT, prs: { state: "ready", prs: [{
+    repo: "acme/app", number: 42, title: "Speed up the reader", branch: "speed", head: "abc",
+    is_draft: false, checks: "pass" }] } };
+  const driven = stub({ stdout: JSON.stringify(mixed) });
+  await driven.start();
+  await driven.settle();
+  await driven.quiesce();
+  // Narrowed to the one working row: the pull request is gone with the filter,
+  // whatever its section's fold says.
+  await driven.press("fleet.focus.working");
+  // A row the filter drops slides out rather than vanishing: the first paint
+  // after the press starts the slide, and the pane is read once it has run.
+  await driven.quiesce();
+  driven.advance(2);
+  const narrowed = renderedText(await driven.quiesce() as never).join("\n");
+  assert.equal(narrowed.includes("Showing 1 working row."), true, narrowed);
+  assert.equal(narrowed.includes("Speed up the reader"), false, narrowed);
+  // The control that speaks for every section drops the filter. A press that
+  // only unfolded the sections would change nothing the person can see, and the
+  // pane would read as stuck.
+  await driven.press("fleet.all.expand");
+  const wide = renderedText(await driven.quiesce() as never).join("\n");
+  assert.equal(wide.includes("Showing"), false);
+  assert.equal(wide.includes("Speed up the reader"), true);
+  assert.equal(wide.includes("Review adapter behavior"), true);
+});
+
 test("the pane opens on what failed, and no section leaves the pane for it", async () => {
   const failing = { ...OUTPUT, roster: { ...OUTPUT.roster,
     jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] } };
@@ -1175,7 +1288,7 @@ test("an open that names a section draws it whole, and nothing narrows it", asyn
   assert.equal(opened.includes("Worktrees"), true);
 });
 
-test("the band's item opens the pane where its row lives, not narrowed", async () => {
+test("a band figure opens the pane narrowed, and the same press widens it", async () => {
   const two = { ...OUTPUT, roster: { ...OUTPUT.roster,
     jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" },
            { ...OUTPUT.roster.jobs[0], id: "job-2", name: "Waiting one",
@@ -1183,13 +1296,20 @@ test("the band's item opens the pane where its row lives, not narrowed", async (
   const driven = stub({ stdout: JSON.stringify(two) });
   await driven.start();
   await driven.settle();
-  const item = buttonKeys(await driven.band() as never)
-    .find((key) => key.startsWith("fleet.band.item."));
-  assert.notEqual(item, undefined);
-  await driven.pressBand(item as string);
-  const opened = renderedText(await driven.render() as never).join("\n");
-  assert.equal(opened.includes("Showing"), false);
-  assert.equal(opened.includes("Waiting one"), true);
+  await driven.band();
+  // The figure counts the waiting job, so its press is that row and nothing
+  // else, and the pane opens rather than asking for a command first.
+  await driven.pressBand("fleet.band.focus.waiting");
+  const narrowed = renderedText(await driven.render() as never).join("\n");
+  assert.equal(narrowed.includes("Showing 1 waiting row."), true, narrowed);
+  assert.equal(narrowed.includes("Waiting one"), true);
+  // The press again is the way back: the pane stays open and every section is
+  // drawn whole.
+  await driven.pressBand("fleet.band.focus.waiting");
+  const wide = renderedText(await driven.render() as never).join("\n");
+  assert.equal(wide.includes("Showing"), false);
+  assert.equal(wide.includes("Review adapter behavior"), true);
+  assert.equal(wide.includes("Waiting one"), true);
 });
 
 test("a figure pressed on the pane's own open narrows it on the first press", async () => {
@@ -1221,8 +1341,11 @@ test("a section command that is refused leaves the pane as it was", async () => 
   await driven.settle();
   await driven.run();
   await driven.render();
+  // The person's own narrowing, pressed: the refusal must not widen it back.
+  await driven.press("fleet.focus.failed");
   const before = renderedText(await driven.render() as never).join("\n");
   assert.equal(before.includes("Review adapter behavior"), true);
+  assert.equal(before.includes("Showing 1 failed row."), true);
   // The configuration leaves the section out, so the command says so and opens
   // nothing: the person's pane stays exactly where it was.
   const answer = await driven.command("keys") as { text: string };
@@ -1244,72 +1367,390 @@ test("a section command for a hidden section leaves the pane as it was", async (
   await driven.settle();
   await driven.run();
   await driven.render();
+  // The person's own narrowing, pressed: the second refusal must leave it too.
+  await driven.press("fleet.focus.failed");
   const before = renderedText(await driven.render() as never).join("\n");
   assert.equal(before.includes("Review adapter behavior"), true);
+  assert.equal(before.includes("Showing 1 failed row."), true);
   const answer = await driven.command("keys") as { text: string };
   assert.equal(/hides/.test(answer.text), true);
   assert.equal(renderedText(await driven.render() as never).join("\n"), before);
 });
 
-test("a band item the pane cannot open leaves the narrowing alone", async () => {
-  // The failure is drawn in a section the pane keeps; the row the item names
-  // lives in a section the configuration leaves out, so the open is refused.
-  const reading = { ...OUTPUT,
-    pane: { state: "ready", order: ["prs"],
-            sections: { prs: { visible: true, collapsed: false } } },
-    prs: { state: "ready", errors: [], prs: [{ repo: "owner/project", number: 7,
-      title: "Add the thing", branch: "feat/thing", head: "abc", is_draft: false,
-      checks: "fail" }] },
-    pacer: { state: "ready", enabled: true, switchSource: "file", reason: null,
-             version: 2, slotCount: 2, workersPerRun: 4, qos: "utility", nice: 10,
-             slots: [], waiting: [], outside: [], outsideCount: 0, outsideCpu: 0,
-             outsideRssKb: 0, errors: [],
-             recent: [{ at: OUTPUT.generated_at - 60, repo: "web-app", waitSeconds: 0,
-                        runSeconds: 1, exit: 75, slot: 0, mode: "refused",
-                        reason: "memory pressure" }] } };
-  const driven = stub({ stdout: JSON.stringify(reading) });
+test("a band figure the host will not place keeps the person's narrowing", async () => {
+  // The pane starts on Failed and the band asks for Waiting. Starting on the
+  // section the press asks for let a handler that commits the selection
+  // before the open pass, because the selection it left was the same one.
+  // Found by review, 2026-11-23.
+  const two = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" },
+           { ...OUTPUT.roster.jobs[0], id: "job-2", name: "Waiting one",
+             state: "blocked", label: "Waiting for you" }] } };
+  const driven = stub({ stdout: JSON.stringify(two), placed: false });
   await driven.start();
   await driven.settle();
   await driven.run();
   await driven.render();
-  const drawn = renderedText(await driven.render() as never).join("\n");
-  assert.equal(drawn.includes("Add the thing"), true, drawn);
-  // The person presses the failed figure: the narrowing is now their choice,
-  // the one a refused press must not take away.
+  // The person's own narrowing, pressed: failed, not the section the band asks for.
   await driven.press("fleet.focus.failed");
   assert.equal(renderedText(await driven.render() as never).join("\n")
                  .includes("Showing 1 failed row."), true);
-  const item = buttonKeys(await driven.band() as never)
-    .find((key) => key.startsWith("fleet.band.item."));
-  assert.notEqual(item, undefined, buttonKeys(await driven.band() as never).join(" "));
-  await driven.pressBand(item as string);
-  // Refused, so the pane is still the failed rows it was.
+  // Narrowed window: the host places nothing, so the figure's press drew nothing
+  // and the narrowing it would have replaced is still there, along with every
+  // fold the person had, laid out by nobody.
+  const kept = driven.calls.stored.length;
+  await driven.band();
+  await driven.pressBand("fleet.band.focus.waiting");
   const after = renderedText(await driven.render() as never).join("\n");
   assert.equal(after.includes("Showing 1 failed row."), true, after);
+  assert.equal(after.includes("Showing 1 waiting row."), false, after);
+  assert.deepEqual(driven.calls.stored.slice(kept), []);
 });
 
-test("a section open the host will not place keeps the person's narrowing", async () => {
-  const waiting = { ...OUTPUT, roster: { ...OUTPUT.roster,
-    jobs: [{ ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" }] } };
-  const driven = stub({ stdout: JSON.stringify(waiting), placed: false });
+test("a band press a newer press overtook does not undo the newer open", async () => {
+  // Waiting and Failed pressed in quick succession: the first open is held and
+  // then refused, and its refusal must not put back the focus, nor mark shut
+  // the pane the second press opened. Found by review, 2026-11-23.
+  const both = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
+    { ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" },
+    { ...OUTPUT.roster.jobs[0], id: "failed-1", state: "failed", label: "Failed" },
+  ] } };
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  // Only the band press is held: the session opens the pane at startup too,
+  // and holding that one would leave the start itself waiting.
+  let armed = false;
+  let refusing = false;
+  const driven = stub({ stdout: JSON.stringify(both),
+                        gateOpen: () => {
+                          if (!armed) {
+                            return undefined;
+                          }
+                          armed = false;
+                          return held;
+                        },
+                        openRejects: () => refusing });
   await driven.start();
   await driven.settle();
   await driven.run();
   await driven.render();
-  // The person's own narrowing, pressed.
-  await driven.press("fleet.focus.waiting");
+  await driven.band();
+  armed = true;
+  const waiting = driven.pressBand("fleet.band.focus.waiting");
+  const failing = driven.pressBand("fleet.band.focus.failed");
+  refusing = true;
+  release();
+  await Promise.all([waiting, failing]);
+  await drain();
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Showing 1 failed row."), true, text);
+});
+
+test("a refused band press restores the filter that landed, not one an earlier press only set", async () => {
+  // Two presses are held, and both opens are then refused. The older press's
+  // refusal is ignored because a newer press overtook it, so the newer one must
+  // restore the filter that was there before either press, never the older
+  // press's tentative one, which nobody saw the pane narrow to. Found by
+  // review, 2026-11-23.
+  const both = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
+    { ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" },
+    { ...OUTPUT.roster.jobs[0], id: "failed-1", state: "failed", label: "Failed" },
+  ] } };
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let armed = 0;
+  let refusing = false;
+  const driven = stub({ stdout: JSON.stringify(both),
+                        gateOpen: () => {
+                          if (armed <= 0) {
+                            return undefined;
+                          }
+                          armed -= 1;
+                          return held;
+                        },
+                        openRejects: () => refusing });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  await driven.band();
+  armed = 2;
+  const waiting = driven.pressBand("fleet.band.focus.waiting");
+  const failing = driven.pressBand("fleet.band.focus.failed");
+  refusing = true;
+  release();
+  await Promise.all([waiting, failing]);
+  await drain();
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Showing 1 waiting row."), false, text);
+  assert.equal(text.includes("Review adapter behavior"), true, text);
+});
+
+test("an older press whose open lands is the filter a newer refusal returns to", async () => {
+  // The older press's open lands while the newer one waits, then the newer
+  // open is refused. The pane the older press opened drew its filter, so the
+  // rollback returns there rather than past it to the filter from before
+  // either press. Found by review, 2026-11-23.
+  const both = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
+    { ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" },
+    { ...OUTPUT.roster.jobs[0], id: "failed-1", state: "failed", label: "Failed" },
+  ] } };
+  let releaseOlder: () => void = () => {};
+  let releaseNewer: () => void = () => {};
+  const older = new Promise<void>((resolve) => { releaseOlder = resolve; });
+  const newer = new Promise<void>((resolve) => { releaseNewer = resolve; });
+  let armed = 0;
+  let refusing = false;
+  const driven = stub({ stdout: JSON.stringify(both),
+                        gateOpen: () => {
+                          if (armed <= 0) {
+                            return undefined;
+                          }
+                          armed -= 1;
+                          return armed === 1 ? older : newer;
+                        },
+                        openRejects: () => refusing });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  await driven.band();
+  armed = 2;
+  const waiting = driven.pressBand("fleet.band.focus.waiting");
+  const failing = driven.pressBand("fleet.band.focus.failed");
+  // The older open lands; the newer one is still held.
+  releaseOlder();
+  await drain();
+  refusing = true;
+  releaseNewer();
+  await Promise.all([waiting, failing]);
+  await drain();
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Showing 1 waiting row."), true, text);
+  assert.equal(text.includes("Showing 1 failed row."), false, text);
+});
+
+test("an older open landing after a newer refusal draws the filter it landed on", async () => {
+  // The newer press is refused first, and its rollback puts back the filter
+  // from before either press. Then the older open lands: the host is showing
+  // the pane that press opened, and the filter it set is what the pane draws,
+  // rather than one nobody saw a press make. Found by review, 2026-11-23.
+  const both = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
+    { ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" },
+    { ...OUTPUT.roster.jobs[0], id: "failed-1", state: "failed", label: "Failed" },
+  ] } };
+  let releaseOlder: () => void = () => {};
+  let releaseNewer: () => void = () => {};
+  const older = new Promise<void>((resolve) => { releaseOlder = resolve; });
+  const newer = new Promise<void>((resolve) => { releaseNewer = resolve; });
+  let armed = 0;
+  let refusing = false;
+  const driven = stub({ stdout: JSON.stringify(both),
+                        gateOpen: () => {
+                          if (armed <= 0) {
+                            return undefined;
+                          }
+                          armed -= 1;
+                          return armed === 1 ? older : newer;
+                        },
+                        openRejects: () => refusing });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  await driven.band();
+  armed = 2;
+  const waiting = driven.pressBand("fleet.band.focus.waiting");
+  const failing = driven.pressBand("fleet.band.focus.failed");
+  // The newer open is refused while the older one is still held.
+  refusing = true;
+  releaseNewer();
+  await failing;
+  await drain();
+  refusing = false;
+  releaseOlder();
+  await waiting;
+  await drain();
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Showing 1 waiting row."), true, text);
+  assert.equal(text.includes("Showing 1 failed row."), false, text);
+  // The pane the older press opened is open: its tick is not stopped by the
+  // newer press's rollback.
+  const cancelled = driven.calls.cancelled;
+  for (const timer of driven.calls.timers) {
+    timer.fn();
+  }
+  assert.equal(driven.calls.cancelled, cancelled,
+               "the open pane's tick was stopped by the refused newer press");
+});
+
+test("an older open landing after a newer open placed leaves the newer filter drawn", async () => {
+  // The newer press's open is placed, and the older press's open lands after
+  // it. The newer press is the person's last word, so the older landing must
+  // not draw its filter over the pane the newer press opened. Found by review,
+  // 2026-11-23.
+  const both = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
+    { ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" },
+    { ...OUTPUT.roster.jobs[0], id: "failed-1", state: "failed", label: "Failed" },
+  ] } };
+  let releaseOlder: () => void = () => {};
+  let releaseNewer: () => void = () => {};
+  const older = new Promise<void>((resolve) => { releaseOlder = resolve; });
+  const newer = new Promise<void>((resolve) => { releaseNewer = resolve; });
+  let armed = 0;
+  const driven = stub({ stdout: JSON.stringify(both),
+                        gateOpen: () => {
+                          if (armed <= 0) {
+                            return undefined;
+                          }
+                          armed -= 1;
+                          return armed === 1 ? older : newer;
+                        } });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  await driven.band();
+  armed = 2;
+  const waiting = driven.pressBand("fleet.band.focus.waiting");
+  const failing = driven.pressBand("fleet.band.focus.failed");
+  // The newer open is placed while the older one is still held, and the older
+  // one lands afterwards.
+  releaseNewer();
+  await failing;
+  await drain();
+  releaseOlder();
+  await waiting;
+  await drain();
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Showing 1 failed row."), true, text);
+  assert.equal(text.includes("Showing 1 waiting row."), false, text);
+});
+
+test("an older placed press does not become the filter a newer refusal restores", async () => {
+  // Three presses: the second places, the first places after it, and the third
+  // is refused. The second is the newest landing, so the rollback returns to
+  // its filter rather than to the older one's. Found by review, 2026-11-23.
+  const three = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
+    { ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" },
+    { ...OUTPUT.roster.jobs[0], id: "failed-1", state: "failed", label: "Failed" },
+    { ...OUTPUT.roster.jobs[0], id: "working-1", state: "working", label: "Working" },
+  ] } };
+  let releaseFirst: () => void = () => {};
+  let releaseSecond: () => void = () => {};
+  let releaseThird: () => void = () => {};
+  const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const second = new Promise<void>((resolve) => { releaseSecond = resolve; });
+  const third = new Promise<void>((resolve) => { releaseThird = resolve; });
+  let armed = 0;
+  let refusing = false;
+  const driven = stub({ stdout: JSON.stringify(three),
+                        gateOpen: () => {
+                          if (armed <= 0) {
+                            return undefined;
+                          }
+                          armed -= 1;
+                          return armed === 2 ? first : armed === 1 ? second : third;
+                        },
+                        openRejects: () => refusing });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  await driven.band();
+  armed = 3;
+  const waiting = driven.pressBand("fleet.band.focus.waiting");
+  const failing = driven.pressBand("fleet.band.focus.failed");
+  const working = driven.pressBand("fleet.band.focus.working");
+  // The second press places, then the first, then the third is refused.
+  releaseSecond();
+  await drain();
+  releaseFirst();
+  await drain();
+  refusing = true;
+  releaseThird();
+  await Promise.all([waiting, failing, working]);
+  await drain();
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Showing 1 failed row."), true, text);
+  assert.equal(text.includes("Showing 1 waiting row."), false, text);
+  assert.equal(text.includes("Showing 1 working row."), false, text);
+});
+
+test("a band press refused after an older open landed leaves the pane open", async () => {
+  // The older press's open is placed; the newer press's is refused, and the
+  // rollback put the pane back to closed though the host is still showing the
+  // pane the older press opened: the tick that keeps its ages moving stopped.
+  // Found by review, 2026-11-23.
+  const both = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
+    { ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" },
+    { ...OUTPUT.roster.jobs[0], id: "failed-1", state: "failed", label: "Failed" },
+  ] } };
+  let releaseOlder: () => void = () => {};
+  let releaseNewer: () => void = () => {};
+  const older = new Promise<void>((resolve) => { releaseOlder = resolve; });
+  const newer = new Promise<void>((resolve) => { releaseNewer = resolve; });
+  let armed = 0;
+  let refusing = false;
+  const driven = stub({ stdout: JSON.stringify(both),
+                        gateOpen: () => {
+                          if (armed <= 0) {
+                            return undefined;
+                          }
+                          armed -= 1;
+                          return armed === 1 ? older : newer;
+                        },
+                        openRejects: () => refusing });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  await driven.band();
+  armed = 2;
+  const waiting = driven.pressBand("fleet.band.focus.waiting");
+  const failing = driven.pressBand("fleet.band.focus.failed");
+  // The older open lands; the newer one is still held, then refused.
+  releaseOlder();
+  await drain();
+  refusing = true;
+  releaseNewer();
+  await Promise.all([waiting, failing]);
+  await drain();
+  const cancelled = driven.calls.cancelled;
+  for (const timer of driven.calls.timers) {
+    timer.fn();
+  }
+  assert.equal(driven.calls.cancelled, cancelled,
+               "the open pane's tick was stopped by the refused press");
+});
+
+test("a band figure whose open is refused keeps the person's narrowing", async () => {
+  // A host that throws rather than answering is not placed either: the press
+  // must put back the narrowing it was about to replace, as the drawn refusal
+  // above does. The pane starts on Failed and the refused press asks for
+  // Waiting, so a handler that commits the new selection early is caught.
+  // Found by review, 2026-11-23.
+  const two = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" },
+           { ...OUTPUT.roster.jobs[0], id: "job-2", name: "Waiting one",
+             state: "blocked", label: "Waiting for you" }] } };
+  // The person's own press lands; the band's open after it is the one refused.
+  let refusing = false;
+  const driven = stub({ stdout: JSON.stringify(two), openRejects: () => refusing });
+  await driven.start();
+  await driven.settle();
+  await driven.run();
+  await driven.render();
+  await driven.press("fleet.focus.failed");
   assert.equal(renderedText(await driven.render() as never).join("\n")
-                 .includes("Showing 1 waiting row."), true);
-  const item = buttonKeys(await driven.band() as never)
-    .find((key) => key.startsWith("fleet.band.item.job:"));
-  assert.notEqual(item, undefined);
-  // Narrowed window: the host places nothing, so the press drew nothing and
-  // the narrowing it would have replaced is still there, along with every fold
-  // the person had, laid out by nobody.
+                 .includes("Showing 1 failed row."), true);
   const kept = driven.calls.stored.length;
-  await driven.pressBand(item as string);
+  refusing = true;
+  await driven.band();
+  await driven.pressBand("fleet.band.focus.waiting");
   const after = renderedText(await driven.render() as never).join("\n");
-  assert.equal(after.includes("Showing 1 waiting row."), true, after);
+  assert.equal(after.includes("Showing 1 failed row."), true, after);
+  assert.equal(after.includes("Showing 1 waiting row."), false, after);
   assert.deepEqual(driven.calls.stored.slice(kept), []);
 });
 
@@ -1458,7 +1899,7 @@ test("each heading folds its own section and no other", async () => {  for (cons
     await driven.settle();
     await driven.render();
     // Open everything, so a press that folds the wrong section is visible as a
-    // heading that did not move rather than hidden by the three that start shut.
+    // heading that did not move rather than hidden by the four that start shut.
     await driven.press("fleet.all.expand");
     await driven.press("fleet.section." + name);
     const text = renderedText(await driven.render() as never).join("\n");
@@ -1589,74 +2030,39 @@ test("a fold pressed in this session is still folded after the plugin is reloade
   assert.equal(after.includes("Review adapter behavior"), false);
 });
 
-test("a fold pressed in one session is the next session's fold", async () => {
-  const carried = { at: 1790000000, documents: OUTPUT };
-  // One store, as every session on the machine shares it; a host of its own each.
+test("an open the host would not place leaves the person's narrowing alone", async () => {
+  // The open drew nothing, so it may not take the narrowing away or leave a
+  // view nobody saw. The person folds a section and narrows to the working
+  // rows first, so there is a fold and a filter to lose, and the filter is the
+  // one the pane reads back: the rows it drops are gone. Found by review,
+  // 2026-11-23.
   const memory: Record<string, unknown> = {};
-  const first = stub({ stored: carried, session: {}, memory });
-  await first.render();
-  await first.quiesce();
-  await first.press("fleet.section.sessions");
-  assert.equal(renderedText(await first.render() as never).join("\n")
-                 .includes("\u25b8\nBackground sessions"), true);
-
-  // A second session is a second registration with a host of its own, which
-  // holds no fold. It opens with the folds the last person left, from the store.
-  const second = stub({ stored: carried, session: {}, memory });
-  const text = renderedText(await second.quiesce() as never).join("\n");
-  assert.equal(text.includes("\u25b8\nBackground sessions"), true);
-  assert.equal(text.includes("Review adapter behavior"), false);
-});
-
-test("a session's own fold outranks the one the last session left", async () => {
-  // The host holds this session's fold across a reload, and the store holds the
-  // last session's: a reload must not hand the session back someone else's.
-  const carried = { at: 1790000000, documents: OUTPUT };
-  const memory: Record<string, unknown> = { [FOLDS_KEY]: { sessions: true } };
-  const driven = stub({ stored: carried, session: { "llm-fleet/folded": { sessions: false } },
-                        memory });
-  const text = renderedText(await driven.quiesce() as never).join("\n");
-  assert.equal(text.includes("\u25be\nBackground sessions"), true);
-  assert.equal(text.includes("Review adapter behavior"), true);
-});
-
-test("a fold is kept for this session in the host and for the next in the store", async () => {
-  const memory: Record<string, unknown> = {};
-  const driven = stub({ stdout: JSON.stringify(CONFIGURED), session: {}, memory });
+  const driven = stub({ placed: false, stdout: JSON.stringify(OUTPUT), session: {}, memory });
   await driven.start();
   await driven.settle();
-  await driven.render();
+  await driven.quiesce();
   await driven.press("fleet.section.sessions");
+  await driven.press("fleet.focus.working");
+  await driven.quiesce();
+  await settles();
+  const narrowed = renderedText(await driven.render() as never).join("\n");
+  assert.equal(narrowed.includes("Showing 1 working row."), true, narrowed);
+  // The press outranks the filter: the section it folded stays folded, and
+  // the sections the filter dropped are gone.
+  assert.equal(narrowed.includes("\u25b8\nBackground sessions"), true, narrowed);
+  assert.equal(narrowed.includes("\nPull requests\n\u258e"), false, narrowed);
+  const stored = driven.calls.stored.length;
+  const stated = driven.calls.stated.length;
+  await driven.command("worktrees");
   await new Promise((resolve) => setImmediate(resolve));
-  // The host holds it for this session, and across a reload of the plugin.
-  assert.deepEqual(driven.calls.stated.map((entry) => entry.key), ["llm-fleet/folded"]);
-  assert.equal(driven.calls.stated[0]?.value !== null, true);
-  // The store holds the same presses for the next session, and nothing else
-  // a press wrote.
-  assert.deepEqual(driven.calls.stored.map((entry) => entry.key), [READING_KEY, FOLDS_KEY]);
-  assert.deepEqual(memory[FOLDS_KEY], driven.calls.stated[0]?.value);
-  assert.deepEqual(driven.calls.toasts, []);
-});
-
-test("a store that refuses a fold says so once, and the pane still folds", async () => {
-  const memory: Record<string, unknown> = {};
-  const driven = stub({ stdout: JSON.stringify(CONFIGURED), session: {}, memory,
-                        refuses: [FOLDS_KEY] });
-  await driven.start();
-  await driven.settle();
-  await driven.render();
-  await driven.press("fleet.section.sessions");
-  await driven.press("fleet.section.sessions");
-  for (let turn = 0; turn < 10; turn += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  // The person hears the folds will not outlive this session, once rather
-  // than on every press, and the press they made still took.
-  assert.deepEqual(driven.calls.toasts,
-                   ["fleet: section folds kept for this session; could not save them."]);
-  assert.equal(FOLDS_KEY in memory, false);
+  assert.deepEqual(driven.calls.stored.slice(stored), []);
+  assert.deepEqual(driven.calls.stated.slice(stated), []);
   const text = renderedText(await driven.render() as never).join("\n");
-  assert.equal(text.includes("\u25b8\nBackground sessions"), true);
+  // The filter and the fold the person set still stand after the refused open.
+  assert.equal(text, narrowed);
+  // Nothing was drawn, so the next ask opens rather than closing.
+  const again = await driven.command("worktrees") as { text: string };
+  assert.equal(again.text, notPlaced("Worktrees"));
 });
 
 test("a host that will not hold a fold still folds the pane", async () => {
@@ -1782,73 +2188,14 @@ test("a fold a person pressed is not undone by a slow host answering late", asyn
   // was folded by the host, and nothing has touched it since.
   assert.equal(after.includes("\u25b8\nBackground sessions"), true);
 
-  // A reload is what proves the answer was kept rather than only held here: the
-  // press wrote itself to the host on its own, and the section this answer
-  // brought back was never written again, so the next registration finds the
-  // press and loses the fold it had restored. The merge was read for a paint,
-  // so it is written at the next tick.
-  driven.tick(AFTER_PAINT_MS);
+  // A reload is what proves the press reached the host: the write follows the
+  // answer it was waiting behind, so what the host holds is the press laid over
+  // what it held, and the next registration finds both.
   await settles();
   driven.reload();
   const reloaded = renderedText(await driven.quiesce() as never).join("\n");
   assert.equal(reloaded.includes("\u25be\nWorktrees"), true);
   assert.equal(reloaded.includes("\u25b8\nBackground sessions"), true);
-});
-
-test("the tick a paint asked for is cancelled once it has made its writes", async () => {
-  // The host's late answer to a fold read is written at the next tick, since a
-  // paint may not write it. One tick is all it waits for: left standing, it
-  // would fire for the rest of the session.
-  const session: Record<string, unknown> = {};
-  const memory: Record<string, unknown> = { [FOLDS_KEY]: { sessions: true } };
-  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
-                        heldState: true });
-  await driven.start();
-  await driven.quiesce();
-  driven.releaseState();
-  await settles();
-  const before = driven.calls.cancelled;
-  driven.tick(AFTER_PAINT_MS);
-  await settles();
-  assert.deepEqual(session["llm-fleet/folded"], { sessions: true });
-  assert.equal(driven.calls.cancelled, before + 1);
-  // The tick that made them is gone, so firing it again writes nothing.
-  driven.tick(AFTER_PAINT_MS);
-  await settles();
-  assert.equal(driven.calls.stateSets.filter((key) => key === "llm-fleet/folded").length, 1);
-});
-
-test("with no clock, a fold a late answer brings waits for the next prompt", async () => {
-  // Without a clock there is no tick to make the write, so it waits for the
-  // next event that is not a paint. Writing it from the paint itself is the one
-  // thing the host refuses.
-  const session: Record<string, unknown> = {};
-  const memory: Record<string, unknown> = { [FOLDS_KEY]: { sessions: true } };
-  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
-                        heldState: true, noClock: true });
-  await driven.start();
-  await driven.quiesce();
-  driven.releaseState();
-  await settles();
-  assert.equal("llm-fleet/folded" in session, false);
-  await driven.prompt("next");
-  await settles();
-  assert.deepEqual(session["llm-fleet/folded"], { sessions: true });
-});
-
-test("with no clock, a fold a late answer brings is written when the session ends", async () => {
-  const session: Record<string, unknown> = {};
-  const memory: Record<string, unknown> = { [FOLDS_KEY]: { sessions: true } };
-  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
-                        heldState: true, noClock: true });
-  await driven.start();
-  await driven.quiesce();
-  driven.releaseState();
-  await settles();
-  assert.equal("llm-fleet/folded" in session, false);
-  await driven.end();
-  await settles();
-  assert.deepEqual(session["llm-fleet/folded"], { sessions: true });
 });
 
 test("a host with no clock still draws the pane", async () => {
@@ -1917,6 +2264,7 @@ test("a section the order leaves out keeps the fold it was left in", async () =>
   // What the host holds still carries the press on the section out of the
   // order, because a control on the sections being drawn is not a statement
   // about the ones that are not.
+  await settles();
   const heldFold = session["llm-fleet/folded"] as Record<string, boolean>;
   assert.equal(heldFold["sessions"], false, "the press on sessions was dropped");
   assert.equal(heldFold["warnings"], true);
@@ -2584,8 +2932,7 @@ test("a look still out when the session ends does not start the timer again", as
   await driven.end();
   await driven.settle();
   await drain();
-  // The end's own bound on the writes it waits for is no look timer.
-  assert.equal(driven.calls.every.filter((ms) => ms !== END_WRITES_MS).length, started);
+  assert.equal(driven.calls.every.length, started);
   driven.tick(LOOK_MS);
   await drain();
   assert.equal(driven.calls.argv.length, 1, "looked after the session ended");
@@ -4185,13 +4532,6 @@ test("the pane's clock and its stream step are the reading's, and the packaged o
   assert.equal(driven.calls.every.includes(500), true);
 });
 
-test("the pane counts what the band hides that the reading still names", async () => {
-  const driven = await pressedPane({ memory: { [HIDDEN_KEY]: ["job:job-2:blocked:1789999700",
-                                                              "job:gone:blocked:1"] } });
-  const text = renderedText(await driven.quiesce(140) as never);
-  assert.equal(text.includes("1 hidden from the band; /llm-fleet unhide shows them again."), true);
-});
-
 /** A pull request whose checks fail: a failure the band leads with. */
 const FAILING = { ...OUTPUT, prs: { state: "ready", prs: [
   { repo: "owner/project", number: 7, title: "Fix it", branch: "fix", head: "abc",
@@ -4291,6 +4631,19 @@ test("the helper is told none as the session starts, then failed, waiting and no
   assert.deepEqual(machine.tabs, [told("none"), told("failed"), told("waiting"), told("none")]);
   // iTerm outside tmux: tmux is never asked anything.
   assert.deepEqual(machine.tmux, []);
+});
+
+test("the tab's level follows the wait a person configured, not the packaged default", async () => {
+  // The job in WAITING has waited ten seconds, so a configured wait of five
+  // parks it: the tab holds no level for a job nobody waits on any more.
+  const parked = { ...WAITING, band: { state: "ready", hiddenLimit: 200,
+                                       waitingJobSeconds: 5 },
+                   alerts: { state: "ready", liveMs: 1000, tabTint: { enabled: true } } };
+  const machine = tabMachine(() => parked);
+  const driven = stub({ env: ITERM, answer: machine.answer });
+  await driven.start();
+  await drain();
+  assert.deepEqual(machine.tabs, [told("none")]);
 });
 
 test("a tint switched off tells the helper none, and one off from the start tells it nothing", async () => {
@@ -4655,23 +5008,6 @@ test("every whole read asks for the rate cards to be refreshed, and the settings
   assert.equal(FRESH_RATES, "--refresh-rates");
 });
 
-test("a band item opens the section its row is drawn in, and an unknown one opens none", () => {
-  assert.equal(sectionOfKey("pacer:web-app:1792490400"), "pacer");
-  assert.equal(sectionOfKey("job:job-a:blocked:1"), "sessions");
-  assert.equal(sectionOfKey("pr:owner/project#9:abc"), "prs");
-  assert.equal(sectionOfKey("skill:target-a:flagged:h1"), "skills");
-  assert.equal(sectionOfKey("pacers:x"), null);
-  // A section the pane no longer draws opens nothing, so a key left in a
-  // session's store from an older build is a press that goes nowhere rather
-  // than a jump to a group that is not there.
-  assert.equal(sectionOfKey("run:k:2"), null);
-  assert.equal(sectionOfKey("trial:k"), null);
-  // Every section a key opens is one the pane carries, so the jump lands.
-  for (const key of ["pacer:a:1", "job:a", "pr:a"]) {
-    assert.ok(SECTIONS.includes(sectionOfKey(key) as string), key);
-  }
-});
-
 test("a session with no reading learns its read time from the settings before its first read", async () => {
   // A configured source slower than the packaged time would end every first
   // read before the reading that carries the longer time could land.
@@ -4883,9 +5219,10 @@ test("a session that opens on a kept reading takes its times from it and asks fo
   assert.deepEqual(driven.calls.settings, []);
 });
 
-test("/worktrees opens the pane on Worktrees alone, probes them on the next look, and keeps the folds", async () => {
+test("/worktrees opens the pane on Worktrees alone, probes them on the next look, and writes no fold", async () => {
   const memory: Record<string, unknown> = {};
-  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, memory });
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, memory, session });
   await driven.start();
   await drain();
   const reads = driven.calls.argv.length;
@@ -4911,14 +5248,19 @@ test("/worktrees opens the pane on Worktrees alone, probes them on the next look
   assert.equal(text.includes("\u25be\nWorktrees"), true);
   assert.equal(text.includes("\u25b8\nBackground sessions"), true);
   assert.equal(text.includes("Review adapter behavior"), false);
-  // Kept for the next session as a press keeps them.
-  const kept = memory[FOLDS_KEY] as Record<string, boolean>;
-  assert.equal(kept.worktrees, false);
-  assert.equal(kept.sessions, true);
+  // The open is a view, not a press: nothing is kept for the next session and
+  // nothing for this one, so a later configuration change is not overridden by
+  // a fold nobody chose.
+  assert.deepEqual(driven.calls.written.map((entry) => entry.key)
+    .filter((key) => OLD_FOLD_KEYS.includes(key)), []);
+  assert.equal("folds" in memory, false);
+  assert.deepEqual(session, {});
 });
 
 test("/worktrees run again with the pane open on Worktrees closes it, and probes nothing", async () => {
-  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, panes: [{ id: PANE }] });
+  const memory: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, memory,
+                        panes: [{ id: PANE }] });
   await driven.start();
   await drain();
   // Open, but on the configured fold, which keeps Worktrees folded: this opens it.
@@ -4927,11 +5269,145 @@ test("/worktrees run again with the pane open on Worktrees closes it, and probes
   const again = await driven.command("worktrees") as { text: string };
   assert.equal(again.text, `llm-fleet pane closed (${MARK}).`);
   assert.deepEqual(driven.calls.closed, [PANE]);
+  // The pane left behind is the one the first run was a view over, not the
+  // one-section layout it drew: the session it folded away is drawn again.
+  const restored = await drawnText(driven);
+  assert.equal(restored.includes("\u25be\nBackground sessions"), true, restored);
+  assert.equal(restored.includes("Review adapter behavior"), true);
+  // The open moved no fold, so the close had none to return: the person
+  // pressed the command twice, and nothing was written for either press.
+  assert.equal("folds" in memory, false);
+  assert.equal("folds-written" in memory, false);
   // The first run asked for a probe; the pane closed before the look came, so
   // the probe that asked for it is not wanted.
   driven.tick(LOOK_MS);
   await drain();
   assert.equal(driven.calls.argv.some((argv) => argv.includes(FRESH_WORKTREES)), false);
+});
+
+test("a one-section open makes no section's fold an override, so a later configuration draws", async () => {
+  // The open is a view: it draws every section but its own folded and records
+  // no fold. A drawing kept as presses made each untouched section's default
+  // an override, so a configuration change later in the session could not
+  // unfold it. Found by review, 2026-11-23.
+  const changed = { ...OUTPUT, pane: { state: "ready",
+    order: ["warnings", "sessions", "worktrees"],
+    sections: { warnings: { visible: true, collapsed: false },
+                sessions: { visible: true, collapsed: false },
+                worktrees: { visible: true, collapsed: false } } } };
+  let reads = 0;
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, held: false,
+                        answer: (argv) => {
+                          if (argv[1] !== "/plugin/llm-fleet/" + READER) {
+                            return undefined;
+                          }
+                          reads += 1;
+                          return { exitCode: 0,
+                                   stdout: JSON.stringify(reads > 1 ? changed : OUTPUT) };
+                        } });
+  await driven.start();
+  await drain();
+  // Warnings is a default fold in the first reading.
+  assert.equal((await drawnText(driven)).includes("▸\nWarnings"), true);
+  // Open on Worktrees: every other section folds, and the looks that follow
+  // take a reading whose configuration starts Warnings unfolded. The first
+  // look probes Worktrees alone; the stale one after it reads the whole
+  // machine, and the new configuration comes with it.
+  await driven.command("worktrees");
+  driven.tick(LOOK_MS);
+  await drain();
+  driven.advance(STALE_SECONDS + 1);
+  driven.tick(LOOK_MS);
+  await driven.settle();
+  await drain();
+  // The view ends, and no press holds a fold for Warnings: the
+  // configuration's "unfolded" now draws.
+  await driven.command("worktrees");
+  await drain();
+  const text = await drawnText(driven);
+  assert.equal(text.includes("▾\nWarnings"), true, text);
+});
+
+test("a one-section open and its close leave nothing in the host for a reload to draw", async () => {
+  // The open writes nothing to the host, so the next load of the same session
+  // draws the section as the configuration folds it. A fold written for the
+  // open came back on that load. Found by review, 2026-11-23.
+  const session: Record<string, unknown> = {};
+  const memory: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory });
+  await driven.start();
+  await drain();
+  await driven.command("worktrees");
+  await drain();
+  assert.equal((await drawnText(driven)).includes("▾\nWorktrees"), true);
+  await driven.command("worktrees");
+  await drain();
+  assert.deepEqual(session, {});
+  driven.reload();
+  const text = renderedText(await driven.quiesce() as never).join("\n");
+  assert.equal(text.includes("▸\nWorktrees"), true, text);
+});
+
+test("two presses in flight open once and the second closes", async () => {
+  // Both presses read the pane as closed and both opened it, so the press that
+  // was meant to close left it standing. Found by review, 2026-11-23.
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let opens = 0;
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, memory: {},
+                        gateOpen: () => {
+                          opens += 1;
+                          return opens === 1 ? held : undefined;
+                        } });
+  await driven.start();
+  await drain();
+  const first = driven.command("worktrees");
+  const second = driven.command("worktrees");
+  release();
+  await first;
+  await second;
+  await drain();
+  assert.deepEqual(driven.calls.closed, [PANE]);
+});
+
+test("a command before the first reading names its section, and the view applies once the reading lands", async () => {
+  // The pane configuration travels with the reading, so before the first one
+  // lands nothing can say whether this section is drawn. The command still
+  // names it: a view changes no fold and no switch, and the paint ignores a
+  // view on a section it cannot draw, so there is nothing to undo either way.
+  const memory: Record<string, unknown> = {};
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stdout: JSON.stringify(OUTPUT), memory, session });
+  await driven.start();
+  const answer = await driven.command("worktrees") as { text: string };
+  assert.equal(answer.text, `llm-fleet pane opened on Worktrees (${MARK}).`);
+  assert.equal("folds" in memory, false);
+  assert.deepEqual(session, {});
+  // The reading lands, and the pane it draws is the one the command asked for.
+  await driven.settle();
+  const text = await drawnText(driven);
+  assert.equal(headingFold(text, "Worktrees"), false, text);
+  assert.equal(headingFold(text, "Background sessions"), true, text);
+  // The same command again is the way back out, as it is with a reading held.
+  const second = await driven.command("worktrees") as { text: string };
+  assert.equal(second.text, `llm-fleet pane closed (${MARK}).`);
+
+  // A second run before any reading closes the pane too.
+  const early = stub({ stdout: JSON.stringify(OUTPUT), memory: {} });
+  await early.start();
+  await early.command("keys");
+  const shut = await early.command("keys") as { text: string };
+  assert.equal(shut.text, `llm-fleet pane closed (${MARK}).`);
+
+  // A view on a section the configuration turns out not to draw is ignored by
+  // the paint: the pane the reading lands on is the configured one.
+  const other = stub({ stdout: JSON.stringify(CONFIGURED), memory: {} });
+  await other.start();
+  await other.command("worktrees");
+  await other.settle();
+  const configured = await drawnText(other);
+  assert.equal(configured.includes("▸\nBackground sessions"), true, configured);
+  assert.equal(configured.includes("▾\nWarnings"), true, configured);
 });
 
 test("/worktrees waits for a read in flight, then probes as it lands", async () => {
@@ -4975,25 +5451,6 @@ test("a -p session that submits a prompt runs no helper and writes nothing to th
   assert.deepEqual(driven.calls.written, []);
 });
 
-test("a fold restored after a press lands in the store with the press, for the next session", async () => {
-  const memory: Record<string, unknown> = { [FOLDS_KEY]: { skills: false, worktrees: false } };
-  const carried = { at: 1790000000, documents: OUTPUT };
-  // The host holds this session's first state read until the case lets it go,
-  // so the press lands before the folds the last session left are read.
-  const driven = stub({ stored: carried, session: {}, memory, heldState: true });
-  await driven.quiesce();
-  await driven.press("fleet.section.sessions");
-  driven.releaseState();
-  await drain();
-  assert.deepEqual(memory[FOLDS_KEY], { skills: false, worktrees: false, sessions: true });
-  // The next session opens with all three.
-  const next = stub({ stored: carried, session: {}, memory });
-  const text = renderedText(await next.quiesce() as never).join("\n");
-  assert.equal(text.includes("\u25b8\nBackground sessions"), true);
-  assert.equal(text.includes("\u25be\nSkills"), true);
-  assert.equal(text.includes("\u25be\nWorktrees"), true);
-});
-
 test("/keys tips run before the startup read lands is not undone by it", async () => {
   // The person turned the tips off in an earlier session; this one turns them
   // back on before the store has answered what the earlier one left.
@@ -5024,7 +5481,7 @@ test("/worktrees and /keys on a section the configuration hides fold nothing and
     const answer = await driven.command(command) as { text: string };
     assert.match(answer.text, new RegExp("pane\\.sections\\." + section + "\\.visible"), command);
     assert.deepEqual(driven.calls.opened, [], command);
-    assert.equal(FOLDS_KEY in memory, false, command);
+    assert.equal("folds" in memory, false, command);
     assert.deepEqual(driven.calls.stated, [], command);
     driven.tick(LOOK_MS);
     await drain();
@@ -5070,91 +5527,6 @@ test("a voice picked while an older line plays is the one the next line tries fi
   assert.equal(answer.text, "llm-fleet speaks as af_bella now.");
 });
 
-/** A reading with these jobs and this band document, dated at the stub's clock. */
-function bandReading(jobs: unknown[], band?: Record<string, unknown>): Record<string, unknown> {
-  return { ...OUTPUT, roster: { ...OUTPUT.roster, jobs }, ...(band ? { band } : {}) };
-}
-
-function waitingJob(id: string, since: number): Record<string, unknown> {
-  return { provider: "one", id, name: "Job " + id, state: "blocked", label: "Blocked",
-           started_at: 1789990000, last_seen_at: 1789999995, folder: "/tmp/" + id, since };
-}
-
-test("how long a waiting job stays on the band comes from the reading", async () => {
-  const jobs = [waitingJob("job-old", 1789999000), waitingJob("job-new", 1789999900)];
-  // The band leads with the first item and counts the rest after it.
-  const shown = async (band?: Record<string, unknown>) => {
-    const driven = stub({ stdout: JSON.stringify(bandReading(jobs, band)) });
-    await driven.start();
-    await drain();
-    const tree = JSON.stringify(await driven.band(400));
-    return { lead: ["job-old", "job-new"].filter((id) => tree.includes("Job " + id + " is waiting")),
-             more: tree.includes("1 more waiting") };
-  };
-  // A day by default, so both are on the band.
-  assert.deepEqual(await shown(), { lead: ["job-old"], more: true });
-  // Ten minutes in the reading leaves the one that blocked a thousand seconds ago in the pane.
-  assert.deepEqual(await shown({ state: "ready", hiddenLimit: 200, waitingJobSeconds: 600 }),
-                   { lead: ["job-new"], more: false });
-});
-
-test("a dismissal keeps the keys that name something current, within the reading's limit", async () => {
-  const jobs = [waitingJob("job-a", 1789999900), waitingJob("job-b", 1789999950)];
-  const current = ["job:job-a:blocked:1789999900", "job:job-b:blocked:1789999950"];
-  const dismissed = async (band: Record<string, unknown> | undefined, before: string[]) => {
-    const memory: Record<string, unknown> = { [HIDDEN_KEY]: before };
-    const driven = stub({ memory, stdout: JSON.stringify(bandReading(jobs, band)) });
-    await driven.start();
-    await drain();
-    await driven.band(400);
-    await driven.pressBand(BAND_DISMISS);
-    await drain();
-    return memory[HIDDEN_KEY];
-  };
-  // Keys left from items that have gone hide nothing, so the dismissal drops them.
-  assert.deepEqual(await dismissed(undefined, ["trial:gone", "job:job-z:blocked:1"]), current);
-  // The newest are kept within the limit the reading carries.
-  assert.deepEqual(await dismissed({ state: "ready", hiddenLimit: 1, waitingJobSeconds: 86400 },
-                                   []),
-                   current.slice(-1));
-});
-
-test("a dismissal made while a provider failed keeps the job that provider could not report", async () => {
-  const jobA = waitingJob("job-a", 1789999900);
-  const failing = { repo: "owner/project", number: 9, title: "Red", branch: "red", head: "abc",
-                    is_draft: false, checks: "fail" };
-  let reading: Record<string, unknown> = bandReading([jobA]);
-  const memory: Record<string, unknown> = {};
-  const driven = stub({ memory, answer: machine([], () => reading) });
-  await driven.start();
-  await drain();
-  await driven.band(400);
-  await driven.pressBand(BAND_DISMISS);
-  await drain();
-  assert.deepEqual(memory[HIDDEN_KEY], ["job:job-a:blocked:1789999900"]);
-  // The provider fails one read, and something else is dismissed meanwhile.
-  reading = { ...OUTPUT, roster: { state: "failed", jobs: [], interactive: {}, providers: {},
-                                   errors: [{ source: "jobs:one", reason: "exit 3" }] },
-              prs: { state: "ready", prs: [failing] } };
-  driven.advance(60);
-  await driven.band(400);
-  await drain();
-  const red = JSON.stringify(await driven.band(400));
-  assert.equal(red.includes("checks failing"), true, red);
-  await driven.pressBand(BAND_DISMISS);
-  await drain();
-  assert.deepEqual(memory[HIDDEN_KEY],
-                   ["job:job-a:blocked:1789999900", "pr:owner/project#9:abc"]);
-  // The provider recovers: the job it could not report is still dismissed.
-  reading = { ...bandReading([jobA]), prs: { state: "ready", prs: [failing] } };
-  driven.advance(60);
-  await driven.band(400);
-  await drain();
-  const back = JSON.stringify(await driven.band(400));
-  assert.equal(back.includes("Job job-a is waiting"), false, back);
-  assert.equal(back.includes("checks failing"), false, back);
-});
-
 test("a dismissed item raises no toast and no notification when its condition comes back", async () => {
   let reading: unknown = OUTPUT;
   const blocked = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
@@ -5180,44 +5552,6 @@ test("a dismissed item raises no toast and no notification when its condition co
   await drain();
   assert.deepEqual(driven.calls.toasts, []);
   assert.deepEqual(driven.calls.notified, []);
-});
-
-/** Waiting jobs, all blocked at one time, and the band keys they make. */
-function manyWaiting(count: number): { jobs: Record<string, unknown>[]; keys: string[] } {
-  const jobs = Array.from({ length: count }, (_, index) => waitingJob("job-" + index, 1789999900));
-  return { jobs, keys: jobs.map((job) => "job:" + String(job.id) + ":blocked:1789999900") };
-}
-
-test("the dismissed keys are cut to the reading's limit, whichever lands first", async () => {
-  const { jobs, keys } = manyWaiting(250);
-  const drawn = async (limit: number, hiddenFirst: boolean): Promise<string> => {
-    const driven = stub({ memory: { [HIDDEN_KEY]: keys },
-                          stdout: JSON.stringify(bandReading(jobs, { state: "ready",
-                                                                     hiddenLimit: limit,
-                                                                     waitingJobSeconds: 86400 })),
-                          hiddenDelayTurns: hiddenFirst ? 0 : 150 });
-    await driven.start();
-    await drain(400);
-    return JSON.stringify(await driven.band(400));
-  };
-  for (const hiddenFirst of [true, false]) {
-    // A limit above two hundred keeps all 250: nothing waits on the band.
-    const kept = await drawn(300, hiddenFirst);
-    assert.equal(kept.includes("is waiting for you"), false, String(hiddenFirst));
-    // A limit of ten keeps the newest ten, so 240 wait: one leads, 239 are counted.
-    const cut = await drawn(10, hiddenFirst);
-    assert.equal(cut.includes("239 more waiting"), true, String(hiddenFirst) + cut.slice(0, 400));
-  }
-});
-
-test("a reading that carries no limit leaves the dismissed keys as they were", async () => {
-  const { jobs, keys } = manyWaiting(250);
-  const driven = stub({ memory: { [HIDDEN_KEY]: keys },
-                        stdout: JSON.stringify(bandReading(jobs)), hiddenDelayTurns: 150 });
-  await driven.start();
-  await drain(400);
-  const tree = JSON.stringify(await driven.band(400));
-  assert.equal(tree.includes("is waiting for you"), false, tree.slice(0, 400));
 });
 
 test("an older voice pick held at its write gives way to the newer pick queued behind it", async () => {
@@ -5350,36 +5684,6 @@ test("asking how speech stands while a line plays is not a pick, so the line's v
   assert.equal(after.text.startsWith("llm-fleet speaks as af_sky."), true, after.text);
 });
 
-test("a reading the paint finds after the keys were read keeps them within its limit", async () => {
-  // The band paints before the session starts, so it asks for the reading the
-  // last session left; the keys land first, then that reading, and the
-  // session's own look finds nothing newer to take.
-  const { jobs, keys } = manyWaiting(250);
-  const driven = stub({ held: false, memory: { [HIDDEN_KEY]: keys }, readingDelays: [20, 80],
-                        stored: { at: 1790000000,
-                                  documents: bandReading(jobs, { state: "ready", hiddenLimit: 10,
-                                                                 waitingJobSeconds: 86400 }) } });
-  await driven.band(400);
-  await driven.start();
-  await drain(200);
-  const tree = JSON.stringify(await driven.band(400));
-  assert.equal(tree.includes("239 more waiting"), true, tree.slice(0, 400));
-});
-
-test("a reading another session left cuts the dismissed keys to its limit as it is drawn", async () => {
-  const { jobs, keys } = manyWaiting(250);
-  const driven = stub({ held: false, memory: { [HIDDEN_KEY]: keys },
-                        stored: { at: 1790000000,
-                                  documents: bandReading(jobs, { state: "ready", hiddenLimit: 10,
-                                                                 waitingJobSeconds: 86400 }) } });
-  await driven.start();
-  await drain(200);
-  await driven.band(400);
-  await drain(200);
-  const tree = JSON.stringify(await driven.band(400));
-  assert.equal(tree.includes("239 more waiting"), true, tree.slice(0, 400));
-});
-
 test("an open pane is drawn every second so its ages count, and the clock stops when it closes", async () => {
   // Drawn only when a reading landed, the age sat still and then leapt: "4s
   // ago", then "27s ago", then "1s ago".
@@ -5503,74 +5807,6 @@ async function settles(): Promise<void> {
   }
 }
 
-test("a restored fold written at the tick never lands over another load's later press", async () => {
-  // Two loads of one session share the host's fold and the store. A's restore
-  // reads the last session's folds from the store before B presses, and lands
-  // after. Written late, it may add only what nobody pressed (skills), and must
-  // leave B's presses as B left them, in the store and in the held fold alike.
-  const session: Record<string, unknown> = {};
-  const memory: Record<string, unknown> = {
-    [FOLDS_KEY]: { worktrees: true, sessions: false, skills: true } };
-  let releaseStore: () => void = () => undefined;
-  const storeHeld = new Promise<void>((resolve) => { releaseStore = resolve; });
-  // A's own state writes go through until the case holds the one its tick makes.
-  let holding = false;
-  let let_go: () => void = () => undefined;
-  const gate = new Promise<void>((resolve) => { let_go = resolve; });
-  const first = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
-                       heldState: true,
-                       gateGetStale: (key) => (key === FOLDS_KEY ? storeHeld : undefined),
-                       gateState: (key) => (holding && key === "llm-fleet/folded" ? gate : undefined) });
-  await first.quiesce();
-  await first.press("fleet.section.worktrees");
-  await settles();
-  // A's restore asks the store now, and is answered with what it held then.
-  first.releaseState();
-  await settles();
-  const second = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory });
-  await second.quiesce();
-  await second.press("fleet.section.sessions");
-  await settles();
-  assert.equal((memory[FOLDS_KEY] as Record<string, boolean>).sessions, true);
-  releaseStore();
-  await first.quiesce();
-  await settles();
-  // The store keeps B's sessions and gains A's worktrees, rather than taking
-  // A's picture, which was read before B pressed.
-  assert.deepEqual(memory[FOLDS_KEY], { worktrees: false, sessions: true, skills: true });
-  // A's tick writes what its restore brought; the case holds that write while
-  // B presses again, so it is made at a version that has moved.
-  holding = true;
-  first.tick(AFTER_PAINT_MS);
-  await settles();
-  await second.render();
-  await second.press("fleet.section.sessions");
-  await settles();
-  const later = { ...(session["llm-fleet/folded"] as Record<string, boolean>) };
-  assert.equal(later.sessions, false);
-  assert.equal("skills" in later, false);
-  let_go();
-  await settles();
-  assert.deepEqual(session["llm-fleet/folded"], { ...later, skills: true });
-  // A wrote three times: its press, the tick's write refused at the moved
-  // version, and the one made after reading again.
-  assert.equal(first.calls.stateSets.filter((key) => key === "llm-fleet/folded").length, 3);
-  assert.deepEqual(first.calls.refusedInRender, []);
-  // B folds sessions once more, so A's picture of it, open, is out of date. A
-  // press from A now changes only the section it pressed, in the held fold and
-  // in the store.
-  await second.render();
-  await second.press("fleet.section.sessions");
-  await settles();
-  assert.equal((session["llm-fleet/folded"] as Record<string, boolean>).sessions, true);
-  holding = false;
-  await first.render();
-  await first.press("fleet.section.worktrees");
-  await settles();
-  assert.equal((session["llm-fleet/folded"] as Record<string, boolean>).sessions, true);
-  assert.equal((memory[FOLDS_KEY] as Record<string, boolean>).sessions, true);
-});
-
 test("one load's fold presses land in the order they were pressed", async () => {
   // The first press's write is held; the second is pressed meanwhile. Run side
   // by side, the first would be refused at the moved version, read again, and
@@ -5591,6 +5827,7 @@ test("one load's fold presses land in the order they were pressed", async () => 
   await driven.quiesce();
   await settles();
   await driven.press("fleet.section.sessions");
+  await settles();
   const first = driven.calls.stated.length;
   await driven.render();
   await driven.press("fleet.section.sessions");
@@ -5602,6 +5839,7 @@ test("one load's fold presses land in the order they were pressed", async () => 
   const drawn = renderedText(await driven.render() as never).join("\n");
   const open = drawn.includes("▾\nBackground sessions");
   assert.equal((session["llm-fleet/folded"] as Record<string, boolean>).sessions, !open);
+  // The held write lands, and the second press's after it.
   assert.equal(driven.calls.stated.length, first + 2);
 });
 
@@ -5622,118 +5860,17 @@ test("Collapse all writes every section it names, even one this load already dre
   await second.press("fleet.section.sessions");
   await settles();
   assert.equal((session["llm-fleet/folded"] as Record<string, boolean>).sessions, false);
-  assert.equal((memory[FOLDS_KEY] as Record<string, boolean>).sessions, false);
   await first.render();
   await first.press("fleet.all.collapse");
   await settles();
   assert.equal((session["llm-fleet/folded"] as Record<string, boolean>).sessions, true);
-  assert.equal((memory[FOLDS_KEY] as Record<string, boolean>).sessions, true);
-});
-
-test("the session's end waits for a fold write still out, and lets go after its bound", async () => {
-  const session: Record<string, unknown> = {};
-  let let_go: () => void = () => undefined;
-  const gate = new Promise<void>((resolve) => { let_go = resolve; });
-  let holding = false;
-  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session,
-                        gateState: (key) => (holding && key === "llm-fleet/folded" ? gate : undefined) });
-  await driven.start();
-  await driven.quiesce();
-  await settles();
-  holding = true;
-  await driven.press("fleet.section.sessions");
-  await settles();
-  let ended = false;
-  const end = driven.end().then(() => { ended = true; });
-  await settles();
-  // The write is held, so the end is too.
-  assert.equal(ended, false);
-  assert.equal(driven.calls.every.includes(END_WRITES_MS), true);
-  let_go();
-  await end;
-  assert.equal(ended, true);
-  assert.equal(typeof (session["llm-fleet/folded"] as Record<string, boolean>).sessions, "boolean");
-
-  // A write the host never answers holds the end only until the bound.
-  let never: () => void = () => undefined;
-  const stuck = new Promise<void>((resolve) => { never = resolve; });
-  const other = stub({ stored: { at: 1790000000, documents: OUTPUT }, session: {},
-                       gateState: (key) => (key === "llm-fleet/folded" ? stuck : undefined) });
-  await other.start();
-  await other.quiesce();
-  await settles();
-  await other.press("fleet.section.sessions");
-  let otherEnded = false;
-  const otherEnd = other.end().then(() => { otherEnded = true; });
-  await settles();
-  assert.equal(otherEnded, false);
-  other.tick(END_WRITES_MS);
-  await otherEnd;
-  assert.equal(otherEnded, true);
-  never();
-});
-
-test("the session's end waits for the writes a fold read lands during the wait", async () => {
-  // The fold read is still out when the end starts, and its answer brings a
-  // section back, which it writes once it lands: the end has to wait for a
-  // write that did not exist when it started.
-  // The session holds no fold, so the read goes on to the store, which the
-  // case holds.
-  const session: Record<string, unknown> = {};
-  const memory: Record<string, unknown> = { [FOLDS_KEY]: { sessions: true } };
-  let answer: () => void = () => undefined;
-  const asked = new Promise<void>((resolve) => { answer = resolve; });
-  let let_go: () => void = () => undefined;
-  const gate = new Promise<void>((resolve) => { let_go = resolve; });
-  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
-                        gateGet: (key) => (key === FOLDS_KEY ? asked : undefined),
-                        gateState: (key) => (key === "llm-fleet/folded" ? gate : undefined) });
-  await driven.start();
-  await settles();
-  let ended = false;
-  const end = driven.end().then(() => { ended = true; });
-  await settles();
-  assert.equal(ended, false);
-  answer();
-  await settles();
-  // The read landed and its write is held, so the end still waits.
-  assert.equal(ended, false);
-  assert.deepEqual(driven.calls.stateSets, []);
-  let_go();
-  await end;
-  assert.equal(ended, true);
-  assert.deepEqual(driven.calls.stateSets, ["llm-fleet/folded"]);
-  assert.equal((session["llm-fleet/folded"] as Record<string, boolean>).sessions, true);
-});
-
-test("a fold read that lands after the session ended is still written", async () => {
-  // The session's end drains what is queued; a read still out then queues its
-  // write after that drain, and nothing would ever run it.
-  // The session holds no fold, so the restore brings the last session's from the
-  // store, and only the restore's own write puts sessions in the held fold.
-  const session: Record<string, unknown> = {};
-  const memory: Record<string, unknown> = { [FOLDS_KEY]: { worktrees: true, sessions: true } };
-  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory,
-                        heldState: true });
-  await driven.start();
-  await driven.quiesce();
-  await driven.press("fleet.section.worktrees");
-  // The end waits for the read, but only as long as its bound: here the read
-  // outlasts it, so the end is over before the read lands.
-  const end = driven.end();
-  await settles();
-  driven.tick(END_WRITES_MS);
-  await within(end, "the end outlasted its bound");
-  driven.releaseState();
-  await settles();
-  assert.deepEqual(session["llm-fleet/folded"], { worktrees: false, sessions: true });
-  assert.deepEqual(driven.calls.refusedInRender, []);
-  assert.equal(driven.calls.stateSets.filter((key) => key === "llm-fleet/folded").length, 2);
+  // Neither load wrote a fold where another session reads.
+  assert.equal("folds" in memory, false);
 });
 
 test("a press made before the restored fold is written is not undone when it is", async () => {
-  // The restore read for a paint, so its write waits for the tick; a press in
-  // between wrote itself, and the tick must write the fold as it stands then.
+  // A press made while the host's answer was out, and one made after it: each
+  // writes the presses as they stand then, so the reload finds both.
   const session: Record<string, unknown> = {
     "llm-fleet/folded": { worktrees: true, sessions: true } };
   const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, heldState: true });
@@ -5741,9 +5878,8 @@ test("a press made before the restored fold is written is not undone when it is"
   await driven.press("fleet.section.worktrees");
   driven.releaseState();
   await driven.quiesce();
-  // Sessions was folded by the host; the person opens it before the tick.
+  // Sessions was folded by the host; the person opens it.
   await driven.press("fleet.section.sessions");
-  driven.tick(AFTER_PAINT_MS);
   await settles();
   driven.reload();
   const reloaded = renderedText(await driven.quiesce() as never).join("\n");
@@ -5751,3 +5887,528 @@ test("a press made before the restored fold is written is not undone when it is"
   assert.equal(reloaded.includes("▾\nWorktrees"), true, reloaded);
 });
 
+
+// Who owns a fold: the invariants docs/pane-design.md names. The configuration
+// is the only fold that lasts, a press lives in the host's state for this
+// session, a view lives in the load's memory, and nothing reaches the store.
+
+/** The store keys an older build kept folds under: neither read nor written now. */
+const OLD_FOLD_KEYS = ["folds", "folds-written"];
+
+/** A reading that switches Worktrees off, folds Keys, and leaves Sessions open. */
+const SWITCHED = { ...OUTPUT, pane: { state: "ready", order: ["sessions", "worktrees", "keys"],
+  sections: { sessions: { visible: true, collapsed: false, off: false },
+              worktrees: { visible: true, collapsed: false, off: true },
+              keys: { visible: true, collapsed: true, off: false } } } };
+
+/** Records every read of the host's values from here on, by key. */
+function stateReads(driven: Stub): string[] {
+  const reads: string[] = [];
+  const get = driven.engine.state.get;
+  driven.engine.state.get = (async (ref: { plugin: string; key: string }) => {
+    reads.push(ref.key);
+    return get(ref as never);
+  }) as typeof get;
+  return reads;
+}
+
+/** Whether a drawing folds a heading: true folded, false open, undefined not drawn. */
+function headingFold(text: string, title: string): boolean | undefined {
+  if (text.includes("▸\n" + title)) {
+    return true;
+  }
+  return text.includes("▾\n" + title) ? false : undefined;
+}
+
+/** Whether the picker draws a section's name dim, or undefined when it does not list it. */
+function pickerDim(tree: unknown, name: string): boolean | undefined {
+  const button = buttonAddressing(tree, "fleet.hide." + name) as { dimColor?: unknown } | null;
+  return button === null ? undefined : button.dimColor === true;
+}
+
+test("no press, view or paint writes a fold to the store, and none is read from it", async () => {
+  const memory: Record<string, unknown> = {};
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, memory, session });
+  await driven.start();
+  await drain();
+  await driven.run();
+  await driven.quiesce();
+  // Every press that folds or switches.
+  await driven.press("fleet.section.sessions");
+  await driven.press("fleet.all.collapse");
+  await driven.press("fleet.all.expand");
+  await driven.quiesce();
+  await driven.press("fleet.hide.pacer");
+  await driven.quiesce();
+  await driven.press("fleet.hide.pacer");
+  await driven.quiesce();
+  // Every view: a figure in the pane, Show all, a one-section command and its
+  // second press, another section, and a figure on the band.
+  await driven.press("fleet.focus.working");
+  await driven.quiesce();
+  await driven.press("fleet.focus.clear");
+  await driven.command("worktrees");
+  await driven.quiesce();
+  await driven.command("worktrees");
+  await driven.command("keys");
+  await driven.quiesce();
+  await driven.band();
+  await driven.pressBand("fleet.band.focus.working");
+  await driven.quiesce();
+  // Escape, a prompt and the session's end are where an older build wrote late.
+  await driven.hostClosed();
+  await driven.prompt("anything");
+  await drain();
+  await driven.end();
+  await drain();
+  assert.deepEqual(driven.calls.written.map((entry) => entry.key)
+                     .filter((key) => OLD_FOLD_KEYS.includes(key)), []);
+  assert.deepEqual(driven.calls.gets.filter((key) => OLD_FOLD_KEYS.includes(key)), []);
+  for (const key of OLD_FOLD_KEYS) {
+    assert.equal(key in memory, false, key);
+  }
+  // The presses are held where a reload finds them, written from the press and
+  // never from a paint, which the host refuses.
+  assert.deepEqual(driven.calls.refusedInRender, []);
+  assert.equal(typeof session["llm-fleet/folded"], "object");
+  assert.deepEqual(session["llm-fleet/hidden"], { pacer: false });
+});
+
+test("a new session draws the configuration exactly, over a store an older build filled", async () => {
+  const carried = { at: 1790000000, documents: OUTPUT };
+  // What an older build left: every fold opposite to the configuration's, and its marks.
+  const left = { folds: { session: true, pacer: true, prs: true, sessions: true,
+                          worktrees: false, skills: false, keys: false },
+                 "folds-written": { sessions: "gone#1", worktrees: "gone#2" } };
+  const memory: Record<string, unknown> = structuredClone(left);
+  const driven = stub({ stored: carried, session: {}, memory });
+  await driven.start();
+  await drain();
+  const over = await drawnText(driven);
+  const clean = stub({ stored: carried, session: {}, memory: {} });
+  await clean.start();
+  await drain();
+  assert.equal(over, await drawnText(clean));
+  // The configuration's folds by name: the packaged default opens the sessions
+  // and folds the worktrees, the opposite of what the store holds.
+  assert.equal(headingFold(over, "Background sessions"), false);
+  assert.equal(headingFold(over, "Worktrees"), true);
+  // Neither read nor written: the old keys stand exactly as they were left.
+  assert.deepEqual(driven.calls.gets.filter((key) => OLD_FOLD_KEYS.includes(key)), []);
+  assert.deepEqual({ folds: memory.folds, "folds-written": memory["folds-written"] }, left);
+});
+
+test("a press in one session changes nothing in the next", async () => {
+  const carried = { at: 1790000000, documents: OUTPUT };
+  // One store, as every session on the machine shares it; a host of its own each.
+  const memory: Record<string, unknown> = {};
+  const first = stub({ stored: carried, session: {}, memory });
+  await first.start();
+  await drain();
+  const configured = await drawnText(first);
+  await first.press("fleet.section.sessions");
+  await first.press("fleet.section.worktrees");
+  await first.press("fleet.hide.pacer");
+  // A section that leaves slides out first, so the clock moves past the slide.
+  await first.quiesce();
+  first.advance(1);
+  const pressed = await drawnText(first);
+  assert.notEqual(pressed, configured);
+  assert.equal(headingFold(pressed, "Background sessions"), true);
+  assert.equal(headingFold(pressed, "Pacer"), undefined);
+  await first.end();
+  await drain();
+  const second = stub({ stored: carried, session: {}, memory });
+  await second.start();
+  await drain();
+  assert.equal(await drawnText(second), configured);
+});
+
+test("a reload draws this session's presses, the folds and the switches", async () => {
+  const session: Record<string, unknown> = {};
+  const memory: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory });
+  await driven.start();
+  await drain();
+  await driven.quiesce();
+  await driven.press("fleet.section.sessions");
+  await driven.press("fleet.section.worktrees");
+  await driven.press("fleet.hide.pacer");
+  // A section that leaves slides out first, so the clock moves past the slide.
+  await driven.quiesce();
+  driven.advance(1);
+  const before = await drawnText(driven);
+  assert.equal(headingFold(before, "Background sessions"), true);
+  assert.equal(headingFold(before, "Worktrees"), false);
+  assert.equal(headingFold(before, "Pacer"), undefined);
+  // Presses only: a section nobody pressed is not in what the host holds.
+  assert.deepEqual(session["llm-fleet/folded"], { sessions: true, worktrees: false });
+  assert.deepEqual(session["llm-fleet/hidden"], { pacer: true });
+  // A reload evaluates the plugin again over the same host, and reads the
+  // presses back from it and from nowhere else.
+  driven.reload();
+  // The switch lands after the first paint, and the section it switches off
+  // slides out, so the clock moves past the slide; the reading's age is the
+  // one line the clock changes.
+  await driven.quiesce();
+  driven.advance(1);
+  const undated = (text: string): string => text.replace(/Updated \d+s ago/, "Updated");
+  assert.equal(undated(await drawnText(driven)), undated(before));
+  assert.deepEqual(driven.calls.gets.filter((key) => OLD_FOLD_KEYS.includes(key)), []);
+  assert.deepEqual(driven.calls.refusedInRender, []);
+});
+
+test("ending a view draws what was drawn before it, and reads nothing", async () => {
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: OUTPUT }, session, memory: {} });
+  await driven.start();
+  await drain();
+  await driven.run();
+  await driven.quiesce();
+  // A layout of the person's own: one section folded and one opened.
+  await driven.press("fleet.section.pacer");
+  await driven.press("fleet.section.skills");
+  const before = await drawnText(driven);
+  assert.equal(headingFold(before, "Pacer"), true);
+  assert.equal(headingFold(before, "Skills"), false);
+  assert.equal(headingFold(before, "Worktrees"), true);
+  const reads = stateReads(driven);
+  const gets = driven.calls.gets.length;
+  const held = structuredClone(session);
+
+  // The second press of the same one-section command.
+  await driven.command("worktrees");
+  const viewed = await drawnText(driven);
+  assert.equal(headingFold(viewed, "Worktrees"), false);
+  assert.equal(headingFold(viewed, "Skills"), true);
+  assert.equal(headingFold(viewed, "Background sessions"), true);
+  const closed = await driven.command("worktrees") as { text: string };
+  assert.equal(closed.text, `llm-fleet pane closed (${MARK}).`);
+  assert.equal(await drawnText(driven), before);
+  // The view wrote nothing the host holds, so there was nothing to put back.
+  assert.deepEqual(session, held);
+
+  // Show all, after a figure narrowed the pane, and the same figure pressed twice.
+  await driven.press("fleet.focus.working");
+  assert.equal((await drawnText(driven)).includes("Showing 1 working row."), true);
+  await driven.press("fleet.focus.clear");
+  assert.equal(await drawnText(driven), before);
+  await driven.press("fleet.focus.working");
+  await driven.quiesce();
+  await driven.press("fleet.focus.working");
+  assert.equal(await drawnText(driven), before);
+  assert.deepEqual(session, held);
+
+  // A fold press on a heading: the view ends, and the pressed heading flips
+  // from what the view drew. Worktrees was open in the view and folded before
+  // it, so folding it draws the pane as it stood.
+  await driven.command("worktrees");
+  await driven.quiesce();
+  await driven.press("fleet.section.worktrees");
+  assert.equal(await drawnText(driven), before);
+
+  // Nothing was read to get back: not the host's values, not the store's folds.
+  assert.deepEqual(reads, []);
+  assert.deepEqual(driven.calls.gets.slice(gets).filter((key) => OLD_FOLD_KEYS.includes(key)), []);
+});
+
+test("a band open that lands after Escape changes nothing", async () => {
+  const two = { ...OUTPUT, roster: { ...OUTPUT.roster,
+    jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" },
+           { ...OUTPUT.roster.jobs[0], id: "job-2", name: "Waiting one",
+             state: "blocked", label: "Waiting for you" }] } };
+  for (const outcome of ["placed", "not placed", "refused"]) {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let armed = false;
+    let refusing = false;
+    const options = { stdout: JSON.stringify(two), placed: true,
+                      gateOpen: () => {
+                        if (!armed) {
+                          return undefined;
+                        }
+                        armed = false;
+                        return held;
+                      },
+                      openRejects: () => refusing };
+    const driven = stub(options);
+    await driven.start();
+    await driven.settle();
+    await driven.run();
+    await driven.render();
+    // The person's own narrowing, pressed in the pane.
+    await driven.press("fleet.focus.failed");
+    await driven.band();
+    armed = true;
+    const pressed = driven.pressBand("fleet.band.focus.waiting");
+    // Escape while the host has not yet answered the open the figure asked for.
+    await driven.hostClosed();
+    const atEscape = renderedText(await driven.render() as never).join("\n");
+    options.placed = outcome === "placed";
+    refusing = outcome === "refused";
+    release();
+    await pressed;
+    await drain();
+    assert.equal(renderedText(await driven.render() as never).join("\n"), atEscape, outcome);
+    // The pane is as Escape left it, shut: the next /llm-fleet opens it.
+    options.placed = true;
+    refusing = false;
+    const answer = await driven.run() as { text: string };
+    assert.equal(answer.text, `llm-fleet pane opened (${MARK}).`, outcome);
+  }
+});
+
+test("a section switched off is not drawn, is dim in the picker, and one press draws it", async () => {
+  const carried = { at: 1790000000, documents: SWITCHED };
+  const session: Record<string, unknown> = {};
+  const memory: Record<string, unknown> = {};
+  const driven = stub({ stored: carried, session, memory });
+  await driven.start();
+  await drain();
+  let tree = await driven.quiesce();
+  let text = renderedText(tree as never).join("\n");
+  // Off in the configuration: no card, and a dim name that is the way to it.
+  assert.equal(headingFold(text, "Worktrees"), undefined);
+  assert.equal(pickerDim(tree, "worktrees"), true);
+  assert.equal(pickerDim(tree, "sessions"), false);
+  assert.equal(headingFold(text, "Background sessions"), false);
+  // One press switches it on for this session, at the fold the configuration gives it.
+  await driven.press("fleet.hide.worktrees");
+  tree = await driven.quiesce();
+  text = renderedText(tree as never).join("\n");
+  assert.equal(headingFold(text, "Worktrees"), false);
+  assert.equal(pickerDim(tree, "worktrees"), false);
+  assert.deepEqual(session["llm-fleet/hidden"], { worktrees: false });
+  // The press is this session's, so a reload still draws the section.
+  driven.reload();
+  tree = await driven.quiesce();
+  assert.equal(headingFold(renderedText(tree as never).join("\n"), "Worktrees"), false);
+  // A second press switches it off again.
+  await driven.press("fleet.hide.worktrees");
+  tree = await driven.quiesce();
+  assert.equal(headingFold(renderedText(tree as never).join("\n"), "Worktrees"), undefined);
+  assert.equal(pickerDim(tree, "worktrees"), true);
+  assert.deepEqual(session["llm-fleet/hidden"], { worktrees: true });
+  await driven.press("fleet.hide.worktrees");
+  await driven.quiesce();
+  assert.deepEqual(session["llm-fleet/hidden"], { worktrees: false });
+  // A new session knows nothing of the press: the configuration's switch stands.
+  const next = stub({ stored: carried, session: {}, memory });
+  await next.start();
+  await drain();
+  tree = await next.quiesce();
+  assert.equal(headingFold(renderedText(tree as never).join("\n"), "Worktrees"), undefined);
+  assert.equal(pickerDim(tree, "worktrees"), true);
+  assert.deepEqual(driven.calls.written.map((entry) => entry.key)
+                     .filter((key) => OLD_FOLD_KEYS.includes(key)), []);
+});
+
+test("a one-section command draws a section that is switched off, and leaves the switch alone", async () => {
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: SWITCHED }, session, memory: {} });
+  await driven.start();
+  await drain();
+  const before = await drawnText(driven);
+  assert.equal(headingFold(before, "Worktrees"), undefined);
+  const answer = await driven.command("worktrees") as { text: string };
+  assert.equal(answer.text, `llm-fleet pane opened on Worktrees (${MARK}).`);
+  const tree = await driven.quiesce();
+  const viewed = renderedText(tree as never).join("\n");
+  assert.equal(headingFold(viewed, "Worktrees"), false);
+  assert.equal(headingFold(viewed, "Background sessions"), true);
+  // Still off: the view drew it, and no switch moved.
+  assert.equal(pickerDim(tree, "worktrees"), true);
+  assert.deepEqual(session, {});
+  await driven.command("worktrees");
+  assert.equal(await drawnText(driven), before);
+  assert.deepEqual(session, {});
+});
+
+test("a heading press flips the fold the pane drew, whatever drew it", async () => {
+  // Opened on a failure: the section holding it is open though the
+  // configuration folds it, and the calm ones stand where the configuration
+  // puts them, Pacer open and Keys folded. A press flips what the person sees,
+  // so the open sessions fold and the folded Keys open.
+  const failing = { ...OUTPUT,
+    roster: { ...OUTPUT.roster,
+              jobs: [{ ...OUTPUT.roster.jobs[0], state: "failed", label: "Failed" }] },
+    pane: { state: "ready", order: ["sessions", "pacer", "keys"],
+            sections: { sessions: { visible: true, collapsed: true, off: false },
+                        pacer: { visible: true, collapsed: false, off: false },
+                        keys: { visible: true, collapsed: true, off: false } } } };
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: failing }, session, memory: {} });
+  await driven.start();
+  await drain();
+  await driven.run();
+  const opened = await drawnText(driven);
+  assert.equal(headingFold(opened, "Background sessions"), false, opened);
+  assert.equal(headingFold(opened, "Pacer"), false, opened);
+  assert.equal(headingFold(opened, "Keys"), true, opened);
+  await driven.press("fleet.section.sessions");
+  assert.equal(headingFold(await drawnText(driven), "Background sessions"), true);
+  await driven.press("fleet.section.keys");
+  const after = await drawnText(driven);
+  assert.equal(headingFold(after, "Background sessions"), true);
+  assert.equal(headingFold(after, "Keys"), false);
+  assert.equal(headingFold(after, "Pacer"), false);
+  assert.deepEqual(session["llm-fleet/folded"], { sessions: true, keys: false });
+});
+
+/**
+ * A configuration with one section switched off and one that is empty and set
+ * to hide while empty, so neither is drawn until somebody asks for it.
+ */
+const SPARSE = { ...OUTPUT,
+  roster: { ...OUTPUT.roster, interactive: {} },
+  pane: { state: "ready", order: ["sessions", "worktrees", "warnings", "keys"],
+          sections: { sessions: { visible: true, collapsed: false, off: false },
+                      worktrees: { visible: true, collapsed: false, off: true },
+                      warnings: { visible: true, collapsed: false, off: false,
+                                  hideWhenEmpty: true },
+                      keys: { visible: true, collapsed: true, off: false } } } };
+
+test("Collapse all and Expand all record one press per section the pane drew", async () => {
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: SPARSE }, session, memory: {} });
+  await driven.start();
+  await drain();
+  const text = await drawnText(driven);
+  assert.equal(headingFold(text, "Worktrees"), undefined, text);
+  assert.equal(headingFold(text, "Warnings"), undefined, text);
+  // Neither card was drawn, so neither gets a press nobody made on it.
+  await driven.press("fleet.all.collapse");
+  await driven.quiesce();
+  assert.deepEqual(session["llm-fleet/folded"], { sessions: true, keys: true });
+  // A one-section view draws the switched-off Worktrees, so Expand all speaks
+  // for that card too.
+  await driven.command("worktrees");
+  const viewed = await drawnText(driven);
+  assert.equal(headingFold(viewed, "Worktrees"), false, viewed);
+  await driven.press("fleet.all.expand");
+  await driven.quiesce();
+  assert.deepEqual(session["llm-fleet/folded"],
+                   { sessions: false, worktrees: false, keys: false });
+
+  // Under a filter only the sections holding its rows are drawn, and only they
+  // are pressed.
+  const narrowed: Record<string, unknown> = {};
+  const filtered = stub({ stored: { at: 1790000000, documents: SPARSE }, session: narrowed,
+                          memory: {} });
+  await filtered.start();
+  await drain();
+  await filtered.quiesce();
+  await filtered.press("fleet.focus.working");
+  await filtered.quiesce();
+  filtered.advance(1);
+  const working = await drawnText(filtered);
+  assert.equal(working.includes("Showing 1 working row."), true, working);
+  assert.equal(headingFold(working, "Keys"), undefined, working);
+  await filtered.press("fleet.all.collapse");
+  await filtered.quiesce();
+  assert.deepEqual(narrowed["llm-fleet/folded"], { sessions: true });
+});
+
+test("a band press made after the person moved on does not bring back an older press's open", async () => {
+  // Waiting is pressed on the band and its open is held. Escape, then the
+  // person opens the pane by command and shows it whole, then presses Failed
+  // on the band. The older open lands, and the newer one is refused: the
+  // refusal returns to the whole pane that stood before it, never to the
+  // filter of a press the person had already moved on from.
+  const both = { ...OUTPUT, roster: { ...OUTPUT.roster, jobs: [
+    { ...OUTPUT.roster.jobs[0], state: "blocked", label: "Waiting for you" },
+    { ...OUTPUT.roster.jobs[0], id: "failed-1", state: "failed", label: "Failed" },
+  ] } };
+  let releaseOlder: () => void = () => {};
+  let releaseNewer: () => void = () => {};
+  const older = new Promise<void>((resolve) => { releaseOlder = resolve; });
+  const newer = new Promise<void>((resolve) => { releaseNewer = resolve; });
+  let gate: Promise<void> | undefined;
+  let refusing = false;
+  // What the host says is open, which the band asks on every paint.
+  const panes: { id: string }[] = [];
+  const driven = stub({ stdout: JSON.stringify(both), panes,
+                        gateOpen: () => {
+                          const held = gate;
+                          gate = undefined;
+                          return held;
+                        },
+                        openRejects: () => refusing });
+  await driven.start();
+  await driven.settle();
+  await driven.render();
+  await driven.band();
+  gate = older;
+  const waiting = driven.pressBand("fleet.band.focus.waiting");
+  await driven.hostClosed();
+  // The person's newer word: the pane opened by command, and shown whole.
+  const reopened = await driven.run() as { text: string };
+  assert.equal(reopened.text, `llm-fleet pane opened (${MARK}).`);
+  panes.push({ id: PANE });
+  await driven.render();
+  await driven.press("fleet.focus.clear");
+  const whole = renderedText(await driven.render() as never).join("\n");
+  assert.equal(whole.includes("Showing 1 waiting row."), false, whole);
+  await driven.band();
+  gate = newer;
+  const failing = driven.pressBand("fleet.band.focus.failed");
+  // The older open lands, placed, while the newer one is still held.
+  releaseOlder();
+  await waiting;
+  await drain();
+  refusing = true;
+  releaseNewer();
+  await failing;
+  await drain();
+  const text = renderedText(await driven.render() as never).join("\n");
+  assert.equal(text.includes("Showing 1 waiting row."), false, text);
+  assert.equal(text.includes("Showing 1 failed row."), false, text);
+  assert.equal(text, whole);
+  // And the pane the command opened is still the open one: the next
+  // /llm-fleet closes it.
+  refusing = false;
+  const next = await driven.run() as { text: string };
+  assert.equal(next.text, `llm-fleet pane closed (${MARK}).`);
+});
+
+test("one press on a dim name draws its card, even an empty one set to hide while empty", async () => {
+  const off = { ...SPARSE, pane: { ...SPARSE.pane, sections: { ...SPARSE.pane.sections,
+    warnings: { visible: true, collapsed: false, off: true, hideWhenEmpty: true } } } };
+  // The section is empty: switched on by the configuration it still draws no card.
+  const plain = stub({ stored: { at: 1790000000, documents: SPARSE }, session: {}, memory: {} });
+  await plain.start();
+  await drain();
+  assert.equal(headingFold(await drawnText(plain), "Warnings"), undefined);
+
+  const session: Record<string, unknown> = {};
+  const driven = stub({ stored: { at: 1790000000, documents: off }, session, memory: {} });
+  await driven.start();
+  await drain();
+  let tree = await driven.quiesce();
+  assert.equal(headingFold(renderedText(tree as never).join("\n"), "Warnings"), undefined);
+  assert.equal(pickerDim(tree, "warnings"), true);
+  // The press is the person asking for the card, so it is drawn with nothing in it.
+  await driven.press("fleet.hide.warnings");
+  tree = await driven.quiesce();
+  let text = renderedText(tree as never).join("\n");
+  assert.equal(headingFold(text, "Warnings"), false, text);
+  assert.equal(pickerDim(tree, "warnings"), false);
+  assert.deepEqual(session["llm-fleet/hidden"], { warnings: false });
+  // A standing filter still narrows what is drawn.
+  await driven.press("fleet.focus.working");
+  await driven.quiesce();
+  driven.advance(1);
+  text = await drawnText(driven);
+  assert.equal(text.includes("Showing 1 working row."), true, text);
+  assert.equal(headingFold(text, "Warnings"), undefined, text);
+  await driven.press("fleet.focus.clear");
+  assert.equal(headingFold(await drawnText(driven), "Warnings"), false);
+  // The second press switches it off again.
+  await driven.press("fleet.hide.warnings");
+  await driven.quiesce();
+  driven.advance(1);
+  tree = await driven.quiesce();
+  assert.equal(headingFold(renderedText(tree as never).join("\n"), "Warnings"), undefined);
+  assert.equal(pickerDim(tree, "warnings"), true);
+});

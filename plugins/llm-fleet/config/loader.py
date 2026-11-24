@@ -18,8 +18,11 @@ from __future__ import annotations
 
 from functools import lru_cache
 import json
+import math
+import ntpath
 import os
 from pathlib import Path
+import posixpath
 import re
 import sys
 import tempfile
@@ -70,9 +73,16 @@ class ConfigError(ValueError):
         super().__init__("configuration refused: " + detail)
 
 
-def error(code: str, path: str) -> dict[str, str]:
-    """Build one refusal entry."""
-    return {"code": code, "path": path}
+def error(code: str, path: str, detail: str | None = None) -> dict[str, str]:
+    """Build one refusal entry.
+
+    `detail` names which of a code's causes this failure was, where the code
+    stands for more than one: a malformed file can be bytes that are not UTF-8
+    or text that is not JSON, and the two call for different repairs.
+    """
+    if detail is None:
+        return {"code": code, "path": path}
+    return {"code": code, "path": path, "detail": detail}
 
 
 def schema_path() -> Path:
@@ -80,19 +90,108 @@ def schema_path() -> Path:
     return Path(__file__).resolve().parent / SCHEMA_NAME
 
 
+def _path_module(platform: str) -> Any:
+    """The path rules of the platform a value is read for."""
+    return ntpath if platform.startswith("win") else posixpath
+
+
+def is_absolute_path(value: str, platform: str | None = None) -> bool:
+    """Whether a path is absolute, by the one rule both loaders implement.
+
+    Python 3.13 changed `ntpath.isabs` so a rooted path with no drive, such as
+    `/fleet/config.json`, no longer counts. The loader states the rule itself so
+    the answer does not move with the interpreter: a path that begins with a
+    separator, or a drive with its root, is absolute; a drive-relative path such
+    as `D:state` is not.
+    """
+    system = sys.platform if platform is None else platform
+    if not system.startswith("win"):
+        return posixpath.isabs(value)
+    if value[:1] in ("\\", "/"):
+        return True
+    drive, rest = ntpath.splitdrive(value)
+    if drive:
+        return rest[:1] in ("\\", "/")
+    return False
+
+
+def normalize_path(value: str, platform: str | None = None) -> str:
+    """Fold a path the way the platform's own module does, both loaders alike."""
+    system = sys.platform if platform is None else platform
+    return _path_module(system).normpath(value)
+
+
+def join_path(base: str, value: str, platform: str | None = None) -> str:
+    """Join and fold a relative value, matching Python's path module on both."""
+    system = sys.platform if platform is None else platform
+    module = _path_module(system)
+    return module.normpath(module.join(base, value))
+
+
+def _integer_valued(value: Any) -> bool:
+    """Whether a JSON number holds no fractional part, finite or not."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return True if isinstance(value, int) else value.is_integer()
+
+
+def _key_forbidden(value: str, schema: dict[str, Any]) -> bool:
+    """Whether a key binding carries a character the schema refuses."""
+    for character in value:
+        code = ord(character)
+        for start, end in schema["keyForbiddenRanges"]:
+            if start <= code <= end:
+                return True
+    return False
+
+
 @lru_cache(maxsize=4)
 def load_schema(path: str = "") -> dict[str, Any]:
     """Read the schema. A broken schema is a packaging defect, not user error."""
     location = Path(path) if path else schema_path()
     try:
-        data = json.loads(location.read_text(encoding="utf-8"))
+        data = json.loads(location.read_text(encoding="utf-8-sig"))
     except OSError as caught:
         raise ConfigError([error(CODE_UNREADABLE, "schema")]) from caught
+    except UnicodeDecodeError as caught:
+        raise ConfigError([error(CODE_MALFORMED, "schema")]) from caught
     except json.JSONDecodeError as caught:
         raise ConfigError([error(CODE_MALFORMED, "schema")]) from caught
     if not isinstance(data, dict):
         raise ConfigError([error(CODE_ROOT_TYPE, "schema")])
     return data
+
+
+class _NonJsonConstant(ValueError):
+    """A JSON document carried NaN or Infinity, which JSON does not have."""
+
+
+def _reject_constant(name: str) -> Any:
+    raise _NonJsonConstant(name)
+
+
+def _parse_int(text: str) -> Any:
+    """An integer literal, or the float it overflows to past the digit limit.
+
+    Python refuses to convert an integer literal longer than its configured
+    digit limit, which the TypeScript parser reads as an infinity. Reading the
+    same literal as the infinity it overflows to lets the validator refuse both
+    the same way, at the field, instead of raising out of the parse.
+    """
+    try:
+        return int(text)
+    except ValueError:
+        return float(text)
+
+
+def _document_json(text: str) -> Any:
+    """Parse a document as strict JSON.
+
+    Python's parser accepts the JavaScript constants NaN and Infinity, which no
+    JSON document may carry and which the TypeScript parser refuses. Reading
+    one here would let a document resolve in one language and fail in the other.
+    """
+    return json.loads(text, parse_constant=_reject_constant, parse_int=_parse_int)
 
 
 def filesystem_probe(path: str) -> str:
@@ -107,9 +206,24 @@ def filesystem_probe(path: str) -> str:
     return "missing"
 
 
-def _environment(environ: dict[str, str] | None) -> dict[str, str]:
+def _environment(environ: dict[str, str] | None,
+                 schema: dict[str, Any]) -> dict[str, str]:
     source = os.environ if environ is None else environ
-    return {key: value for key, value in source.items() if isinstance(value, str)}
+    resolved = {key: value for key, value in source.items() if isinstance(value, str)}
+    for name, alias in schema["environment"].get("aliases", {}).items():
+        if not resolved.get(name) and resolved.get(alias):
+            resolved[name] = resolved[alias]
+    return resolved
+
+
+def resolved_environment(environ: dict[str, str] | None = None,
+                         schema: dict[str, Any] | None = None) -> dict[str, str]:
+    """The environment a load reads: every absent variable taken from its alias.
+
+    A caller that reports on a machine rather than reading a document, such as
+    the doctor, asks for this so its view of `HOME` is the one the loader used.
+    """
+    return _environment(environ, load_schema("") if schema is None else schema)
 
 
 def _expand(value: str, environ: dict[str, str],
@@ -144,11 +258,11 @@ def _resolve_path(value: str, config_directory: str | None, environ: dict[str, s
         return None, failure or CODE_VALUE
     if not expanded:
         return None, CODE_VALUE
-    if os.path.isabs(expanded):
-        return os.path.normpath(expanded), None
+    if is_absolute_path(expanded):
+        return normalize_path(expanded), None
     if config_directory is None:
         return None, CODE_VALUE
-    return os.path.normpath(os.path.join(config_directory, expanded)), None
+    return join_path(config_directory, expanded), None
 
 
 class _Context:
@@ -178,13 +292,25 @@ def _default_value(field: dict[str, Any], context: _Context) -> tuple[Any, str |
         return None, CODE_UNRESOLVED_VAR
     if isinstance(default, dict) and "resolvedBy" in default:
         if default["resolvedBy"] == "systemTemp":
-            return os.path.normpath(tempfile.gettempdir()), None
+            return normalize_path(tempfile.gettempdir()), None
         if default["resolvedBy"] == "underStateDir":
             if context.state_dir is None:
                 return SKIP, None
-            return os.path.normpath(os.path.join(context.state_dir, default["relative"])), None
+            return join_path(context.state_dir, default["relative"]), None
         return None, CODE_VALUE
     return default, None
+
+
+def _carried_default(field: dict[str, Any]) -> bool:
+    """Whether a default is a path this loader already computed for the machine.
+
+    Such a value is environment data, not document text: expanding it a second
+    time would read a `$` inside a profile path as the start of a variable and
+    refuse the default the schema declares.
+    """
+    default = field.get("default")
+    return field.get("type") == "path" \
+        and isinstance(default, dict) and "resolvedBy" in default
 
 
 def _scalar(field: dict[str, Any], value: Any, context: _Context, path: str,
@@ -201,9 +327,24 @@ def _scalar(field: dict[str, Any], value: Any, context: _Context, path: str,
             return INVALID
         return value
     if kind == "integer":
-        if isinstance(value, bool) or not isinstance(value, int):
+        # JSON Schema counts a number with no fractional part as an integer,
+        # and the TypeScript parser cannot tell 1.0 from 1 after parsing. Read
+        # the two the same way here, and refuse a real fraction.
+        if isinstance(value, float) and not math.isfinite(value):
+            errors.append(error(CODE_VALUE, path))
+            return INVALID
+        integral = _integral(value)
+        if integral is None:
             errors.append(error(CODE_TYPE, path))
             return INVALID
+        # An integer both parsers cannot carry exactly is refused rather than
+        # rounded: the TypeScript parser has already lost the literal's last
+        # digits, so accepting it would resolve a number the document never
+        # wrote. The bound is declared once, in the schema.
+        if abs(integral) > context.schema["numberLimits"]["safeInteger"]:
+            errors.append(error(CODE_VALUE, path))
+            return INVALID
+        value = integral
         if "minimum" in field and value < field["minimum"]:
             errors.append(error(CODE_VALUE, path))
             return INVALID
@@ -217,6 +358,13 @@ def _scalar(field: dict[str, Any], value: Any, context: _Context, path: str,
     if kind == "number":
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             errors.append(error(CODE_TYPE, path))
+            return INVALID
+        if isinstance(value, float) and not math.isfinite(value):
+            errors.append(error(CODE_VALUE, path))
+            return INVALID
+        if _integer_valued(value) \
+                and abs(value) > context.schema["numberLimits"]["safeInteger"]:
+            errors.append(error(CODE_VALUE, path))
             return INVALID
         if "minimum" in field and value < field["minimum"]:
             errors.append(error(CODE_VALUE, path))
@@ -240,7 +388,10 @@ def _scalar(field: dict[str, Any], value: Any, context: _Context, path: str,
         if not isinstance(value, str):
             errors.append(error(CODE_TYPE, path))
             return INVALID
-        if not value or any(character.isspace() for character in value):
+        # One keystroke: a character the schema refuses cannot be bound, and the
+        # same ranges apply in both loaders so neither accepts a binding the
+        # other drops.
+        if not value or _key_forbidden(value, context.schema):
             errors.append(error(CODE_VALUE, path))
             return INVALID
         return value
@@ -273,6 +424,21 @@ def _scalar(field: dict[str, Any], value: Any, context: _Context, path: str,
     return INVALID
 
 
+def _integral(value: Any) -> int | None:
+    """A JSON number with no fractional part, as the TypeScript parser reads it.
+
+    JSON Schema counts 1.0 as an integer, and after parsing the TypeScript
+    loader cannot tell 1.0 from 1 at all. Every place this loader reads an
+    integer reads it here, so a document one loader accepts is accepted by the
+    other. Found by review, 2026-11-23.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    return value
+
+
 def _array(field: dict[str, Any], value: Any, context: _Context, path: str,
            errors: list[dict[str, str]]) -> Any:
     kind = field["type"]
@@ -283,11 +449,14 @@ def _array(field: dict[str, Any], value: Any, context: _Context, path: str,
         if len(value) != 3:
             errors.append(error(CODE_VALUE, path))
             return INVALID
+        triple: list[int] = []
         for index, item in enumerate(value):
-            if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 255:
+            integral = _integral(item)
+            if integral is None or not 0 <= integral <= 255:
                 errors.append(error(CODE_VALUE, "{0}[{1}]".format(path, index)))
                 return INVALID
-        return list(value)
+            triple.append(integral)
+        return triple
     if kind == "sectionArray":
         resolved: list[str] = []
         for index, item in enumerate(value):
@@ -524,6 +693,12 @@ def _unknown_keys(source: dict[str, Any], known: frozenset[str], prefix: str,
                   errors: list[dict[str, str]]) -> None:
     for key, value in source.items():
         path = prefix + "." + key if prefix else key
+        if "." in key:
+            # A key that spells a path is not a nested object. The document
+            # looks like it sets a declared field, resolves to nothing, and
+            # would leave the setting silently unapplied.
+            errors.append(error(CODE_UNKNOWN_KEY, path))
+            continue
         if path in known:
             continue
         if any(candidate.startswith(path + ".") for candidate in known):
@@ -585,7 +760,7 @@ def _group_state(group: dict[str, Any], values: dict[str, Any],
 
 
 def _apply_rules(schema: dict[str, Any], flat: dict[str, Any],
-                 errors: list[dict[str, str]]) -> None:
+                 document: dict[str, Any], errors: list[dict[str, str]]) -> None:
     """Cross-field checks the schema declares, so neither loader hardcodes them."""
     for rule in schema["rules"]:
         name = rule["rule"]
@@ -632,6 +807,11 @@ def _apply_rules(schema: dict[str, Any], flat: dict[str, Any],
                 if not pattern.fullmatch(key):
                     errors.append(error(CODE_RULE, rule["container"] + "." + key))
             order = flat.get(rule["field"])
+            # The position is the document's, not the list's after an invalid
+            # entry was dropped: a person repairs the entry the document wrote.
+            present, declared_order = _lookup(document, rule["field"])
+            if present and isinstance(declared_order, list):
+                order = declared_order
             if isinstance(order, list):
                 for index, item in enumerate(order):
                     if isinstance(item, str) and item.startswith(rule["prefix"]) \
@@ -669,7 +849,7 @@ def _select_config(selector_path: str | None, environment: dict[str, str],
         if failure is not None:
             errors.append(error(failure, "$" + selector))
             return None, ORIGIN_ENVIRONMENT
-        if expanded is None or not os.path.isabs(expanded):
+        if expanded is None or not is_absolute_path(expanded):
             errors.append(error(CODE_VALUE, "$" + selector))
             return None, ORIGIN_ENVIRONMENT
         return expanded, ORIGIN_ENVIRONMENT
@@ -688,7 +868,7 @@ def config_location(config_path: str | None = None, environ: dict[str, str] | No
     a refusal of the selector itself, such as a relative path in it.
     """
     schema = load_schema(schema_file or "")
-    environment = _environment(environ)
+    environment = _environment(environ, schema)
     errors: list[dict[str, str]] = []
     selected, origin = _select_config(config_path, environment, schema, errors)
     if selected is None and origin == ORIGIN_NONE:
@@ -696,7 +876,7 @@ def config_location(config_path: str | None = None, environ: dict[str, str] | No
     if selected is not None and origin in (ORIGIN_DEFAULT, ORIGIN_NONE):
         # The schema writes its default places with forward slashes; on Windows
         # that leaves a mixed path, shown to a person and written to by setup.
-        selected = os.path.normpath(selected)
+        selected = normalize_path(selected)
     return {"path": selected, "origin": origin, "errors": errors}
 
 
@@ -716,14 +896,26 @@ def _read_config(selector_path: str | None, environment: dict[str, str],
         errors.append(error(CODE_FILE_NOT_REGULAR, "$" + selector))
         return None, {}
     try:
-        text = location.read_text(encoding="utf-8")
+        # The file is read as bytes and decoded once: text mode would translate
+        # line endings before the document is parsed, so the loader would see a
+        # different byte stream from the one Windows wrote. A Windows editor
+        # may write a byte order mark, which `utf-8-sig` reads as no part of
+        # the document and strips once, at the start.
+        data = location.read_bytes()
     except OSError:
         errors.append(error(CODE_UNREADABLE, "$" + selector))
         return None, {}
     try:
-        document = json.loads(text)
-    except json.JSONDecodeError:
-        errors.append(error(CODE_MALFORMED, ROOT_PATH))
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        # Bytes that are not UTF-8 are not a document this loader can read, and
+        # that is a malformed file rather than an unreadable one.
+        errors.append(error(CODE_MALFORMED, ROOT_PATH, "bytes"))
+        return None, {}
+    try:
+        document = _document_json(text)
+    except (json.JSONDecodeError, _NonJsonConstant):
+        errors.append(error(CODE_MALFORMED, ROOT_PATH, "json"))
         return None, {}
     if not isinstance(document, dict):
         errors.append(error(CODE_ROOT_TYPE, ROOT_PATH))
@@ -769,7 +961,7 @@ def load_config(config_path: str | None = None, environ: dict[str, str] | None =
     contract it is given, and resolve a platform rule, without editing this module.
     """
     schema = load_schema(schema_file or "")
-    environment = _environment(environ)
+    environment = _environment(environ, schema)
     path_probe = filesystem_probe if probe is None else probe
     errors: list[dict[str, str]] = []
     config_directory, document = _read_config(config_path, environment, schema, errors)
@@ -788,12 +980,19 @@ def load_config(config_path: str | None = None, environ: dict[str, str] | None =
             if failure is not None:
                 errors.append(error(failure, path))
                 continue
+            if _carried_default(field):
+                # Already resolved from the machine; expanding it again would
+                # read a `$` in an environment value as a variable.
+                flat[path] = raw
+                if path == "stateDir" and isinstance(raw, str):
+                    context.state_dir = raw
+                continue
         value = _field_value(field, raw, context, path, errors, path_probe)
         if value is not INVALID:
             flat[path] = value
         if path == "stateDir" and isinstance(value, str):
             context.state_dir = value
-    _apply_rules(schema, flat, errors)
+    _apply_rules(schema, flat, document, errors)
     if errors:
         raise ConfigError(errors)
     resolved = _assemble(schema, flat, path_probe, context.platform, errors)
