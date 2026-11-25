@@ -59,37 +59,37 @@
  * which was a separate plugin.
  */
 
-import type { ReaderDocuments } from "../components/snapshot.ts";
-import type { Engine, Register } from "./engine.ts";
-import type { Job, Pacer, Snapshot } from "../components/state.ts";
-import type { PaneConfig } from "../components/options.ts";
-import type { FleetFold } from "../types/index.d.ts";
-import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.ts";
-import { recolor, THEME } from "../components/palette.ts";
+import type { ReaderDocuments } from "../components/snapshot.js";
+import type { Engine, Register } from "./engine.js";
+import type { Job, Pacer, Snapshot } from "../components/state.js";
+import type { PaneConfig } from "../components/options.js";
+import type { FleetFold } from "../types";
+import { GEOMETRY, paneConfigFrom, paneOptions, SECTIONS } from "../components/options.js";
+import { recolor, THEME } from "../components/palette.js";
 import { CLOSE, DETAILS_PREFIX, drawnFolds, FOCUS_CLEAR, FOCUS_PREFIX, HIDE_PREFIX,
          REPLY_PENDING_SECONDS, replyKey, replyText, SHOW_ALL_PREFIX, switchedOff, TOGGLE_ALL,
          TOGGLE_PREFIX, unreadableKey,
          type Focus, type PaneActions, type PaneOptions, type RepliesPaused }
-  from "../components/pane.ts";
-import { mask } from "../components/mask.ts";
-import { pendingSources, stepStream } from "../components/stream.ts";
-import { isReading, isRefusal, surfaceTree } from "../components/surface.ts";
-import { bandConfigFrom, bandCounts, bandItems, bandTree, hiddenLimitFrom } from "../components/band.ts";
-import { bindPrimitives, drawsFields, mount, type HostElements } from "../components/mount.ts";
-import { snapshotFrom } from "../components/snapshot.ts";
-import { newEvents, type FleetEvent } from "../components/alerts.ts";
-import { money, pricedCost, sessionDocument, withSession } from "../components/session.ts";
-import { animate, BLINK_MS, motionMemory, SLIDE_MS, type Motion } from "../components/motion.ts";
-import type { Pane } from "../components/layout.ts";
+  from "../components/pane.js";
+import { mask } from "../components/mask.js";
+import { pendingSources, stepStream } from "../components/stream.js";
+import { isReading, isRefusal, surfaceTree } from "../components/surface.js";
+import { bandConfigFrom, bandCounts, bandItems, bandTree, hiddenLimitFrom } from "../components/band.js";
+import { bindPrimitives, drawsFields, mount, type HostElements } from "../components/mount.js";
+import { snapshotFrom } from "../components/snapshot.js";
+import { newEvents, type FleetEvent } from "../components/alerts.js";
+import { money, pricedCost, sessionDocument, withSession } from "../components/session.js";
+import { animate, BLINK_MS, motionMemory, SLIDE_MS, type Motion } from "../components/motion.js";
+import type { Pane } from "../components/layout.js";
 import { firstName, speakRequest, speakStatus, speechInfo, SPEAK_USAGE, voiceList, voiceOrder,
          voiceReply, voiceSetting, type SpeechInfo, type VoiceSetting }
-  from "../components/speech.ts";
+  from "../components/speech.js";
 import { afterSend, endNeeded, nextSend, passesThrough, serially, tabArgs, tabLevel, tabSender,
          tabTerminal, TINT_DEFAULTS, tintFrom, type TabLevel, type TabSender, type TabTerminal,
-         type TabTint } from "../components/tab.ts";
-import { KEYS_USAGE, keysRequest, tipAt, tipsShown, withTip } from "../components/tips.ts";
+         type TabTint } from "../components/tab.js";
+import { KEYS_USAGE, keysRequest, tipAt, tipsShown, withTip } from "../components/tips.js";
 import { ENTRIES, entryArgv, entryEnv, LAUNCH, launchFrom, type Entry, type Launch }
-  from "../components/entries.ts";
+  from "../components/entries.js";
 
 /** The pane's id, which is also the requestId its render hook is keyed by. */
 export const PANE = "fleet";

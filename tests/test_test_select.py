@@ -279,6 +279,48 @@ class TypeScriptReachTests(FixtureRepository):
         self.assertEqual(self.lines("plugins/llm-fleet/components/palette.ts"),
                          ["ts-suite components/layout.test.ts"])
 
+    def test_a_js_import_reaches_the_ts_module_behind_it(self) -> None:
+        self.write("plugins/llm-fleet/components/band.ts", """
+            import { tone } from "./tint.js";
+            export const band = tone;
+            """)
+        self.write("plugins/llm-fleet/components/tint.ts", 'export const tone = "y";\n')
+        self.write("components/band.test.ts", """
+            import { band } from "../plugins/llm-fleet/components/band.ts";
+            """)
+        self.assertEqual(self.lines("plugins/llm-fleet/components/tint.ts"),
+                         ["ts-suite components/band.test.ts"])
+
+    def test_a_js_import_with_a_query_or_hash_reaches_the_ts_module(self) -> None:
+        self.write("plugins/llm-fleet/components/band.ts", """
+            import { tone } from "./tint.js?v=1";
+            import { hue } from "./hue.js#part";
+            export const band = tone + hue;
+            """)
+        self.write("plugins/llm-fleet/components/tint.ts", 'export const tone = "y";\n')
+        self.write("plugins/llm-fleet/components/hue.ts", 'export const hue = "z";\n')
+        self.write("components/band.test.ts", """
+            import { band } from "../plugins/llm-fleet/components/band.ts";
+            """)
+        for changed in ("plugins/llm-fleet/components/tint.ts", "plugins/llm-fleet/components/hue.ts"):
+            with self.subTest(changed):
+                self.assertEqual(self.lines(changed), ["ts-suite components/band.test.ts"])
+
+    def test_a_js_file_that_exists_is_the_one_a_js_import_reaches(self) -> None:
+        self.write("plugins/llm-fleet/components/band.ts", """
+            import { tone } from "./tint.js";
+            export const band = tone;
+            """)
+        self.write("plugins/llm-fleet/components/tint.js", 'export const tone = "js";\n')
+        self.write("plugins/llm-fleet/components/tint.ts", 'export const tone = "ts";\n')
+        self.write("components/band.test.ts", """
+            import { band } from "../plugins/llm-fleet/components/band.ts";
+            """)
+        self.assertEqual(self.lines("plugins/llm-fleet/components/tint.js"),
+                         ["ts-suite components/band.test.ts"])
+        self.assertEqual(self.lines("plugins/llm-fleet/components/tint.ts"),
+                         ["ts-all plugins/llm-fleet/components/tint.ts"])
+
     def test_a_changed_suite_selects_itself(self) -> None:
         self.assertEqual(self.lines("components/other.test.ts"),
                          ["ts-suite components/other.test.ts"])

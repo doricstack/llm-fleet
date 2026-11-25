@@ -33,6 +33,8 @@
 | `tests/test_doc_format.py` | Checker behavior and failure-path tests | Present |
 | `tests/test_host_drift.py` | Declared-primitive drift refusal tests | Present |
 | `tests/test_render_review.py` | Review-page leak refusal tests | Present |
+| `tests/test_statusline_demo.py` | Statusline preview contract: the sample drawn through Node, a recorded payload named as one, a refused configuration, and a missing payload file | Present |
+| `tests/test_runner_entry.py` | Runner start contract: each Node runner draws when started through a link whose name holds a space, refuses bad input there, does nothing when imported, and the preview refuses a render that printed nothing | Present |
 | `tests/test_config_loader.py` | Config contract, resolution, state, and parity tests | Present |
 | `.github/workflows/ci.yml` | On a pull request, `make quality build` and the push-tier impact selection; on main and a `v*` tag, `make test-ci`; Linux and Windows | Present |
 | `plugins/llm-fleet/config/schema.json` | Versioned contract: fields, defaults, source rules, error codes; in the plugin folder because an install copies that folder alone | Present |
@@ -67,6 +69,8 @@
 | `tests/test_publication.py` | Publication contract: each README's install line names the manifest and the published repository, both marketplaces list that plugin at its folder, and one version holds everywhere | Present |
 | `plugins/llm-fleet/components/` | Declared primitives, shared layout, pane view model, masking, snapshot assembly, pane options, the band above the prompt, alert events, the voice, and the statusline composer: every module the host evaluates | Present |
 | `components/` | Modules only this repository runs: the review tool, the statusline command line, and the TypeScript suites | Present |
+| `components/resolve.ts`, `components/resolve.test.ts` | The resolver every Node run here starts with under `--import`: a relative `./name.js` import that names no file finds `name.ts`, as the host does, and a `.js` that exists is loaded as written | Present |
+| `components/entry.ts` | Whether a runner was started rather than imported: the started path and the module URL compared as real paths on disk, never as strings, since a Windows path, a space and a link each make the strings differ | Present |
 | `plugins/typing/` | Independent input mod | Planned |
 | `plugins/secret-shield/` | Independent masking mod | Planned |
 | `plugins/context-keeper/` | Compaction mod | Planned |
@@ -119,10 +123,10 @@
 | `make test-engine` | Run the plugin entry against a stub of the declared engine subset |
 | `make test-pane HOST_CLI='<command>'` | Draw the pane through the host's own test kit; unavailable without a command |
 | `make plugin-boundary` | Refuse a plugin module that imports outside its own folder |
-| `make plugin-validate HOST_CLI='<command>'` | Validate the manifest, hooks, and types contract through the host; unavailable without a command |
+| `make plugin-validate HOST_CLI='<command>'` | Validate the manifest, hooks, types contract and every module's types through the host with `--strict`, so a warning fails; unavailable without a command |
 | `make install-check HOST_CLI='<command>'` | Validate the repository as the marketplace the install line names, through the host; unavailable without a command |
 | `make mutants` | Measure what changed through the receipt store and judge it; a slice proved green under the same bytes is reused, and a survivor fails |
-| `make mutants-measure MUTANTS='<id> <id>'` | The harness alone, for one mutant or a few, with no receipt written |
+| `make mutants-measure MUTANTS='<id> <id>'` | The harness alone, for one mutant or a few, with no receipt written; `MUTATION_SUITE_TIMEOUT=<seconds>` raises the 300s bound on each suite run, here and under `make mutants`, which hands its environment to every slice |
 | `make install`, `make link` | Fail with unavailable status until runtime extraction |
 | `make typecheck TYPECHECK='<command>'` | Run an explicitly configured checker; fail if unset |
 
@@ -144,6 +148,7 @@
 | TEST-13 | Plugin folder boundary | Keep every module the host evaluates inside the plugin folder and free of node globals, and let `make plugin-boundary` refuse one that breaks either rule: the host compiles the folder without node, so a shared directory beside the plugin or a module reading `process.argv` reads as working source here and loads as nothing there. A Python module under the folder imports from the plugin root (`config.loader`, `readers.<name>`) and never climbs above it, because an install copies the folder alone; a reader started by path reaches that root only through `readers/plugin_root.py`, and the plugin starts a script only through `components/entries.ts`. |
 | TEST-18 | Plugin state contract | Declare every `$.state` key in `plugins/llm-fleet/types/index.d.ts`, the contract `plugin.json` names as "types", in the change that first reads or writes it, and spell it once, as a const reference holding the literal plugin name and key `as const`, which every call names: the host refuses a plugin that uses an undeclared key, and a name spelled in one place cannot drift in another. `tests/test_plugin_contract.py` holds the rule in CI, which has no host CLI, and `make plugin-validate HOST_CLI='<command>'` runs the host's own check where one is installed. |
 | TEST-19 | Directory submission | Keep the hooks module readable by the directory, which `claude plugin validate` does not reproduce: never declare, destructure or take as a parameter a name the module binds for `on`, `$`, an event or `next`; read no object's kind by reflection; and add a line to the README's programs table in the change that adds a script or a fixed program. `tests/test_directory_rules.py` holds it in CI; the shared plugin directory rule governs the rest. |
+| TEST-22 | Plugin module imports | Import a sibling module as `./name.js`, never `./name.ts`, and write every module to pass the host's strict type check (`noUncheckedIndexedAccess` included): `claude plugin validate --strict plugins/llm-fleet` type-checks each module with the host's own settings, ignores any tsconfig the plugin ships, and the directory fails the listing on one warning. `tests/test_directory_rules.py` refuses a `.ts` import in CI, `make plugin-validate HOST_CLI='<command>'` runs the strict check, and every Node run here starts with `components/resolve.ts`. |
 | TEST-17 | Mutation evidence | State a mutation result only from `make mutants`: declare each mutant in `mutation/mutants.json` with the suite that must notice it, and declare a survivor equivalent only with the reason it cannot be observed. The gate measures one slice per mutated file through the shared receipt store and writes the verdict the pull-request guard reads; a run of the harness alone is `make mutants-measure` and never a result to state. |
 | TEST-20 | Heavy targets take a slot | Wrap every command that runs for minutes in the machine's heavy-run slots, so it competes for one instead of taking every core: a heavy recipe carries `$(PACED)` before the interpreter and never after an assignment, and the include that defines it is optional, so a machine without it runs the target bare. Teaching pacer a command's name only makes a run visible on the pane; only the wrapper admits it to a slot, and a run outside the pool is the one that starves the others. |
 | TEST-6 | Reporting checks | Report actual failures and skips. |

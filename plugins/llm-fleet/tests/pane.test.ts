@@ -25,7 +25,7 @@
 
 import { expect, mock, test } from "claude-code/testing";
 
-import { HIDDEN_KEY, READING_KEY, REPLIED_KEY } from "../hooks/llm-fleet.ts";
+import { HIDDEN_KEY, READING_KEY, REPLIED_KEY } from "../hooks/llm-fleet.js";
 
 const PANE_PROPS = {
   title: "llm-fleet",

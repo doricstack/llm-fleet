@@ -44,6 +44,8 @@ PRIVACY_URL = "https://doricstack.com/privacy"
 NAME = re.compile(r"\$\.(?P<group>[A-Za-z0-9_]+)\.(?P<method>[A-Za-z0-9_]+)")
 CALL_SECTION = re.compile(r"^### Calls from Claude Code$(?P<body>.*?)(?=^### |\Z)",
                           re.MULTILINE | re.DOTALL)
+TS_IMPORT = re.compile(r"""(?:\bfrom\s*|^\s*import\s*)['"](?P<spec>\.{1,2}/[^'"\n]+\.ts)['"]""",
+                       re.MULTILINE)
 BRACKET = re.compile(r"\$\s*\[|\$\.\s*$|(?:const|let|var)\s*\{[^}]*\}\s*=\s*\$")
 
 
@@ -222,6 +224,31 @@ class FleetDirectoryRules(unittest.TestCase):
                 if word in code:
                     found.append("{0}: {1}".format(path.relative_to(PLUGIN), word))
         self.assertEqual(found, [])
+
+    def test_no_module_imports_a_file_by_its_ts_name(self):
+        # `claude plugin validate --strict` type-checks every module with the
+        # host's own settings, which refuse an import ending in `.ts` (TS5097),
+        # and the directory runs that check: one such import fails the listing.
+        found = []
+        scanned = 0
+        for path in sorted(PLUGIN.rglob("*.ts")):
+            if ".claude-plugin" in path.parts or path.name.endswith(".d.ts"):
+                continue
+            scanned += 1
+            text = path.read_text(encoding="utf-8")
+            for match in TS_IMPORT.finditer(text):
+                found.append("{0}: {1}".format(path.relative_to(PLUGIN), match.group("spec")))
+        self.assertGreater(scanned, 10)
+        self.assertEqual(found, [])
+
+    def test_the_ts_import_reading_finds_each_form(self):
+        for line in ('import { a } from "./a.ts";', "import type { B } from '../b.d.ts';",
+                     'export { c } from "./c.ts";', 'import "./d.ts";',
+                     'import {\n  e,\n  f,\n} from "./e.ts";'):
+            self.assertIsNotNone(TS_IMPORT.search(line), line)
+        for line in ('import { a } from "./a.js";', 'import type { R } from "claude-code";',
+                     'const name = "./a.ts";'):
+            self.assertIsNone(TS_IMPORT.search(line), line)
 
 
 if __name__ == "__main__":

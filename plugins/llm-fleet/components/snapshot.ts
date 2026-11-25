@@ -13,7 +13,7 @@ import type {
   AgentFigures, FanEntry, Job, ModelSpend, RateAccount, JobReply, Load, LoadProcess, LoadSystem, PullRequest, PullRequests, ReaderState, Roster, SkillItem, SkillScope, Skills,
   SessionFigures, Snapshot, SourceState, Worktree,
   Worktrees, Custom, CustomRow, CustomSection, CheckRun, SpendSeries,
-  TimelineSegment, Pacer, PacerOutside, PacerRun, PacerSlot, PacerWaiter } from "./state.ts";
+  TimelineSegment, Pacer, PacerOutside, PacerRun, PacerSlot, PacerWaiter } from "./state.js";
 
 export type ReaderDocuments = {
   roster?: unknown;
@@ -258,7 +258,7 @@ function agentOf(value: unknown): AgentFigures | undefined {
     const parts = ["input", "cacheWrite", "cacheRead", "output"].map(
       (key) => tokenCount((value.tokens as Record<string, unknown>)[key]));
     if (parts.every((part) => part !== undefined)) {
-      const [input, cacheWrite, cacheRead, output] = parts as number[];
+      const [input, cacheWrite, cacheRead, output] = parts as [number, number, number, number];
       figures.tokens = { input, cacheWrite, cacheRead, output };
     }
   }

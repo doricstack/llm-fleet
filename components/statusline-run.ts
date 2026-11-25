@@ -13,6 +13,7 @@
  */
 
 import { composeLines, renderedLines, type StatuslineInput } from "../plugins/llm-fleet/components/statusline.ts";
+import { startedDirectly } from "./entry.ts";
 
 const WIDTH_FALLBACK = 100;
 const MAX_REQUEST_BYTES = 1_048_576;
@@ -71,6 +72,6 @@ async function main(): Promise<number> {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (startedDirectly(import.meta.url)) {
   main().then((code) => process.exit(code));
 }

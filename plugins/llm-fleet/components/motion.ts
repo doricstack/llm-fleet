@@ -13,7 +13,7 @@
  * telling a person about news that is not news.
  */
 
-import type { Group, Pane, Row } from "./layout.ts";
+import type { Group, Pane, Row } from "./layout.js";
 
 /** How long a row takes to slide in or out, in milliseconds. */
 export const SLIDE_MS = 360;

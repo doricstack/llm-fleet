@@ -15,8 +15,8 @@
  */
 
 import { CUSTOM_PREFIX, DEFAULT_KEYS, type PaneGeometry, type PaneKeys, type PaneOptions,
-         type SectionChoice } from "./pane.ts";
-import { THEME, themeFrom, type Theme } from "./palette.ts";
+         type SectionChoice } from "./pane.js";
+import { THEME, themeFrom, type Theme } from "./palette.js";
 
 /** The sections the pane carries, in the order a reader meets them. */
 export const SECTIONS = [

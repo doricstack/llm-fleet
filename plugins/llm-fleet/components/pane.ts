@@ -8,13 +8,13 @@
  */
 
 import type { Control, Group, Pane, PickerItem, Row, RowLine, GroupState, Slot,
-              Spark } from "./layout.ts";
-import { ageText, durationText, fit } from "./layout.ts";
-import { stateColor } from "./cards.ts";
-import { mask, MASK } from "./mask.ts";
-import { THEME, worktreeToken, type Theme } from "./palette.ts";
-import { money, pricedCost, spendWindowTile } from "./session.ts";
-import { FOOTER_TEXT } from "./version.ts";
+              Spark } from "./layout.js";
+import { ageText, durationText, fit } from "./layout.js";
+import { stateColor } from "./cards.js";
+import { mask, MASK } from "./mask.js";
+import { THEME, worktreeToken, type Theme } from "./palette.js";
+import { money, pricedCost, spendWindowTile } from "./session.js";
+import { FOOTER_TEXT } from "./version.js";
 
 // The money rule lives with the session figures it prices; this module drew it
 // before the machine-wide spend tile needed the same rule in that module.
@@ -22,7 +22,7 @@ export { money };
 import type {
   AgentFigures, Job, Load, LoadProcess, PullRequest, PullRequests, Roster,
   SessionFigures, SkillItem, Skills, Snapshot, SpendSeries, Worktree,
-  Worktrees, CustomRow, CustomSection, Pacer, PacerRun, PacerSlot } from "./state.ts";
+  Worktrees, CustomRow, CustomSection, Pacer, PacerRun, PacerSlot } from "./state.js";
 
 /** The prefix a section a person added is named by in the order. */
 export const CUSTOM_PREFIX = "custom:";
@@ -450,7 +450,8 @@ export const TOGGLE_ALL = "fleet.all";
 /** The address a press carries back for the control that closes the pane. */
 export const CLOSE = "fleet.close";
 /** The two folds that act on every section at once. */
-export const ALL_CONTROLS = [
+export const ALL_CONTROLS: readonly [{ key: string; label: string },
+                                     { key: string; label: string }] = [
   { key: TOGGLE_ALL + ".collapse", label: "Collapse all" },
   { key: TOGGLE_ALL + ".expand", label: "Expand all" },
 ];
@@ -646,11 +647,11 @@ function baseName(word: string): string {
   if (parts.length === 0) {
     return "";
   }
-  const last = parts[parts.length - 1];
+  const last = parts[parts.length - 1]!;
   // The state file cuts a long command line, and a name cut in two says
   // nothing: the folder above it is what is still readable.
   if (parts.length > 1 && /(…|\.\.\.)$/.test(last)) {
-    return parts[parts.length - 2];
+    return parts[parts.length - 2]!;
   }
   return last;
 }
@@ -689,7 +690,7 @@ export function shortCommand(label: string): string {
   // `--` that separates the runner's own flags from the command.
   const wrapped = /\brun\b.*?\s--\s(.+)$/s.exec(text);
   if (wrapped !== null) {
-    text = wrapped[1].trim();
+    text = wrapped[1]!.trim();
   }
   // A line that chains commands is known by the first one: what follows a
   // separator is another command's work, not this one's argument.
@@ -702,15 +703,15 @@ export function shortCommand(label: string): string {
   if (words.length === 0) {
     return "";
   }
-  let first = baseName(words[0]);
+  let first = baseName(words[0]!);
   let rest = words.slice(1);
   if (INTERPRETER.test(first)) {
     // A flag where a script would be says the host takes its input from the
     // command itself, and the interpreter is all there is to name.
-    if (rest.length === 0 || rest[0].startsWith("-")) {
+    if (rest.length === 0 || rest[0]!.startsWith("-")) {
       return first;
     }
-    first = baseName(rest[0]);
+    first = baseName(rest[0]!);
     rest = rest.slice(1);
   }
   if (first === "" || SHELL_WORDS.has(first)) {
@@ -2421,7 +2422,7 @@ function runLabel(repo: string | null): string | null {
   }
   const agent = /^(?:agent|worktree)-([0-9a-f]{6,})/i.exec(repo);
   if (agent !== null) {
-    return "agent " + agent[1].slice(0, 8);
+    return "agent " + agent[1]!.slice(0, 8);
   }
   // A post-merge check runs in a scratch tree named for the repository and the
   // commit; the tree suffix says nothing a reader needs and the whole name

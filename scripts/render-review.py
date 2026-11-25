@@ -29,6 +29,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 READER = ROOT / "plugins" / "llm-fleet" / "readers" / "snapshot.py"
 RENDERER = ROOT / "components" / "review.ts"
+# Lets Node find the `.ts` file behind the plugin's `./name.js` imports.
+NODE_PRELUDE = ["--import", (ROOT / "components" / "resolve.ts").as_uri()]
 DEFAULT_OUT = Path.home() / "Desktop" / "fleet-review"
 # Below this the pane has no room for a title and a right-hand slot on one row.
 MINIMUM_COLUMNS = 40
@@ -74,7 +76,8 @@ def read_machine(config: str | None, now: float | None, timeout: float,
     if completed.returncode != 0:
         return json.loads(completed.stdout or "{}"), ""
     snapshot = json.loads(completed.stdout)
-    rendered = subprocess.run(["node", str(RENDERER), str(width)], input=completed.stdout,
+    rendered = subprocess.run(["node", *NODE_PRELUDE, str(RENDERER), str(width)],
+                              input=completed.stdout,
                               capture_output=True, text=True, check=False, timeout=timeout,
                               cwd=str(ROOT))
     if rendered.returncode != 0:
@@ -88,7 +91,7 @@ def draw_vectors(snapshot: dict, width: int, timeout: float) -> list[dict] | Non
     The same tree the text is rendered from, so a bar on the page is the bar the
     text draws as glyphs: the desktop draws these where a terminal draws cells.
     """
-    rendered = subprocess.run(["node", str(RENDERER), str(width), "--vectors"],
+    rendered = subprocess.run(["node", *NODE_PRELUDE, str(RENDERER), str(width), "--vectors"],
                               input=json.dumps(snapshot), capture_output=True, text=True,
                               check=False, timeout=timeout, cwd=str(ROOT))
     if rendered.returncode != 0:

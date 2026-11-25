@@ -9,7 +9,7 @@
  */
 
 import type { BoxProps, ButtonProps, InputProps, LinkProps, Node, Primitives, SvgProps,
-              TextProps } from "./host.ts";
+              TextProps } from "./host.js";
 
 /** The engine's resolved elements, as the host hands them over at mount. */
 export type HostElements = {

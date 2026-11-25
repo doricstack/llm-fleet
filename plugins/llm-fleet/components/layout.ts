@@ -16,10 +16,10 @@
  * - a group that failed says it failed even while it is collapsed.
  */
 
-import type { BoxProps, ButtonProps, Color, InputProps, Node, TextProps, Tree } from "./host.ts";
+import type { BoxProps, ButtonProps, Color, InputProps, Node, TextProps, Tree } from "./host.js";
 import { FOLDED, OPENED, checkDots, historyStrip, rateBar, sparkline, stateColor, statStrip,
-         statusDot, tag, tagTexts, timelineStrip, titleChip } from "./cards.ts";
-import { tileVector } from "./vector.ts";
+         statusDot, tag, tagTexts, timelineStrip, titleChip } from "./cards.js";
+import { tileVector } from "./vector.js";
 
 /**
  * Something a person can press, and the address a press comes back on.

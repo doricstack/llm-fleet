@@ -19,7 +19,7 @@
  * the layout gave it rather than leaving it short of that slot.
  */
 
-import type { Color, Vector } from "./host.ts";
+import type { Color, Vector } from "./host.js";
 
 /** Pixels a cell is drawn at in the markup: wider than a code font's advance. */
 export const CELL_PIXELS = 10;

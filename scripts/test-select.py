@@ -521,11 +521,16 @@ def read_typescript(repository: Repository, path: str) -> Module:
         specifier = match.group(1)
         if not specifier.startswith("."):
             continue
-        target = relative(specifier)
+        # A query or a hash names the same file to Node and the host.
+        target = relative(re.split(r"[?#]", specifier, maxsplit=1)[0])
         if target is None:
             continue
-        found = next((candidate for candidate in
-                      (target, target + ".ts", target + ".tsx", target + "/index.ts")
+        candidates = [target, target + ".ts", target + ".tsx", target + "/index.ts"]
+        # The plugin imports a sibling as `./name.js`, which the host and the
+        # resolver Node runs under both find as `name.ts` when no `.js` is there.
+        if target.endswith(".js"):
+            candidates[1:1] = [target[:-len(".js")] + ".ts", target[:-len(".js")] + ".tsx"]
+        found = next((candidate for candidate in candidates
                       if repository.present(candidate)), None)
         if found:
             module.edges.add(found)

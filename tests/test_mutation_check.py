@@ -260,6 +260,8 @@ class DeclarationTests(HarnessCase):
             "outside the tree": [{**self.mutant("x", "a", "b"), "file": "../calc.py"}],
             "changes nothing": [self.mutant("x", "a + b", "a + b")],
             "no suite": [{**self.mutant("x", "a + b", "a - b"), "suite": []}],
+            "bare node": [{**self.mutant("x", "a + b", "a - b"), "suite": ["node", "--test", "t.ts"]}],
+            "bare python3": [{**self.mutant("x", "a + b", "a - b"), "suite": ["python3", "check.py"]}],
             "no mutants": [],
         }
         for name, mutants in cases.items():
@@ -354,6 +356,136 @@ class VersionTokenTests(HarnessCase):
         result = self.run_harness([self.mutant("same", '"{version}"', '"9.9.9"')])
         self.assertEqual(result.returncode, 2)
         self.assertIn("changes nothing", result.stderr + result.stdout)
+
+
+@unittest.skipIf(shutil.which("node") is None, "no Node on PATH to run a TypeScript suite")
+class NodeImportTests(HarnessCase):
+    """A Node suite runs with the resolver the plugin's `./name.js` imports need.
+
+    The plugin imports its siblings as `./name.js`, the form the host's strict
+    check accepts, and Node does not find `name.ts` behind that name by itself.
+    The harness starts every `{node}` suite with the repository's resolver, so
+    a mutated plugin module is measured rather than failing to load.
+    """
+
+    def setUp(self):
+        super().setUp()
+        (self.repo / "components").mkdir()
+        shutil.copy2(ROOT / "components" / "resolve.ts", self.repo / "components" / "resolve.ts")
+        (self.repo / "sum.ts").write_bytes(
+            b"export function add(a: number, b: number): number {\n  return a + b;\n}\n")
+        (self.repo / "uses.ts").write_bytes(b'export { add } from "./sum.js";\n')
+        (self.repo / "uses.test.ts").write_bytes(
+            b'import { test } from "node:test";\nimport assert from "node:assert/strict";\n'
+            b'import { add } from "./uses.ts";\n'
+            b'test("adds", () => { assert.equal(add(2, 3), 5); });\n')
+        subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
+
+    def node_mutant(self):
+        return {"id": "node-add", "file": "sum.ts", "find": "return a + b;",
+                "replace": "return a - b;", "suite": ["{node}", "--test", "uses.test.ts"]}
+
+    def test_a_node_suite_starts_with_the_resolver(self):
+        self.assertEqual(mutation_check.command(["{node}", "--test", "a.test.ts"], self.repo),
+                         [mutation_check.RUNTIMES["{node}"], "--import",
+                          "./components/resolve.ts", "--test", "a.test.ts"])
+
+    def test_a_tree_without_the_resolver_runs_node_as_written(self):
+        (self.repo / "components" / "resolve.ts").unlink()
+        self.assertEqual(mutation_check.command(["{node}", "--test", "a.test.ts"], self.repo),
+                         [mutation_check.RUNTIMES["{node}"], "--test", "a.test.ts"])
+
+    def test_a_python_suite_is_left_as_written(self):
+        self.assertEqual(mutation_check.command(["{python}", "check.py"], self.repo),
+                         [mutation_check.RUNTIMES["{python}"], "check.py"])
+
+    def test_a_mutant_behind_a_js_import_is_killed(self):
+        result = self.run_harness([self.node_mutant()])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("killed     node-add", result.stdout)
+
+
+BOUND = "MUTATION_SUITE_TIMEOUT"
+
+
+SLOW_SUITE = (b"import sys, time\nsys.path.insert(0, '.')\nfrom calc import add\n"
+              b"time.sleep(1.0)\nsys.exit(0 if add(2, 3) == 5 else 1)\n")
+
+
+@unittest.skipIf(shutil.which("make") is None, "no make on PATH to start the harness")
+class SuiteBoundTests(unittest.TestCase):
+    """The suite bound is set through make, which is how the gate starts every slice.
+
+    The harness bounds each suite run at 300s. The heavy-run slot runs the gate at
+    a low priority, and under load a real-git suite that takes a minute alone
+    took 376s there, so the slice was red before any mutant for a reason the
+    change under test had nothing to do with. The gate hands its environment to
+    the make call that runs a slice, so the bound is read from there.
+
+    Each case starts this repository's own Makefile and harness in a small git
+    tree of its own, whose suite takes a second: the harness lists what git
+    tracks, and a measured copy of this repository is not a git checkout.
+    """
+
+    MUTANT = "slow-add"
+
+    def setUp(self):
+        self.tree = Path(tempfile.mkdtemp(prefix="mutation-bound-"))
+        self.addCleanup(shutil.rmtree, self.tree, True)
+        (self.tree / "make").mkdir()
+        (self.tree / "scripts").mkdir()
+        (self.tree / "mutation").mkdir()
+        shutil.copy2(ROOT / "Makefile", self.tree / "Makefile")
+        for fragment in (ROOT / "make").glob("*.mk"):
+            shutil.copy2(fragment, self.tree / "make" / fragment.name)
+        shutil.copy2(SCRIPT, self.tree / "scripts" / SCRIPT.name)
+        (self.tree / "calc.py").write_bytes(SOURCE.encode("utf-8"))
+        (self.tree / "check.py").write_bytes(SLOW_SUITE)
+        declaration = {"mutants": [{"id": self.MUTANT, "file": "calc.py", "find": "return a + b",
+                                    "replace": "return a - b",
+                                    "suite": ["{python}", "check.py"]}]}
+        (self.tree / "mutation" / "mutants.json").write_bytes(
+            json.dumps(declaration).encode("utf-8"))
+        subprocess.run(["git", "init", "-q"], cwd=self.tree, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.tree, check=True)
+
+    def start(self, *assignments: str, bound: str | None = None) -> subprocess.CompletedProcess:
+        environment = {name: value for name, value in os.environ.items() if name != BOUND}
+        if bound is not None:
+            environment[BOUND] = bound
+        return subprocess.run(["make", "--no-print-directory", "script-mutation-check",
+                               "MUTANTS=" + self.MUTANT, *assignments], cwd=self.tree,
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=600, env=environment, check=False)
+
+    def test_a_suite_past_the_bound_is_refused_before_any_mutant(self):
+        result = self.start(BOUND + "=0.2")
+        said = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, said)
+        self.assertIn("the suite is red before any mutant", said)
+        self.assertIn("the suite did not finish within 0.2s", said)
+        self.assertNotIn("killed", said)
+
+    def test_the_bound_is_read_from_the_environment_the_gate_hands_on(self):
+        result = self.start(bound="0.2")
+        said = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, said)
+        self.assertIn("the suite did not finish within 0.2s", said)
+        self.assertNotIn("killed", said)
+
+    def test_without_a_bound_the_harness_default_holds(self):
+        result = self.start()
+        said = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, said)
+        self.assertIn("killed     " + self.MUTANT, said)
+        self.assertNotIn("--timeout", said)
+
+    def test_a_bound_that_is_not_a_number_is_refused(self):
+        result = self.start(BOUND + "=soon")
+        said = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, said)
+        self.assertIn("invalid float value: 'soon'", said)
+        self.assertNotIn("killed", said)
 
 
 if __name__ == "__main__":

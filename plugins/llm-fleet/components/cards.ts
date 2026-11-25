@@ -13,12 +13,12 @@
  * what the format rule refuses, and naming it is what the rule asks for instead.
  */
 
-import type { Color, Node } from "./host.ts";
+import type { Color, Node } from "./host.js";
 // Type-only, so the cycle with layout.ts is erased rather than evaluated: the
 // layout draws with the pieces here, so the pieces cannot draw with it.
-import type { History, PaneCard, Slot } from "./layout.ts";
-import { box, fit, pressable, text } from "./layout.ts";
-import { barVector, stripVector } from "./vector.ts";
+import type { History, PaneCard, Slot } from "./layout.js";
+import { box, fit, pressable, text } from "./layout.js";
+import { barVector, stripVector } from "./vector.js";
 
 /**
  * The mark a bar is drawn with, filled and track alike: a heavy line on the
@@ -185,17 +185,17 @@ function shareWidths(cards: { label: string; value: string }[], width: number): 
   while (spare > 0) {
     let pick = -1;
     for (const [index, size] of sizes.entries()) {
-      if (size >= needed[index]) {
+      if (size >= needed[index]!) {
         continue;
       }
-      if (pick < 0 || needed[index] - size > needed[pick] - sizes[pick]) {
+      if (pick < 0 || needed[index]! - size > needed[pick]! - sizes[pick]!) {
         pick = index;
       }
     }
     if (pick < 0) {
       break;
     }
-    sizes[pick] += 1;
+    sizes[pick]! += 1;
     spare -= 1;
   }
   return sizes;
@@ -227,7 +227,7 @@ export function statStrip(cards: PaneCard[], width: number, measured = false): N
                cards.map((card) => statCell(card, width)));
   }
   return box({ flexDirection: "row", gap: 3 },
-             cards.map((card, index) => statCell(card, sizes[index])));
+             cards.map((card, index) => statCell(card, sizes[index]!)));
 }
 
 /**

@@ -158,7 +158,7 @@ make test-engine
 make test-ci
 ```
 
-`make test-ci` is what CI runs on Linux and Windows: the quality checks, every suite, the build, and an export of this tree into a fresh directory that is built and tested again. `make plugin-validate HOST_CLI=claude` and `make test-pane HOST_CLI=claude` run the host's own validation and test kit where Claude Code is installed. `make help` lists every target.
+`make test-ci` is what CI runs on Linux and Windows: the quality checks, every suite, the build, and an export of this tree into a fresh directory that is built and tested again. `make plugin-validate HOST_CLI=claude` and `make test-pane HOST_CLI=claude` run the host's own validation, with `--strict` so a warning fails as it does in the directory, and its test kit where Claude Code is installed. `make help` lists every target.
 
 To run your working copy instead of the installed plugin, start a session with `claude --plugin-dir plugins/llm-fleet`.
 

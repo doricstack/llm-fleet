@@ -12,14 +12,14 @@
  * either, and it names every error the loader found rather than the first one.
  */
 
-import type { Primitives } from "./host.ts";
-import { renderPane, type Group, type Pane } from "./layout.ts";
-import { mount } from "./mount.ts";
-import { recolor, THEME } from "./palette.ts";
-import { CLOSE, DEFAULT_KEYS, paneFrom, type PaneOptions } from "./pane.ts";
-import { paneOptions } from "./options.ts";
-import { snapshotFrom, type ReaderDocuments } from "./snapshot.ts";
-import { FOOTER_TEXT } from "./version.ts";
+import type { Primitives } from "./host.js";
+import { renderPane, type Group, type Pane } from "./layout.js";
+import { mount } from "./mount.js";
+import { recolor, THEME } from "./palette.js";
+import { CLOSE, DEFAULT_KEYS, paneFrom, type PaneOptions } from "./pane.js";
+import { paneOptions } from "./options.js";
+import { snapshotFrom, type ReaderDocuments } from "./snapshot.js";
+import { FOOTER_TEXT } from "./version.js";
 
 export type SurfaceInput = {
   /** What the read command printed, or nothing when it has not answered yet. */

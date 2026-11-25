@@ -19,6 +19,7 @@ import { paneConfigFrom, paneOptions } from "../plugins/llm-fleet/components/opt
 import { recolor, THEME } from "../plugins/llm-fleet/components/palette.ts";
 import { paneFrom } from "../plugins/llm-fleet/components/pane.ts";
 import { snapshotFrom, type ReaderDocuments } from "../plugins/llm-fleet/components/snapshot.ts";
+import { startedDirectly } from "./entry.ts";
 
 export const DEFAULT_WIDTH = 100;
 export { paneOptions };
@@ -269,6 +270,6 @@ async function main(): Promise<number> {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (startedDirectly(import.meta.url)) {
   main().then((code) => process.exit(code));
 }

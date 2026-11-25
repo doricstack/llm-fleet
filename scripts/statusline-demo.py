@@ -33,6 +33,8 @@ from readers.host import read_statusline  # noqa: E402
 from readers.transcript import read_transcript  # noqa: E402
 
 RUNNER = ROOT / "components" / "statusline-run.ts"
+# Lets Node find the `.ts` file behind the plugin's `./name.js` imports.
+NODE_PRELUDE = ["--import", (ROOT / "components" / "resolve.ts").as_uri()]
 
 # A payload in the shape the host sends, taken from a recorded one. The session
 # name, the paths and the cost are invented; the field names and their nesting
@@ -113,11 +115,14 @@ def transcript_path(payload: dict, home: Path) -> str | None:
     return str(home / ".claude" / "projects" / slug / (session + ".jsonl"))
 
 
-def render(request: dict, width: int) -> list[str]:
-    result = subprocess.run(["node", str(RUNNER)], input=json.dumps(request),
+def render(request: dict, width: int, runner: Path = RUNNER) -> list[str]:
+    result = subprocess.run(["node", *NODE_PRELUDE, str(runner)], input=json.dumps(request),
                             capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         raise SystemExit("the render failed: " + result.stderr.strip())
+    if not result.stdout.strip():
+        # A runner that never started exits 0 with nothing; that is no preview.
+        raise SystemExit("the render printed nothing: " + str(runner))
     return result.stdout.rstrip("\n").split("\n")
 
 

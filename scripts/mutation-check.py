@@ -84,6 +84,9 @@ def names_version(mutants: list[Any]) -> bool:
     return False
 
 
+BARE_RUNTIMES = {"node": "{node}", "python": "{python}", "python3": "{python}"}
+
+
 def load(path: Path, root: Path | None = None) -> list[dict[str, Any]]:
     """The declared mutants, each checked for the fields a run needs.
 
@@ -116,6 +119,12 @@ def load(path: Path, root: Path | None = None) -> list[dict[str, Any]]:
         suite = mutant.get("suite")
         if not isinstance(suite, list) or not suite or not all(isinstance(a, str) for a in suite):
             raise MutationError("mutant {0} has no suite".format(mutant["id"]))
+        # A bare runtime name runs whatever is first on PATH and, for Node, without
+        # the resolver the plugin's `./name.js` imports need, so its baseline is red
+        # for a reason the mutant never touched.
+        if suite[0] in BARE_RUNTIMES:
+            raise MutationError("mutant {0} starts its suite with {1!r}; write {2}".format(
+                mutant["id"], suite[0], BARE_RUNTIMES[suite[0]]))
         if mutant["find"] == mutant["replace"]:
             raise MutationError("mutant {0} changes nothing".format(mutant["id"]))
         if mutant["id"] in seen:
@@ -143,13 +152,26 @@ def copy_tree(source: Path, destination: Path) -> None:
 
 
 RUNTIMES = {"{python}": sys.executable, "{node}": "node"}
+# The resolver the plugin's `./name.js` imports need under Node, relative to the
+# root of the copy being measured, which is where a suite runs from.
+RESOLVER = "components/resolve.ts"
 
 TIMEOUT_REASON = "the suite did not finish within "
 
 
-def command(suite: list[str]) -> list[str]:
-    """A suite's argv, with the configured runtimes standing in for `{python}` and `{node}`."""
-    return [RUNTIMES.get(part, part) for part in suite]
+def command(suite: list[str], tree: Path) -> list[str]:
+    """A suite's argv, with the configured runtimes standing in for `{python}` and `{node}`.
+
+    A `{node}` suite starts with the tree's resolver under `--import` when the
+    tree has one; a tree without it runs Node as written.
+    """
+    resolver = (tree / RESOLVER).is_file()
+    argv: list[str] = []
+    for part in suite:
+        argv.append(RUNTIMES.get(part, part))
+        if part == "{node}" and resolver:
+            argv.extend(["--import", "./" + RESOLVER])
+    return argv
 
 
 def partial_text(value) -> str:
@@ -182,7 +204,7 @@ def passes(suite: list[str], tree: Path, timeout: float) -> tuple[bool, str]:
     # UTF-8 and a non-UTF-8 locale read it as mojibake, which the tail below
     # then could not recognise as a name. Found by review, 2026-11-23.
     try:
-        completed = subprocess.run(command(suite), cwd=tree, capture_output=True,
+        completed = subprocess.run(command(suite, Path(tree)), cwd=tree, capture_output=True,
                                    timeout=timeout, check=False, env=environment,
                                    text=True, encoding="utf-8", errors="replace")
     except subprocess.TimeoutExpired as expired:

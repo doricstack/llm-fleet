@@ -10,9 +10,9 @@
  * opened is the band's to show, not an alert's to announce.
  */
 
-import { hisSkill, isOwnJob } from "./band.ts";
-import { mask } from "./mask.ts";
-import type { Snapshot } from "./state.ts";
+import { hisSkill, isOwnJob } from "./band.js";
+import { mask } from "./mask.js";
+import type { Snapshot } from "./state.js";
 
 export type FleetEvent = {
   key: string;

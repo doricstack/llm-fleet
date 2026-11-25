@@ -55,6 +55,7 @@ review: ## Read the machine and write a pane review page you can open
 	$(PYTHON) scripts/render-review.py $(if $(REVIEW_OUT),--out "$(REVIEW_OUT)",) $(if $(FLEET_CONFIG),--config "$(FLEET_CONFIG)",)
 
 test-components: ## Run the shared layout, pane view model, masking, and declared binding check
+	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/resolve.test.ts
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/layout.test.ts
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/pressable.test.ts
 	$(PYTHON) scripts/typescript-suite.py --node "$(NODE)" --suite components/mask.test.ts
@@ -108,13 +109,13 @@ test-pane: ## Draw the pane through the host's own test kit; unavailable without
 	@set -euo pipefail; test -n "$(HOST_CLI)" || { echo 'Unavailable: set HOST_CLI to the host command that runs a plugin suite.' >&2; exit 2; }
 	$(HOST_CLI) plugin test plugins/llm-fleet
 
-plugin-validate: ## Validate the plugin manifest, hooks, and types contract through the host; unavailable without HOST_CLI
+plugin-validate: ## Validate the plugin manifest, hooks, types contract and module types through the host, warnings failing; unavailable without HOST_CLI
 	@set -euo pipefail; test -n "$(HOST_CLI)" || { echo 'Unavailable: set HOST_CLI to the host command that validates a plugin.' >&2; exit 2; }
-	$(HOST_CLI) plugin validate plugins/llm-fleet
+	$(HOST_CLI) plugin validate --strict plugins/llm-fleet
 
 install-check: ## Validate the repository as the marketplace the install line names, through the host; unavailable without HOST_CLI
 	@set -euo pipefail; test -n "$(HOST_CLI)" || { echo 'Unavailable: set HOST_CLI to the host command that validates a marketplace.' >&2; exit 2; }
-	$(HOST_CLI) plugin validate .
+	$(HOST_CLI) plugin validate --strict .
 
 test-ci: ## Run all CI checks, including an isolated exported-tree round trip
 	@$(MAKE) quality

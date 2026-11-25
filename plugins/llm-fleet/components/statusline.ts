@@ -24,8 +24,8 @@
  * config rather than in the line every host draws.
  */
 
-import { MASK, mask } from "./mask.ts";
-import { barCells, fit, type Slot } from "./layout.ts";
+import { MASK, mask } from "./mask.js";
+import { barCells, fit, type Slot } from "./layout.js";
 
 export type SourceState = "ready" | "empty" | "unavailable" | "failed";
 

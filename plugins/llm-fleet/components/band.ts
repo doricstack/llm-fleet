@@ -22,12 +22,12 @@
  * is a terminal, and an emoji where the surface draws pictures.
  */
 
-import type { Color, Node } from "./host.ts";
-import { chip } from "./cards.ts";
-import { box, fit, pressable, text } from "./layout.ts";
-import { mask } from "./mask.ts";
-import { active, failedOutcomes, waiting, working } from "./pane.ts";
-import type { Job, Snapshot } from "./state.ts";
+import type { Color, Node } from "./host.js";
+import { chip } from "./cards.js";
+import { box, fit, pressable, text } from "./layout.js";
+import { mask } from "./mask.js";
+import { active, failedOutcomes, waiting, working } from "./pane.js";
+import type { Job, Snapshot } from "./state.js";
 
 /** The address of the band's switch, which is what a press comes back on. */
 export const BAND_TOGGLE = "fleet.band.toggle";

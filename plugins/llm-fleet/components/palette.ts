@@ -13,8 +13,8 @@
  * for the tokens the theme asks for.
  */
 
-import type { Color, Node, Tree } from "./host.ts";
-import { restyle } from "./vector.ts";
+import type { Color, Node, Tree } from "./host.js";
+import { restyle } from "./vector.js";
 
 /** A tone, named by what it means rather than how it looks. */
 export type Tone = "failure" | "waiting" | "working" | "idle";

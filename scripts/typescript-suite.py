@@ -23,6 +23,9 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITE = ROOT / "config" / "loader.test.ts"
+# The plugin's modules import each other as `./name.js`, the form the host's
+# strict check accepts; this lets Node find the `.ts` file behind that name.
+NODE_PRELUDE = ["--import", (ROOT / "components" / "resolve.ts").as_uri()]
 MINIMUM = (22, 6)
 # The folder a gate names for reports, read by every suite whoever starts it.
 REPORT_FOLDER = "FLEET_TS_JUNIT_DIR"
@@ -87,7 +90,7 @@ def run_with_report(found: str, suite: Path, report: Path) -> int:
     report.parent.mkdir(parents=True, exist_ok=True)
     raw = report.with_name(report.name + ".node")
     clear_report(report)
-    result = subprocess.run([found, "--test",
+    result = subprocess.run([found, *NODE_PRELUDE, "--test",
                              "--test-reporter=spec", "--test-reporter-destination=stdout",
                              "--test-reporter=junit",
                              "--test-reporter-destination={0}".format(raw),
@@ -192,7 +195,7 @@ def main() -> int:
     if report is not None:
         returncode = run_with_report(found, suite, report)
     else:
-        returncode = subprocess.run([found, "--test", str(suite)], cwd=str(ROOT),
+        returncode = subprocess.run([found, *NODE_PRELUDE, "--test", str(suite)], cwd=str(ROOT),
                                     check=False).returncode
     if returncode != 0:
         print("TypeScript suite {0} failed under {1}".format(suite, detail), file=sys.stderr)

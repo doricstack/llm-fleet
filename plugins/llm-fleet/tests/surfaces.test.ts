@@ -12,9 +12,10 @@
  * Run with: claude plugin test plugins/llm-fleet
  */
 
+import type { On } from "claude-code";
 import { expect, mock, test } from "claude-code/testing";
 
-import { FRESH_WORKTREES, READING_KEY, TAB_HELPER, TIPS_KEY } from "../hooks/llm-fleet.ts";
+import { FRESH_WORKTREES, READING_KEY, TAB_HELPER, TIPS_KEY } from "../hooks/llm-fleet.js";
 
 const AT = 1790000000;
 
@@ -59,7 +60,7 @@ function strings(node: unknown): string[] {
 }
 
 /** The test's `on`, which answers beneath the plugin as the engine does. */
-type TestOn = Parameters<Parameters<typeof test>[1] & ((...args: never[]) => unknown)>[1];
+type TestOn = On;
 
 /**
  * The engine's own parts a session answers and the kit does not: a command's

@@ -47,6 +47,7 @@ config/fixtures/README.md
 config/fixtures/*/*.json
 config/examples/custom-section.json
 config/examples/disk_section.py
+components/entry.ts
 components/layout.test.ts
 components/mask.test.ts
 components/options.test.ts
@@ -54,6 +55,8 @@ components/pane.test.ts
 components/review.test.ts
 components/review.ts
 components/snapshot.test.ts
+components/resolve.test.ts
+components/resolve.ts
 components/statusline-run.ts
 components/statusline.test.ts
 components/surface.test.ts
@@ -122,6 +125,7 @@ plugins/llm-fleet/readers/pacer.py
 plugins/llm-fleet/readers/rate_cards.py
 plugins/llm-fleet/readers/custom.py
 tests/test_impact_override.py
+tests/test_runner_entry.py
 tests/test_test_report.py
 tests/test_test_select.py
 tests/test_typescript_report.py
@@ -133,6 +137,7 @@ tests/test_config_loader.py
 tests/test_host_drift.py
 tests/test_host_update.py
 tests/test_render_review.py
+tests/test_statusline_demo.py
 tests/test_plugin_boundary.py
 tests/test_plugin_standalone.py
 tests/paths.py
@@ -147,6 +152,7 @@ tests/test_reader_snapshot.py
 tests/test_reader_host.py
 tests/test_reader_transcript.py
 tests/test_reader_agents.py
+tests/test_reader_jobs.py
 tests/test_reader_rates.py
 tests/test_reader_pacer.py
 tests/test_rate_cards.py

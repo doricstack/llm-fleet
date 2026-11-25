@@ -250,10 +250,11 @@ test("the clock is the host's local time and pads both fields", () => {
   // not of the formatter. 1790000000 is 14:13 UTC and 10:13 in New York.
   const at = (zone: string): string => {
     // Named by this file's own place, so moving the suite cannot leave it
-    // pointing at a path that no longer exists. No TypeScript flag: this mirrors
-    // how the suite itself runs a .ts file.
+    // pointing at a path that no longer exists. The child starts with the
+    // resolver, as the suite itself does: the plugin imports `./name.js`.
     const module = new URL("../plugins/llm-fleet/components/statusline.ts", import.meta.url).href;
-    const result = spawnSync(process.execPath, ["-e",
+    const resolver = new URL("./resolve.ts", import.meta.url).href;
+    const result = spawnSync(process.execPath, ["--import", resolver, "-e",
       `import(${JSON.stringify(module)}).then((m) => process.stdout.write(m.clockText(1790000000)));`],
       { env: { ...process.env, TZ: zone }, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);

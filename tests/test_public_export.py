@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import base64
+import json
 import os
 import shutil
 import subprocess
@@ -636,6 +637,52 @@ class HardeningTests(unittest.TestCase):
         (self.destination / "sample.txt").write_text("an edited line\n")
         result = self.run_export()
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+def exported_paths(root: Path) -> set[str]:
+    """Every file the repository's own allowlist selects, as a relative POSIX path."""
+    selected: set[str] = set()
+    for pattern in (root / "public-export/allowlist.txt").read_text(encoding="utf-8").splitlines():
+        if not pattern or pattern.startswith("#"):
+            continue
+        for path in root.glob(pattern):
+            if path.is_file():
+                selected.add(path.relative_to(root).as_posix())
+    return selected
+
+
+class ExportedMutantsTests(unittest.TestCase):
+    """The declaration rides the export, so every file a mutant names has to ride with it."""
+
+    def test_every_file_a_declared_mutant_names_is_exported(self):
+        exported = exported_paths(ROOT)
+        self.assertIn("mutation/mutants.json", exported)
+        mutants = json.loads((ROOT / "mutation/mutants.json").read_text(encoding="utf-8"))["mutants"]
+        self.assertGreater(len(mutants), 0)
+        missing: set[str] = set()
+        for mutant in mutants:
+            named = [mutant["file"]]
+            for argument in mutant["suite"]:
+                if (ROOT / argument).is_file():
+                    named.append(argument)
+            for path in named:
+                if path not in exported:
+                    missing.add(path)
+        self.assertEqual(sorted(missing), [],
+                         "named by a mutant in the exported declaration but not exported")
+
+    def test_a_file_left_out_of_the_allowlist_is_named(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "public-export").mkdir()
+            (root / "tests").mkdir()
+            (root / "tests/kept.py").write_bytes(b"")
+            (root / "tests/left.py").write_bytes(b"")
+            (root / "public-export/allowlist.txt").write_bytes(b"# tests\ntests/kept.py\n")
+            exported = exported_paths(root)
+            self.assertIn("tests/kept.py", exported)
+            self.assertNotIn("tests/left.py", exported)
+            self.assertNotIn("public-export/allowlist.txt", exported)
 
 
 if __name__ == "__main__":
